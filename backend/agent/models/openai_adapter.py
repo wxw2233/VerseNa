@@ -30,6 +30,11 @@ class OpenAIAdapter(BaseModelAdapter):
                         body = await resp.aread()
                         yield ModelResponse(content=f"[API错误 {resp.status_code}] {body.decode()[:200]}")
                         return
+
+                    # Accumulate streaming tool_calls by index
+                    accumulated_tool_calls = {}
+                    content = ""
+
                     async for line in resp.aiter_lines():
                         if line.startswith("data: ") and line.strip() != "data: [DONE]":
                             try:
@@ -39,9 +44,35 @@ class OpenAIAdapter(BaseModelAdapter):
                             if not chunk.get("choices"):
                                 continue
                             delta = chunk["choices"][0].get("delta", {})
-                            content = delta.get("content", "")
-                            tool_calls = delta.get("tool_calls")
-                            yield ModelResponse(content=content, tool_calls=tool_calls or [])
+
+                            # Accumulate text content
+                            if delta.get("content"):
+                                content += delta["content"]
+                                yield ModelResponse(content=delta["content"])
+
+                            # Accumulate tool_call deltas
+                            if delta.get("tool_calls"):
+                                for tc_delta in delta["tool_calls"]:
+                                    idx = tc_delta.get("index", 0)
+                                    if idx not in accumulated_tool_calls:
+                                        accumulated_tool_calls[idx] = {
+                                            "id": tc_delta.get("id", ""),
+                                            "type": tc_delta.get("type", "function"),
+                                            "function": {"name": "", "arguments": ""}
+                                        }
+                                    tc = accumulated_tool_calls[idx]
+                                    if tc_delta.get("id"):
+                                        tc["id"] = tc_delta["id"]
+                                    func = tc_delta.get("function", {})
+                                    if func.get("name"):
+                                        tc["function"]["name"] += func["name"]
+                                    if func.get("arguments"):
+                                        tc["function"]["arguments"] += func["arguments"]
+
+                    # Yield complete tool_calls at the end
+                    if accumulated_tool_calls:
+                        complete = [accumulated_tool_calls[i] for i in sorted(accumulated_tool_calls.keys())]
+                        yield ModelResponse(content="", tool_calls=complete)
             else:
                 resp = await client.post(f"{self.base_url}/chat/completions", json=payload, headers=headers)
                 data = resp.json()
