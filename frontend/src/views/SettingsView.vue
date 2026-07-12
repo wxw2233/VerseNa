@@ -30,6 +30,7 @@ onMounted(async () => {
   const data = await resp.json()
   form.base_url = data.base_url || ''
   form.model_name = data.model_name || ''
+  form.api_key = data.api_key || ''
 })
 
 async function save() {
