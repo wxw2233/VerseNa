@@ -38,6 +38,9 @@ app.include_router(theme_router)
 from api.plugin_api import router as plugin_router
 app.include_router(plugin_router)
 
+from api.upload_api import router as upload_router
+app.include_router(upload_router)
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host=settings.HOST, port=settings.PORT, reload=settings.DEBUG)
