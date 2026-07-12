@@ -22,12 +22,16 @@ class ReActAgent:
             chunk_content = ""
             tool_calls = []
 
-            async for chunk in self.model.chat(messages, tools=tools, stream=True):
-                if chunk.content:
-                    chunk_content += chunk.content
-                    yield {"type": "answer", "content": chunk.content}
-                if chunk.tool_calls:
-                    tool_calls.extend(chunk.tool_calls)
+            try:
+                async for chunk in self.model.chat(messages, tools=tools, stream=True):
+                    if chunk.content:
+                        chunk_content += chunk.content
+                        yield {"type": "answer", "content": chunk.content}
+                    if chunk.tool_calls:
+                        tool_calls.extend(chunk.tool_calls)
+            except Exception as e:
+                yield {"type": "answer", "content": f"\n[连接错误] {e}"}
+                break
 
             full_response += chunk_content
 

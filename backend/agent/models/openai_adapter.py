@@ -26,9 +26,16 @@ class OpenAIAdapter(BaseModelAdapter):
         async with httpx.AsyncClient(timeout=120) as client:
             if stream:
                 async with client.stream("POST", f"{self.base_url}/chat/completions", json=payload, headers=headers) as resp:
+                    if resp.status_code != 200:
+                        body = await resp.aread()
+                        yield ModelResponse(content=f"[API错误 {resp.status_code}] {body.decode()[:200]}")
+                        return
                     async for line in resp.aiter_lines():
                         if line.startswith("data: ") and line.strip() != "data: [DONE]":
-                            chunk = json.loads(line[6:])
+                            try:
+                                chunk = json.loads(line[6:])
+                            except json.JSONDecodeError:
+                                continue
                             if not chunk.get("choices"):
                                 continue
                             delta = chunk["choices"][0].get("delta", {})
