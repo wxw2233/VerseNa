@@ -24,6 +24,12 @@ app.add_middleware(
 async def health():
     return {"status": "ok", "version": settings.VERSION}
 
+from api.chat import router as chat_router
+from api.config_api import router as config_router
+
+app.include_router(chat_router)
+app.include_router(config_router)
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host=settings.HOST, port=settings.PORT, reload=settings.DEBUG)
