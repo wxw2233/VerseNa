@@ -29,6 +29,8 @@ class OpenAIAdapter(BaseModelAdapter):
                     async for line in resp.aiter_lines():
                         if line.startswith("data: ") and line.strip() != "data: [DONE]":
                             chunk = json.loads(line[6:])
+                            if not chunk.get("choices"):
+                                continue
                             delta = chunk["choices"][0].get("delta", {})
                             content = delta.get("content", "")
                             tool_calls = delta.get("tool_calls")
