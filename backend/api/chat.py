@@ -5,6 +5,7 @@ from agent.models.openai_adapter import OpenAIAdapter
 from agent.memory import MemoryManager
 from config import settings
 from persona.manager import persona_manager
+from tools.registry import tool_registry
 
 router = APIRouter()
 
@@ -14,7 +15,7 @@ def create_agent(api_key: str = None, base_url: str = None, model_name: str = No
     model = model_name or settings.DEFAULT_MODEL_NAME
     adapter = OpenAIAdapter(api_key=key, base_url=url, model_name=model)
     memory = MemoryManager()
-    return ReActAgent(model=adapter, memory=memory)
+    return ReActAgent(model=adapter, memory=memory, tool_registry=tool_registry)
 
 @router.websocket("/ws/chat")
 async def websocket_chat(ws: WebSocket):
@@ -33,7 +34,7 @@ async def websocket_chat(ws: WebSocket):
             emotion = persona_manager.get_emotion_engine(persona_name)
             emotion_state = emotion.pick_emotion()
 
-            async for event in agent.run(session_id, content, system_prompt=system_prompt):
+            async for event in agent.run(session_id, content, system_prompt=system_prompt, tools=tool_registry.get_tools()):
                 await ws.send_text(json.dumps(event, ensure_ascii=False))
 
             done_msg = {"type": "done", "emotion": emotion_state.primary, "emoji": emotion_state.emoji}

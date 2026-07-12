@@ -10,3 +10,4 @@ Task 8: complete (commit 3b4680f, 12/12 tests pass, vite build OK 42 modules)
 
 === P0-P3 ALL COMPLETE ===
 Task 9: complete (commit bbfab47, 14/14 checks)
+Task 10: complete (commit d41469a, vite build OK, ThemeSwitcher in SettingsView)
