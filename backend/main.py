@@ -32,6 +32,9 @@ app.include_router(chat_router)
 app.include_router(config_router)
 app.include_router(persona_router)
 
+from api.theme_api import router as theme_router
+app.include_router(theme_router)
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host=settings.HOST, port=settings.PORT, reload=settings.DEBUG)
