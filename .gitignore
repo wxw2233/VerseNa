@@ -1,0 +1,6 @@
+backend/data/
+backend/__pycache__/
+*.pyc
+node_modules/
+.vite/
+*.egg-info/
