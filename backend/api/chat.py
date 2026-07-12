@@ -4,6 +4,7 @@ from agent.react import ReActAgent
 from agent.models.openai_adapter import OpenAIAdapter
 from agent.memory import MemoryManager
 from config import settings
+from persona.manager import persona_manager
 
 router = APIRouter()
 
@@ -27,13 +28,16 @@ async def websocket_chat(ws: WebSocket):
 
             session_id = msg.get("session_id", "default")
             content = msg.get("content", "")
-            persona = msg.get("persona", "default")
-            system_prompt = msg.get("system_prompt", "")
+            persona_name = msg.get("persona", "default")
+            system_prompt = persona_manager.get_system_prompt(persona_name)
+            emotion = persona_manager.get_emotion_engine(persona_name)
+            emotion_state = emotion.pick_emotion()
 
             async for event in agent.run(session_id, content, system_prompt=system_prompt):
                 await ws.send_text(json.dumps(event, ensure_ascii=False))
 
-            await ws.send_text(json.dumps({"type": "done"}))
+            done_msg = {"type": "done", "emotion": emotion_state.primary, "emoji": emotion_state.emoji}
+            await ws.send_text(json.dumps(done_msg))
 
     except WebSocketDisconnect:
         pass

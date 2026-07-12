@@ -26,9 +26,11 @@ async def health():
 
 from api.chat import router as chat_router
 from api.config_api import router as config_router
+from api.persona_api import router as persona_router
 
 app.include_router(chat_router)
 app.include_router(config_router)
+app.include_router(persona_router)
 
 if __name__ == "__main__":
     import uvicorn

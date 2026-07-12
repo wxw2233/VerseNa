@@ -1,5 +1,6 @@
 <template>
   <div class="chat-view">
+    <PersonaSwitcher />
     <div class="messages" ref="messagesRef">
       <ChatBubble v-for="(msg, i) in store.messages" :key="i" :msg="msg" />
       <div v-if="store.messages.length === 0" class="empty">
@@ -15,10 +16,13 @@
 import { ref, nextTick, onMounted } from 'vue'
 import { useChatStore } from '../stores/chat'
 import { useWebSocket } from '../composables/useWebSocket'
+import { usePersonaStore } from '../stores/persona'
 import ChatBubble from '../components/ChatBubble.vue'
 import ChatInput from '../components/ChatInput.vue'
+import PersonaSwitcher from '../components/PersonaSwitcher.vue'
 
 const store = useChatStore()
+const personaStore = usePersonaStore()
 const messagesRef = ref(null)
 const { connect, send, onMessage } = useWebSocket()
 
@@ -45,7 +49,7 @@ function handleSend(content) {
   send({
     session_id: 'default',
     content,
-    persona: store.currentPersona,
+    persona: personaStore.current,
     system_prompt: ''
   })
 }
