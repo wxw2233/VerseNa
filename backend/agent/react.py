@@ -17,41 +17,48 @@ class ReActAgent:
         full_response = ""
         loops = 0
 
-        while loops < settings.MAX_REACT_LOOPS:
-            loops += 1
-            chunk_content = ""
-            tool_calls = []
+        try:
+            while loops < settings.MAX_REACT_LOOPS:
+                loops += 1
+                chunk_content = ""
+                tool_calls = []
 
-            try:
-                async for chunk in self.model.chat(messages, tools=tools, stream=True):
-                    if chunk.content:
-                        chunk_content += chunk.content
-                        yield {"type": "answer", "content": chunk.content}
-                    if chunk.tool_calls:
-                        tool_calls.extend(chunk.tool_calls)
-            except Exception as e:
-                yield {"type": "answer", "content": f"\n[连接错误] {e}"}
-                break
+                try:
+                    async for chunk in self.model.chat(messages, tools=tools, stream=True):
+                        if chunk.content:
+                            chunk_content += chunk.content
+                            yield {"type": "answer", "content": chunk.content}
+                        if chunk.tool_calls:
+                            tool_calls.extend(chunk.tool_calls)
+                except Exception as e:
+                    yield {"type": "answer", "content": f"\n[连接错误] {e}"}
+                    break
 
-            full_response += chunk_content
+                full_response += chunk_content
 
-            if not tool_calls:
-                break
+                if not tool_calls:
+                    break
 
-            messages.append({"role": "assistant", "content": chunk_content, "tool_calls": tool_calls})
+                messages.append({"role": "assistant", "content": chunk_content, "tool_calls": tool_calls})
 
-            if not self.tool_registry:
-                yield {"type": "thinking", "content": "工具系统未配置"}
-                break
+                if not self.tool_registry:
+                    yield {"type": "thinking", "content": "工具系统未配置"}
+                    break
 
-            for tc in tool_calls:
-                func = tc.get("function", {})
-                tool_name = func.get("name", "")
-                tool_args = json.loads(func.get("arguments", "{}"))
-                yield {"type": "tool_call", "content": json.dumps({"name": tool_name, "args": tool_args}, ensure_ascii=False)}
+                for tc in tool_calls:
+                    func = tc.get("function", {})
+                    tool_name = func.get("name", "")
+                    try:
+                        tool_args = json.loads(func.get("arguments") or "{}")
+                    except json.JSONDecodeError:
+                        tool_args = {}
+                    yield {"type": "tool_call", "content": json.dumps({"name": tool_name, "args": tool_args}, ensure_ascii=False)}
 
-                result = await self.tool_registry.execute(tool_name, tool_args)
-                messages.append({"role": "tool", "tool_call_id": tc.get("id", ""), "content": result})
-                yield {"type": "tool_result", "content": result}
+                    result = await self.tool_registry.execute(tool_name, tool_args)
+                    messages.append({"role": "tool", "tool_call_id": tc.get("id", ""), "content": result})
+                    yield {"type": "tool_result", "content": result}
+
+        except Exception as e:
+            yield {"type": "answer", "content": f"\n[错误] {e}"}
 
         await self.memory.add_message(session_id, "assistant", full_response)
