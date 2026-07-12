@@ -31,6 +31,8 @@ async def websocket_chat(ws: WebSocket):
             content = msg.get("content", "")
             persona_name = msg.get("persona", "default")
             system_prompt = persona_manager.get_system_prompt(persona_name)
+            tool_desc = "\n".join(f"- {t['function']['name']}: {t['function']['description']}" for t in tool_registry.get_tools())
+            system_prompt += f"\n\n## 可用工具\n你有以下工具可以调用，请在需要时主动使用：\n{tool_desc}\n\n使用工具时请通过 function calling 调用，不要直接告诉用户你没有工具。"
             emotion = persona_manager.get_emotion_engine(persona_name)
             emotion_state = emotion.pick_emotion()
 
