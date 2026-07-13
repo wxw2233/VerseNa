@@ -12,8 +12,10 @@ defineProps({ msg: Object })
 <style scoped>
 .bubble {
   max-width: 75%;
-  padding: 10px 14px;
-  border-radius: 12px;
+  padding: var(--bubble-padding);
+  border-radius: var(--bubble-radius);
+  box-shadow: var(--bubble-shadow);
+  border: var(--bubble-border);
   margin: 6px 0;
   line-height: 1.6;
   white-space: pre-wrap;

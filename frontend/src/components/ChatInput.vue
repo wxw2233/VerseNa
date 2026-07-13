@@ -45,9 +45,9 @@ textarea {
   flex: 1;
   resize: none;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--input-radius);
   padding: 8px 12px;
-  background: var(--bg-primary);
+  background: var(--input-bg);
   color: var(--text-primary);
   font-size: 14px;
   outline: none;

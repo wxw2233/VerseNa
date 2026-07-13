@@ -1,4 +1,5 @@
 :root {
+  /* 颜色 */
   --primary: #7c5cfc;
   --bg-primary: #0f0f1a;
   --bg-secondary: #1a1a2e;
@@ -7,6 +8,32 @@
   --border: #2a2a40;
   --bubble-user: rgba(124, 92, 252, 0.15);
   --bubble-agent: rgba(30, 30, 50, 0.9);
+
+  /* 气泡 */
+  --bubble-radius: 12px;
+  --bubble-shadow: none;
+  --bubble-border: none;
+  --bubble-padding: 10px 14px;
+
+  /* 字体 */
+  --font-family: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-size-base: 14px;
+  --font-size-small: 12px;
+  --line-height: 1.6;
+
+  /* 间距 */
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 16px;
+  --spacing-lg: 24px;
+
+  /* 侧栏 */
+  --sidebar-width: 220px;
+  --sidebar-bg: var(--bg-secondary);
+
+  /* 输入框 */
+  --input-radius: 8px;
+  --input-bg: var(--bg-primary);
 }
 
 * {
@@ -16,10 +43,12 @@
 }
 
 body {
-  font-family: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif;
+  font-family: var(--font-family);
   background: var(--bg-primary);
   color: var(--text-primary);
   height: 100vh;
+  font-size: var(--font-size-base);
+  line-height: var(--line-height);
 }
 
 #app {
