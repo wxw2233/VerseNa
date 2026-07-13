@@ -2,12 +2,11 @@
   <div class="chat-view">
     <SessionList />
     <div class="chat-main">
-      <PersonaSwitcher />
       <div class="messages" ref="messagesRef">
         <ChatBubble v-for="(msg, i) in store.messages" :key="i" :msg="msg" />
         <div v-if="store.messages.length === 0" class="empty">
           <p>✨ 次元人格 ✨</p>
-          <p class="sub">选择一个角色开始聊天</p>
+          <p class="sub">点击「+ 新对话」开始聊天</p>
         </div>
       </div>
       <ChatInput @send="handleSend" />
@@ -23,7 +22,6 @@ import { usePersonaStore } from '../stores/persona'
 import { useSessionStore } from '../stores/session'
 import ChatBubble from '../components/ChatBubble.vue'
 import ChatInput from '../components/ChatInput.vue'
-import PersonaSwitcher from '../components/PersonaSwitcher.vue'
 import SessionList from '../components/SessionList.vue'
 
 const store = useChatStore()
