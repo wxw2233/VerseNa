@@ -4,7 +4,6 @@ import { createRouter, createWebHistory } from 'vue-router'
 import App from './App.vue'
 import ChatView from './views/ChatView.vue'
 import SettingsView from './views/SettingsView.vue'
-
 import './styles/default.css'
 
 const router = createRouter({
@@ -12,7 +11,6 @@ const router = createRouter({
   routes: [
     { path: '/', component: ChatView },
     { path: '/settings', component: SettingsView },
-
   ]
 })
 
