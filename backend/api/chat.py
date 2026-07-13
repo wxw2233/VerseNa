@@ -37,7 +37,7 @@ async def websocket_chat(ws: WebSocket):
             emotion = persona_manager.get_emotion_engine(persona_name)
             emotion_state = emotion.pick_emotion()
 
-            async for event in agent.run(session_id, content, system_prompt=system_prompt, tools=tool_registry.get_tools()):
+            async for event in agent.run(session_id, content, system_prompt=system_prompt, tools=tool_registry.get_tools(), persona=persona_name):
                 await ws.send_text(json.dumps(event, ensure_ascii=False))
 
             done_msg = {"type": "done", "emotion": emotion_state.primary, "emoji": emotion_state.emoji}

@@ -10,8 +10,8 @@ class ReActAgent:
         self.memory = memory
         self.tool_registry = tool_registry
 
-    async def run(self, session_id: str, user_message: str, system_prompt: str = "", tools: list = None) -> AsyncGenerator[dict, None]:
-        await self.memory.add_message(session_id, "user", user_message)
+    async def run(self, session_id: str, user_message: str, system_prompt: str = "", tools: list = None, persona: str = "default") -> AsyncGenerator[dict, None]:
+        await self.memory.add_message(session_id, "user", user_message, persona=persona)
         messages = await self.memory.get_context(session_id, system_prompt)
 
         full_response = ""
@@ -61,4 +61,4 @@ class ReActAgent:
         except Exception as e:
             yield {"type": "answer", "content": f"\n[错误] {e}"}
 
-        await self.memory.add_message(session_id, "assistant", full_response)
+        await self.memory.add_message(session_id, "assistant", full_response, persona=persona)

@@ -15,7 +15,7 @@ class SessionRename(BaseModel):
 async def list_sessions():
     """获取所有会话列表，按 persona 分组"""
     rows = await db._db.execute(
-        "SELECT session_id, persona, MAX(created_at) as last_msg, COUNT(*) as msg_count FROM conversations GROUP BY session_id ORDER BY last_msg DESC"
+        "SELECT session_id, MAX(persona) as persona, MAX(created_at) as last_msg, COUNT(*) as msg_count FROM conversations GROUP BY session_id ORDER BY last_msg DESC"
     )
     results = await rows.fetchall()
     return [{"id": r["session_id"], "persona": r["persona"] or "default", "last_msg": r["last_msg"], "msg_count": r["msg_count"]} for r in results]
