@@ -54,3 +54,53 @@ async def create_theme(req: ThemeCreate):
 """
     (theme_dir / "variables.css").write_text(css, encoding="utf-8")
     return {"status": "ok", "id": req.id}
+
+
+@router.get("/api/themes/{theme_id}/full")
+async def get_theme_full(theme_id: str):
+    theme_dir = THEMES_DIR / theme_id
+    config_path = theme_dir / "theme.json"
+    css_path = theme_dir / "variables.css"
+    if not config_path.exists():
+        raise HTTPException(404, f"Theme '{theme_id}' not found")
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    css = css_path.read_text(encoding="utf-8") if css_path.exists() else ""
+    return {"id": theme_id, "config": config, "css": css}
+
+
+@router.put("/api/themes/{theme_id}")
+async def update_theme(theme_id: str, req: ThemeCreate):
+    theme_dir = THEMES_DIR / theme_id
+    if not theme_dir.exists():
+        raise HTTPException(404, f"Theme '{theme_id}' not found")
+    config = {
+        "name": req.name,
+        "version": "1.0.0",
+        "author": "user",
+        "colors": {
+            "primary": req.primary,
+            "bg-primary": req.bg_primary,
+            "bg-secondary": req.bg_secondary,
+            "text-primary": req.text_primary,
+            "text-secondary": req.text_secondary,
+            "border": req.border,
+            "bubble-user": f"{req.primary}26",
+            "bubble-agent": "rgba(30, 30, 50, 0.9)",
+        },
+        "font": req.font,
+        "effects": {},
+    }
+    (theme_dir / "theme.json").write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
+    css = f""":root {{
+  --primary: {req.primary};
+  --bg-primary: {req.bg_primary};
+  --bg-secondary: {req.bg_secondary};
+  --text-primary: {req.text_primary};
+  --text-secondary: {req.text_secondary};
+  --border: {req.border};
+  --bubble-user: {req.primary}26;
+  --bubble-agent: rgba(30, 30, 50, 0.9);
+}}
+"""
+    (theme_dir / "variables.css").write_text(css, encoding="utf-8")
+    return {"status": "ok"}

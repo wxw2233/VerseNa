@@ -34,6 +34,18 @@
             >
               <div class="card-name">{{ p.name }}</div>
               <div class="card-desc">{{ p.description || '—' }}</div>
+              <div class="card-actions">
+                <button
+                  class="card-edit-btn"
+                  @click.stop="selectPersona(p.name)"
+                  title="编辑角色"
+                >&#9998;</button>
+                <button
+                  class="card-reset-btn"
+                  @click.stop="resetPersona(p.name)"
+                  title="重置角色"
+                >&#8634;</button>
+              </div>
             </div>
           </div>
           <div v-if="personas.length === 0" class="empty-hint">暂无角色，点击上方「+ 新建」创建</div>
@@ -355,6 +367,49 @@ function cancelEdit() {
   form.value = null
   selectedId.value = null
 }
+
+const defaultPersonaValues = {
+  id: 'default',
+  name: '默认助手',
+  description: '一个友好的 AI 助手',
+  prompt: '你是一个友好、乐于助人的 AI 助手。',
+  emotion_weights: { cheerful: 0.5, shy: 0.2, curious: 0.5, angry: 0.1, sad: 0.1 },
+  speech_style: { tone: '友好', catchphrase: '', emoji_frequency: 'medium', formality: 'casual' },
+  theme_binding: 'default',
+}
+
+async function resetPersona(id) {
+  if (!confirm(`确定要重置角色「${id}」为默认值？`)) return
+  if (id === 'default') {
+    // Reset default persona to original values
+    const resp = await fetch('/api/personas/default', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(defaultPersonaValues),
+    })
+    if (resp.ok) {
+      form.value = null
+      selectedId.value = null
+      await loadPersonas()
+    } else {
+      const err = await resp.json()
+      alert(err.detail || '重置失败')
+    }
+  } else {
+    // Custom persona: delete and reload
+    const resp = await fetch(`/api/personas/${id}`, { method: 'DELETE' })
+    if (resp.ok) {
+      if (selectedId.value === id) {
+        form.value = null
+        selectedId.value = null
+      }
+      await loadPersonas()
+    } else {
+      const err = await resp.json()
+      alert(err.detail || '重置失败')
+    }
+  }
+}
 </script>
 
 <style scoped>
@@ -438,6 +493,7 @@ function cancelEdit() {
 }
 
 .persona-card {
+  position: relative;
   padding: 14px 16px;
   background: var(--bg-primary);
   border: 1px solid var(--border);
@@ -463,6 +519,42 @@ function cancelEdit() {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.card-actions {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  display: flex;
+  gap: 3px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.persona-card:hover .card-actions {
+  opacity: 1;
+}
+.card-edit-btn, .card-reset-btn {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  color: white;
+  border: none;
+  font-size: 12px;
+  line-height: 20px;
+  text-align: center;
+  cursor: pointer;
+  padding: 0;
+}
+.card-edit-btn {
+  background: var(--primary);
+}
+.card-edit-btn:hover {
+  background: #6a4fe0;
+}
+.card-reset-btn {
+  background: #f39c12;
+}
+.card-reset-btn:hover {
+  background: #e67e22;
 }
 
 /* Inline persona editor */
