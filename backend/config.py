@@ -5,7 +5,7 @@ class Settings:
     PROJECT_NAME = "次元人格"
     VERSION = "0.1.0"
     HOST = "0.0.0.0"
-    PORT = 8000
+    PORT = 8001
     DEBUG = True
     BASE_DIR = Path(__file__).parent
     DATA_DIR = BASE_DIR / "data"
