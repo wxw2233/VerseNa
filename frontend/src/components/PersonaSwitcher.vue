@@ -22,16 +22,37 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { usePersonaStore } from '../stores/persona'
+import { useSessionStore } from '../stores/session'
+import { useChatStore } from '../stores/chat'
 const personaStore = usePersonaStore()
+const sessionStore = useSessionStore()
+const chatStore = useChatStore()
 const collapsed = ref(true)
 
 const currentPersona = computed(() =>
   personaStore.personas.find(p => p.id === personaStore.current)
 )
 
-function selectPersona(id) {
+async function selectPersona(id) {
   personaStore.switchPersona(id)
   collapsed.value = true
+  // 查找该人格的现有会话
+  const existing = sessionStore.sessions.find(s => s.persona === id)
+  if (existing) {
+    sessionStore.switchSession(existing.id)
+    // 加载历史
+    const resp = await fetch(`/api/sessions/${existing.id}/history`)
+    const history = await resp.json()
+    chatStore.clearMessages()
+    for (const msg of history) {
+      if (msg.role === 'user') chatStore.addUserMessage(msg.content)
+      else if (msg.role === 'assistant') chatStore.messages.push({ role: 'assistant', content: msg.content, streaming: false })
+    }
+  } else {
+    // 创建新会话
+    await sessionStore.createSession()
+    chatStore.clearMessages()
+  }
 }
 
 onMounted(() => personaStore.fetchPersonas())

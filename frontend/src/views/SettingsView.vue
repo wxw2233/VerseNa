@@ -27,22 +27,22 @@
           <div class="persona-grid">
             <div
               v-for="p in personas"
-              :key="p.name"
+              :key="p.id"
               class="persona-card"
-              :class="{ selected: selectedId === p.name }"
-              @click="selectPersona(p.name)"
+              :class="{ selected: selectedId === p.id }"
+              @click="selectPersona(p.id)"
             >
               <div class="card-name">{{ p.name }}</div>
               <div class="card-desc">{{ p.description || '—' }}</div>
               <div class="card-actions">
                 <button
                   class="card-edit-btn"
-                  @click.stop="selectPersona(p.name)"
+                  @click.stop="selectPersona(p.id)"
                   title="编辑角色"
                 >&#9998;</button>
                 <button
                   class="card-reset-btn"
-                  @click.stop="resetPersona(p.name)"
+                  @click.stop="resetPersona(p.id)"
                   title="重置角色"
                 >&#8634;</button>
               </div>
