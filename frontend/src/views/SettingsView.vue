@@ -2,6 +2,8 @@
   <div class="settings">
     <ThemeSwitcher />
     <hr style="border-color: var(--border); margin: 24px 0;" />
+    <ThemeCreator />
+    <hr style="border-color: var(--border); margin: 24px 0;" />
     <PluginManager />
     <hr style="border-color: var(--border); margin: 24px 0;" />
     <h2>模型配置</h2>
@@ -24,6 +26,7 @@
 <script setup>
 import { reactive, onMounted } from 'vue'
 import ThemeSwitcher from '../components/ThemeSwitcher.vue'
+import ThemeCreator from '../components/ThemeCreator.vue'
 import PluginManager from '../components/PluginManager.vue'
 
 const form = reactive({ api_key: '', base_url: '', model_name: '' })
