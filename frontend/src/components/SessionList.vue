@@ -36,6 +36,24 @@
       </template>
       <div v-if="Object.keys(groupedSessions).length === 0" class="empty">暂无对话</div>
     </div>
+    <!-- 人格选择弹窗 -->
+    <div v-if="showPersonaSelect" class="persona-modal">
+      <div class="persona-modal-content">
+        <div class="persona-modal-title">选择角色</div>
+        <div class="persona-modal-list">
+          <div
+            v-for="p in personaStore.personas"
+            :key="p.id"
+            class="persona-modal-item"
+            @click="createWithPersona(p.id)"
+          >
+            <div class="persona-name">{{ p.name }}</div>
+            <div class="persona-desc">{{ p.description }}</div>
+          </div>
+        </div>
+        <button class="cancel-modal" @click="showPersonaSelect = false">取消</button>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -43,12 +61,15 @@
 import { ref, computed, onMounted } from 'vue'
 import { useSessionStore } from '../stores/session'
 import { useChatStore } from '../stores/chat'
+import { usePersonaStore } from '../stores/persona'
 
 const sessionStore = useSessionStore()
 const chatStore = useChatStore()
+const personaStore = usePersonaStore()
 
 const renamingId = ref('')
 const newName = ref('')
+const showPersonaSelect = ref(false)
 
 const groupedSessions = computed(() => {
   const groups = {}
@@ -63,6 +84,12 @@ const groupedSessions = computed(() => {
 onMounted(() => sessionStore.fetchSessions())
 
 async function handleNew() {
+  showPersonaSelect.value = true
+}
+
+async function createWithPersona(personaId) {
+  showPersonaSelect.value = false
+  personaStore.switchPersona(personaId)
   await sessionStore.createSession()
   chatStore.clearMessages()
 }
@@ -224,5 +251,62 @@ async function confirmRename(id) {
   text-align: center;
   color: var(--text-secondary);
   font-size: 13px;
+}
+.persona-modal {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+.persona-modal-content {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px;
+  min-width: 280px;
+  max-width: 360px;
+}
+.persona-modal-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 12px;
+  text-align: center;
+}
+.persona-modal-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+.persona-modal-item {
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.persona-modal-item:hover {
+  border-color: var(--primary);
+  background: rgba(124, 92, 252, 0.1);
+}
+.cancel-modal {
+  width: 100%;
+  margin-top: 12px;
+  padding: 8px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 13px;
+}
+.cancel-modal:hover {
+  border-color: var(--primary);
+  color: var(--text-primary);
 }
 </style>

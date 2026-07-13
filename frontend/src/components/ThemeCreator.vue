@@ -79,6 +79,7 @@ async function create() {
   })
   if (resp.ok) {
     msg.value = '创建成功！'
+    cancelPreview()
     await themeStore.fetchThemes()
     form.id = ''
     form.name = ''

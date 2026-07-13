@@ -2,13 +2,28 @@
   <div id="app-root">
     <nav class="top-bar">
       <router-link to="/" class="nav-title">次元人格</router-link>
-      <router-link to="/settings" class="nav-link">设置</router-link>
+      <a class="nav-link" :class="{ active: isSettings }" @click="toggleSettings">{{ isSettings ? '返回' : '设置' }}</a>
     </nav>
     <main class="main-content">
       <router-view />
     </main>
   </div>
 </template>
+
+<script setup>
+import { computed } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+const route = useRoute()
+const router = useRouter()
+const isSettings = computed(() => route.path === '/settings')
+function toggleSettings() {
+  if (isSettings.value) {
+    router.push('/')
+  } else {
+    router.push('/settings')
+  }
+}
+</script>
 
 <style scoped>
 .top-bar {
@@ -29,8 +44,9 @@
   color: var(--text-secondary);
   text-decoration: none;
   font-size: 14px;
+  cursor: pointer;
 }
-.nav-link:hover {
+.nav-link:hover, .nav-link.active {
   color: var(--primary);
 }
 .main-content {
