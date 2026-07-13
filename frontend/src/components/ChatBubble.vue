@@ -1,6 +1,7 @@
 <template>
   <div class="bubble" :class="[msg.role, { streaming: msg.streaming }]">
     <div class="bubble-content">{{ msg.content }}</div>
+    <div v-if="msg.emoji" class="bubble-emoji">{{ msg.emoji }}</div>
   </div>
 </template>
 
@@ -34,5 +35,10 @@ defineProps({ msg: Object })
 }
 @keyframes blink {
   50% { opacity: 0; }
+}
+.bubble-emoji {
+  font-size: 18px;
+  margin-top: 4px;
+  text-align: right;
 }
 </style>

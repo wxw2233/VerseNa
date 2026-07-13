@@ -39,6 +39,10 @@ onMounted(() => {
       store.appendAgentChunk(msg.content)
     } else if (msg.type === 'done') {
       store.finishStreaming()
+      if (msg.emoji) {
+        const last = store.messages[store.messages.length - 1]
+        if (last) last.emoji = msg.emoji
+      }
     } else if (msg.type === 'error') {
       store.appendAgentChunk(`\n[错误] ${msg.content}`)
       store.finishStreaming()
