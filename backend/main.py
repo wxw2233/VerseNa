@@ -63,6 +63,9 @@ app.include_router(theme_delete_router)
 from api.theme_asset_api import router as theme_asset_router
 app.include_router(theme_asset_router)
 
+from api.theme_package_api import router as theme_package_router
+app.include_router(theme_package_router)
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host=settings.HOST, port=settings.PORT, reload=settings.DEBUG)

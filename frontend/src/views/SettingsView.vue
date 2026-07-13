@@ -123,6 +123,7 @@
         <h3>主题管理</h3>
         <ThemeSwitcher />
         <ThemeCreator />
+        <AssetUploader />
       </div>
 
       <!-- 模型配置 (Model) -->
@@ -195,6 +196,7 @@
 import { ref, reactive, onMounted } from 'vue'
 import ThemeSwitcher from '../components/ThemeSwitcher.vue'
 import ThemeCreator from '../components/ThemeCreator.vue'
+import AssetUploader from '../components/AssetUploader.vue'
 import PluginManager from '../components/PluginManager.vue'
 import QQBotConfig from '../components/QQBotConfig.vue'
 
