@@ -9,6 +9,8 @@ async def lifespan(app: FastAPI):
     await db.connect()
     from api.config_api import load_saved_config
     await load_saved_config()
+    from api.qq_api import load_qq_config
+    await load_qq_config()
     yield
     await db.close()
 

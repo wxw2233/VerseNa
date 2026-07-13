@@ -20,7 +20,10 @@
       <div class="webhook-url">POST http://你的域名:8000/api/qq/webhook</div>
     </div>
     <button @click="save">保存配置</button>
-    <div v-if="msg" class="msg">{{ msg }}</div>
+    <div v-if="msg" class="msg" :class="{ error: isError }">{{ msg }}</div>
+    <div class="status">
+      状态：<span :class="{ online: botStatus === '已连接', offline: botStatus !== '已连接' }">{{ botStatus }}</span>
+    </div>
   </div>
 </template>
 
@@ -29,6 +32,8 @@ import { reactive, onMounted, ref } from 'vue'
 
 const form = reactive({ app_id: '', app_secret: '', sandbox: true })
 const msg = ref('')
+const isError = ref(false)
+const botStatus = ref('未连接')
 
 onMounted(async () => {
   const resp = await fetch('/api/qq/config')
@@ -37,16 +42,27 @@ onMounted(async () => {
     form.app_id = data.app_id || ''
     form.app_secret = data.app_secret || ''
     form.sandbox = data.sandbox !== false
+    botStatus.value = data.bot_status || '未连接'
   }
 })
 
 async function save() {
+  msg.value = ''
+  isError.value = false
   const resp = await fetch('/api/qq/config', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(form),
   })
-  msg.value = resp.ok ? '保存成功！' : '保存失败'
+  if (resp.ok) {
+    const data = await resp.json()
+    botStatus.value = data.bot_status || '未知'
+    msg.value = data.bot_status === '已连接' ? '保存成功，Bot 已连接！' : data.bot_status
+    isError.value = data.bot_status !== '已连接'
+  } else {
+    msg.value = '保存失败'
+    isError.value = true
+  }
 }
 </script>
 
@@ -70,4 +86,8 @@ button {
   border-radius: 6px; cursor: pointer; font-size: 13px;
 }
 .msg { margin-top: 8px; font-size: 13px; color: var(--primary); }
+.msg.error { color: #ff4757; }
+.status { margin-top: 12px; font-size: 13px; color: var(--text-secondary); }
+.status .online { color: #2ed573; font-weight: 600; }
+.status .offline { color: #ff4757; }
 </style>
