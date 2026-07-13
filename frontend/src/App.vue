@@ -3,6 +3,7 @@
     <nav class="top-bar">
       <router-link to="/" class="nav-title">次元人格</router-link>
       <router-link to="/settings" class="nav-link">设置</router-link>
+      <router-link to="/personas" class="nav-link">角色</router-link>
     </nav>
     <main class="main-content">
       <router-view />
