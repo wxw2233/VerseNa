@@ -13,12 +13,15 @@
       <div class="color-item" v-for="key in colorKeys" :key="key.key">
         <label>{{ key.label }}</label>
         <div class="color-input">
-          <input type="color" v-model="form[key.key]" />
+          <input type="color" v-model="form[key.key]" @input="applyPreview" />
           <span>{{ form[key.key] }}</span>
         </div>
       </div>
     </div>
-    <button @click="create" :disabled="!form.id || !form.name">创建主题</button>
+    <div class="btn-row">
+      <button @click="create" :disabled="!form.id || !form.name">创建主题</button>
+      <button class="cancel-btn" @click="cancelPreview">取消预览</button>
+    </div>
     <div v-if="msg" class="msg">{{ msg }}</div>
   </div>
 </template>
@@ -44,6 +47,29 @@ const colorKeys = [
   { key: 'text_secondary', label: '次文字' },
   { key: 'border', label: '边框' },
 ]
+
+function applyPreview() {
+  let styleEl = document.getElementById('theme-preview')
+  if (!styleEl) {
+    styleEl = document.createElement('style')
+    styleEl.id = 'theme-preview'
+    document.head.appendChild(styleEl)
+  }
+  styleEl.textContent = `:root {
+    --primary: ${form.primary};
+    --bg-primary: ${form.bg_primary};
+    --bg-secondary: ${form.bg_secondary};
+    --text-primary: ${form.text_primary};
+    --text-secondary: ${form.text_secondary};
+    --border: ${form.border};
+  }`
+}
+
+function cancelPreview() {
+  const el = document.getElementById('theme-preview')
+  if (el) el.remove()
+  themeStore.applyTheme(themeStore.current)
+}
 
 async function create() {
   const resp = await fetch('/api/themes/create', {
@@ -77,10 +103,13 @@ async function create() {
 .color-input { display: flex; align-items: center; gap: 6px; }
 .color-input input[type="color"] { width: 32px; height: 32px; border: none; cursor: pointer; }
 .color-input span { font-size: 11px; color: var(--text-secondary); }
+.btn-row { display: flex; gap: 10px; }
 button {
   padding: 8px 20px; background: var(--primary); color: white; border: none;
   border-radius: 6px; cursor: pointer; font-size: 13px;
 }
 button:disabled { opacity: 0.5; cursor: not-allowed; }
+.cancel-btn { background: var(--bg-secondary); border: 1px solid var(--border); }
+.cancel-btn:hover { border-color: var(--primary); }
 .msg { margin-top: 8px; font-size: 13px; color: var(--primary); }
 </style>
