@@ -6,6 +6,8 @@
     <hr style="border-color: var(--border); margin: 24px 0;" />
     <PluginManager />
     <hr style="border-color: var(--border); margin: 24px 0;" />
+    <QQBotConfig />
+    <hr style="border-color: var(--border); margin: 24px 0;" />
     <h2>模型配置</h2>
     <div class="form-group">
       <label>API Base URL</label>
@@ -28,6 +30,7 @@ import { reactive, onMounted } from 'vue'
 import ThemeSwitcher from '../components/ThemeSwitcher.vue'
 import ThemeCreator from '../components/ThemeCreator.vue'
 import PluginManager from '../components/PluginManager.vue'
+import QQBotConfig from '../components/QQBotConfig.vue'
 
 const form = reactive({ api_key: '', base_url: '', model_name: '' })
 
