@@ -8,14 +8,27 @@ router = APIRouter()
 class SessionCreate(BaseModel):
     name: str = ""
 
+class SessionRename(BaseModel):
+    name: str
+
 @router.get("/api/sessions")
 async def list_sessions():
-    """获取所有会话列表"""
+    """获取所有会话列表，按 persona 分组"""
     rows = await db._db.execute(
-        "SELECT DISTINCT session_id, MAX(created_at) as last_msg, COUNT(*) as msg_count FROM conversations GROUP BY session_id ORDER BY last_msg DESC"
+        "SELECT session_id, persona, MAX(created_at) as last_msg, COUNT(*) as msg_count FROM conversations GROUP BY session_id ORDER BY last_msg DESC"
     )
     results = await rows.fetchall()
-    return [{"id": r["session_id"], "last_msg": r["last_msg"], "msg_count": r["msg_count"]} for r in results]
+    return [{"id": r["session_id"], "persona": r["persona"] or "default", "last_msg": r["last_msg"], "msg_count": r["msg_count"]} for r in results]
+
+@router.put("/api/sessions/{session_id}/rename")
+async def rename_session(session_id: str, req: SessionRename):
+    """重命名会话"""
+    await db._db.execute(
+        "UPDATE conversations SET session_id = ? WHERE session_id = ?",
+        (req.name, session_id)
+    )
+    await db._db.commit()
+    return {"status": "ok", "new_id": req.name}
 
 @router.get("/api/sessions/{session_id}/history")
 async def get_session_history(session_id: str, limit: int = 50):

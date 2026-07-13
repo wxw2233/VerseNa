@@ -55,6 +55,9 @@ app.include_router(persona_editor_router)
 from api.theme_editor_api import router as theme_editor_router
 app.include_router(theme_editor_router)
 
+from api.theme_delete_api import router as theme_delete_router
+app.include_router(theme_delete_router)
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host=settings.HOST, port=settings.PORT, reload=settings.DEBUG)

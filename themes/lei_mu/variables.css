@@ -1,0 +1,10 @@
+:root {
+  --primary: #2c7fed;
+  --bg-primary: #94d6ff;
+  --bg-secondary: #0000ff;
+  --text-primary: #e8e8f0;
+  --text-secondary: #8888aa;
+  --border: #2a2a40;
+  --bubble-user: #2c7fed26;
+  --bubble-agent: rgba(30, 30, 50, 0.9);
+}
