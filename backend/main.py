@@ -46,6 +46,9 @@ app.include_router(upload_router)
 from api.qq_api import router as qq_router
 app.include_router(qq_router)
 
+from api.session_api import router as session_router
+app.include_router(session_router)
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host=settings.HOST, port=settings.PORT, reload=settings.DEBUG)

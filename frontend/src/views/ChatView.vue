@@ -1,14 +1,17 @@
 <template>
   <div class="chat-view">
-    <PersonaSwitcher />
-    <div class="messages" ref="messagesRef">
-      <ChatBubble v-for="(msg, i) in store.messages" :key="i" :msg="msg" />
-      <div v-if="store.messages.length === 0" class="empty">
-        <p>✨ 次元人格 ✨</p>
-        <p class="sub">选择一个角色开始聊天</p>
+    <SessionList />
+    <div class="chat-main">
+      <PersonaSwitcher />
+      <div class="messages" ref="messagesRef">
+        <ChatBubble v-for="(msg, i) in store.messages" :key="i" :msg="msg" />
+        <div v-if="store.messages.length === 0" class="empty">
+          <p>✨ 次元人格 ✨</p>
+          <p class="sub">选择一个角色开始聊天</p>
+        </div>
       </div>
+      <ChatInput @send="handleSend" />
     </div>
-    <ChatInput @send="handleSend" />
   </div>
 </template>
 
@@ -17,12 +20,15 @@ import { ref, nextTick, onMounted } from 'vue'
 import { useChatStore } from '../stores/chat'
 import { useWebSocket } from '../composables/useWebSocket'
 import { usePersonaStore } from '../stores/persona'
+import { useSessionStore } from '../stores/session'
 import ChatBubble from '../components/ChatBubble.vue'
 import ChatInput from '../components/ChatInput.vue'
 import PersonaSwitcher from '../components/PersonaSwitcher.vue'
+import SessionList from '../components/SessionList.vue'
 
 const store = useChatStore()
 const personaStore = usePersonaStore()
+const sessionStore = useSessionStore()
 const messagesRef = ref(null)
 const { connect, send, onMessage } = useWebSocket()
 
@@ -47,7 +53,7 @@ function handleSend(content) {
   store.addUserMessage(content)
   store.isStreaming = true
   send({
-    session_id: 'default',
+    session_id: sessionStore.currentSessionId,
     content,
     persona: personaStore.current,
     system_prompt: ''
@@ -58,8 +64,13 @@ function handleSend(content) {
 <style scoped>
 .chat-view {
   display: flex;
-  flex-direction: column;
   height: calc(100vh - 52px);
+}
+.chat-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
 }
 .messages {
   flex: 1;
