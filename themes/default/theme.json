@@ -1,7 +1,7 @@
 {
-  "name": "默认暗黑",
+  "name": "Default",
   "version": "1.0.0",
-  "author": "official",
+  "author": "user",
   "colors": {
     "primary": "#7c5cfc",
     "bg-primary": "#0f0f1a",
@@ -9,7 +9,7 @@
     "text-primary": "#e8e8f0",
     "text-secondary": "#8888aa",
     "border": "#2a2a40",
-    "bubble-user": "rgba(124, 92, 252, 0.15)",
+    "bubble-user": "#7c5cfc26",
     "bubble-agent": "rgba(30, 30, 50, 0.9)"
   },
   "font": "Noto Sans SC",

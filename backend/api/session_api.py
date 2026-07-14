@@ -18,7 +18,23 @@ async def list_sessions():
         "SELECT session_id, MAX(persona) as persona, MAX(created_at) as last_msg, COUNT(*) as msg_count FROM conversations GROUP BY session_id ORDER BY last_msg DESC"
     )
     results = await rows.fetchall()
-    return [{"id": r["session_id"], "persona": r["persona"] or "default", "last_msg": r["last_msg"], "msg_count": r["msg_count"]} for r in results]
+    sessions = []
+    for r in results:
+        sid = r["session_id"]
+        meta = await db.get_session_meta(sid)
+        sessions.append({
+            "id": sid,
+            "persona": r["persona"] or "default",
+            "last_msg": r["last_msg"],
+            "msg_count": r["msg_count"],
+            "name": meta["name"],
+            "theme_pack_id": meta["theme_pack_id"],
+        })
+    return sessions
+
+class SessionUpdate(BaseModel):
+    name: str = None
+    theme_pack_id: str = None
 
 @router.put("/api/sessions/{session_id}/rename")
 async def rename_session(session_id: str, req: SessionRename):
@@ -27,8 +43,21 @@ async def rename_session(session_id: str, req: SessionRename):
         "UPDATE conversations SET session_id = ? WHERE session_id = ?",
         (req.name, session_id)
     )
+    # 更新元数据
+    meta = await db.get_session_meta(session_id)
+    await db.set_session_meta(req.name, name=req.name, theme_pack_id=meta["theme_pack_id"])
+    # 删除旧元数据
+    await db._db.execute("DELETE FROM session_metadata WHERE session_id = ?", (session_id,))
     await db._db.commit()
     return {"status": "ok", "new_id": req.name}
+
+@router.put("/api/sessions/{session_id}")
+async def update_session(session_id: str, req: SessionUpdate):
+    if req.name:
+        await rename_session(session_id, SessionRename(name=req.name))
+    if req.theme_pack_id:
+        await db.set_session_meta(session_id, theme_pack_id=req.theme_pack_id)
+    return {"status": "ok"}
 
 @router.get("/api/sessions/{session_id}/history")
 async def get_session_history(session_id: str, limit: int = 50):
