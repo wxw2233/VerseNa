@@ -20,44 +20,28 @@
       <div v-if="activeTab === 'persona'" class="tab-content">
         <h2>角色管理</h2>
         <div class="persona-section">
-          <div class="persona-header">
-            <h3>角色列表</h3>
-            <button class="btn-new" @click="startCreate">+ 新建</button>
-          </div>
+          <div class="current-persona-label">当前角色：{{ currentPersonaName }} ✓</div>
           <div class="persona-grid">
             <div
               v-for="p in personas"
               :key="p.id"
               class="persona-card"
-              :class="{ selected: selectedId === p.id }"
-              @click="selectPersona(p.id)"
+              :class="{ selected: selectedId === p.id, current: personaStore.current === p.id }"
+              @click="handleCardClick(p.id)"
             >
-              <div class="card-name">{{ p.name }}</div>
-              <div class="card-desc">{{ p.description || '—' }}</div>
-              <div class="card-actions">
-                <button
-                  class="card-edit-btn"
-                  @click.stop="selectPersona(p.id)"
-                  title="编辑角色"
-                >&#9998;</button>
-                <button
-                  class="card-reset-btn"
-                  @click.stop="resetPersona(p.id)"
-                  title="重置角色"
-                >&#8634;</button>
+              <div class="card-name">
+                {{ p.name }}
+                <span v-if="personaStore.current === p.id" class="current-badge">✓</span>
               </div>
+              <div class="card-desc">{{ p.description || '—' }}</div>
             </div>
           </div>
-          <div v-if="personas.length === 0" class="empty-hint">暂无角色，点击上方「+ 新建」创建</div>
+          <div v-if="personas.length === 0" class="empty-hint">暂无角色</div>
         </div>
 
-        <!-- Inline Editor (replaces PersonaEditorView) -->
-        <div v-if="form" class="persona-editor-inline">
-          <h3>{{ isCreate ? '新建角色' : '编辑角色 — ' + form.id }}</h3>
-          <div class="form-group">
-            <label>ID（英文标识）</label>
-            <input v-model="form.id" :disabled="!isCreate" placeholder="e.g. my_character" />
-          </div>
+        <!-- Inline Editor -->
+        <div v-if="selectedId && form" class="persona-editor-inline">
+          <h3>编辑角色 — {{ form.name }}</h3>
           <div class="form-group">
             <label>名称</label>
             <input v-model="form.name" placeholder="角色显示名" />
@@ -114,8 +98,8 @@
           </div>
           <div class="actions">
             <button class="btn-save" @click="savePersona">保存</button>
-            <button v-if="!isCreate && form.id !== 'default'" class="btn-delete" @click="removePersona">删除</button>
-            <button class="btn-cancel" @click="cancelEdit">取消</button>
+            <button class="btn-reset" @click="resetToDefault">重置为默认</button>
+            <button v-if="form.id !== 'default'" class="btn-delete" @click="removePersona">删除</button>
           </div>
         </div>
 
@@ -218,8 +202,9 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { useThemeStore } from '../stores/theme'
+import { usePersonaStore } from '../stores/persona'
 import ThemeSwitcher from '../components/ThemeSwitcher.vue'
 import ThemeCreator from '../components/ThemeCreator.vue'
 import AssetUploader from '../components/AssetUploader.vue'
@@ -240,6 +225,7 @@ const menuItems = [
 
 // --- Model Config ---
 const themeStore = useThemeStore()
+const personaStore = usePersonaStore()
 const form_model = reactive({ api_key: '', base_url: '', model_name: '' })
 
 onMounted(async () => {
@@ -398,6 +384,21 @@ function cancelEdit() {
   selectedId.value = null
 }
 
+function handleCardClick(id) {
+  personaStore.switchPersona(id)
+  selectPersona(id)
+}
+
+const currentPersonaName = computed(() => {
+  const p = personas.value.find(x => x.id === personaStore.current)
+  return p ? p.name : personaStore.current
+})
+
+async function resetToDefault() {
+  if (!form.value || !selectedId.value) return
+  await resetPersona(selectedId.value)
+}
+
 const defaultPersonaValues = {
   id: 'default',
   name: '默认助手',
@@ -535,6 +536,13 @@ async function importTheme(e) {
 }
 
 /* Persona cards */
+.current-persona-label {
+  font-size: 14px;
+  color: var(--primary);
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+
 .persona-header {
   display: flex;
   align-items: center;
@@ -568,6 +576,15 @@ async function importTheme(e) {
 .persona-card.selected {
   border-color: var(--primary);
   box-shadow: 0 0 0 2px rgba(124, 92, 252, 0.2);
+}
+.persona-card.current {
+  border-color: #7c5cfc;
+  box-shadow: 0 0 0 2px rgba(124, 92, 252, 0.3);
+}
+.current-badge {
+  color: #7c5cfc;
+  font-weight: 700;
+  margin-left: 4px;
 }
 .card-name {
   font-size: 14px;

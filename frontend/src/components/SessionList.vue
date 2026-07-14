@@ -2,7 +2,7 @@
   <div class="session-panel">
     <div class="session-header">
       <span>对话</span>
-      <button @click="showNewDialog = true" class="new-btn">+</button>
+      <button @click="handleNew" class="new-btn">+</button>
     </div>
 
     <div class="session-items">
@@ -44,49 +44,8 @@
       <div v-if="Object.keys(groupedSessions).length === 0" class="empty">暂无对话</div>
     </div>
 
-    <!-- 新建对话弹窗 -->
-    <div v-if="showNewDialog" class="modal-overlay" @click.self="showNewDialog = false">
-      <div class="modal">
-        <div class="modal-title">新建对话</div>
-
-        <div class="modal-section">
-          <div class="modal-label">选择角色</div>
-          <div class="modal-grid">
-            <div
-              v-for="p in personaStore.personas"
-              :key="p.id"
-              class="modal-card"
-              :class="{ selected: newPersona === p.id }"
-              @click="newPersona = p.id"
-            >
-              <div class="card-name">{{ p.name }}</div>
-              <div class="card-desc">{{ p.description }}</div>
-            </div>
-          </div>
-        </div>
-
-        <div class="modal-section">
-          <div class="modal-label">选择主题</div>
-          <div class="modal-grid theme-grid">
-            <div
-              v-for="t in themeStore.themes"
-              :key="t.id"
-              class="modal-card theme-mini"
-              :class="{ selected: newTheme === t.id }"
-              @click="newTheme = t.id"
-            >
-              <div class="theme-dot" :style="{ background: previewColors[t.id] || '#888' }"></div>
-              <span>{{ t.name }}</span>
-            </div>
-          </div>
-        </div>
-
-        <div class="modal-actions">
-          <button class="btn-cancel" @click="showNewDialog = false">取消</button>
-          <button class="btn-create" @click="createWithSelection">创建</button>
-        </div>
-      </div>
-    </div>
+    <!-- 创建向导 -->
+    <CreationWizard ref="wizardRef" @complete="onWizardComplete" />
   </div>
 </template>
 
@@ -96,6 +55,7 @@ import { useSessionStore } from '../stores/session'
 import { useChatStore } from '../stores/chat'
 import { usePersonaStore } from '../stores/persona'
 import { useThemeStore } from '../stores/theme'
+import CreationWizard from './CreationWizard.vue'
 
 const sessionStore = useSessionStore()
 const chatStore = useChatStore()
@@ -104,12 +64,8 @@ const themeStore = useThemeStore()
 
 const renamingId = ref('')
 const newName = ref('')
-const showNewDialog = ref(false)
-const newPersona = ref('default')
-const newTheme = ref('default')
 const collapsedGroups = reactive({})
-
-const previewColors = { default: '#7c5cfc', miku: '#39C5BB' }
+const wizardRef = ref(null)
 
 const groupedSessions = computed(() => {
   const groups = {}
@@ -130,23 +86,24 @@ function toggleGroup(persona) {
   collapsedGroups[persona] = !collapsedGroups[persona]
 }
 
+function handleNew() {
+  wizardRef.value.show()
+}
+
+async function onWizardComplete({ personaId, themeId }) {
+  personaStore.switchPersona(personaId)
+  if (themeId !== themeStore.current) {
+    await themeStore.applyTheme(themeId)
+  }
+  await sessionStore.createSession()
+  chatStore.clearMessages()
+}
+
 onMounted(() => {
   sessionStore.fetchSessions()
   personaStore.fetchPersonas()
   themeStore.fetchThemes()
 })
-
-async function createWithSelection() {
-  showNewDialog.value = false
-  personaStore.switchPersona(newPersona.value)
-  if (newTheme.value !== themeStore.current) {
-    await themeStore.applyTheme(newTheme.value)
-  }
-  await sessionStore.createSession()
-  chatStore.clearMessages()
-  newPersona.value = 'default'
-  newTheme.value = 'default'
-}
 
 async function handleSwitch(id) {
   sessionStore.switchSession(id)
@@ -274,49 +231,4 @@ async function confirmRename(id) {
   border-radius: 4px; padding: 4px 6px; outline: none;
 }
 .empty { padding: 20px; text-align: center; color: var(--text-secondary); font-size: 13px; }
-
-/* 新建对话弹窗 */
-.modal-overlay {
-  position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(0,0,0,0.6); z-index: 100;
-  display: flex; align-items: center; justify-content: center;
-}
-.modal {
-  background: var(--bg-secondary); border: 1px solid var(--border);
-  border-radius: 12px; padding: 20px; width: 380px; max-height: 80vh;
-  overflow-y: auto;
-}
-.modal-title {
-  font-size: 16px; font-weight: 700; color: var(--text-primary);
-  margin-bottom: 16px; text-align: center;
-}
-.modal-section { margin-bottom: 16px; }
-.modal-label { font-size: 12px; color: var(--text-secondary); margin-bottom: 8px; }
-.modal-grid { display: flex; flex-direction: column; gap: 6px; }
-.modal-card {
-  padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px;
-  cursor: pointer; transition: all 0.15s;
-}
-.modal-card:hover { border-color: var(--primary); }
-.modal-card.selected { background: var(--primary); border-color: var(--primary); }
-.modal-card.selected .card-desc { color: rgba(255,255,255,0.7); }
-.card-name { font-size: 13px; font-weight: 600; color: var(--text-primary); }
-.card-desc { font-size: 11px; color: var(--text-secondary); margin-top: 1px; }
-.theme-grid { flex-direction: row; flex-wrap: wrap; gap: 8px; }
-.theme-mini {
-  display: flex; align-items: center; gap: 6px;
-  padding: 6px 12px; min-width: auto;
-}
-.theme-dot { width: 12px; height: 12px; border-radius: 50%; }
-.modal-actions { display: flex; gap: 10px; margin-top: 16px; }
-.btn-cancel {
-  flex: 1; padding: 8px; background: transparent;
-  border: 1px solid var(--border); border-radius: 6px;
-  color: var(--text-secondary); cursor: pointer; font-size: 13px;
-}
-.btn-cancel:hover { border-color: var(--primary); color: var(--text-primary); }
-.btn-create {
-  flex: 1; padding: 8px; background: var(--primary);
-  border: none; border-radius: 6px; color: white; cursor: pointer; font-size: 13px;
-}
 </style>
