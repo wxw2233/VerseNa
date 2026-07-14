@@ -37,13 +37,23 @@ async def websocket_chat(ws: WebSocket):
             emotion = persona_manager.get_emotion_engine(persona_name)
             emotion_state = emotion.pick_emotion()
 
-            async for event in agent.run(session_id, content, system_prompt=system_prompt, tools=tool_registry.get_tools(), persona=persona_name):
-                await ws.send_text(json.dumps(event, ensure_ascii=False))
+            try:
+                async for event in agent.run(session_id, content, system_prompt=system_prompt, tools=tool_registry.get_tools(), persona=persona_name):
+                    await ws.send_text(json.dumps(event, ensure_ascii=False))
+            except Exception as e:
+                try:
+                    await ws.send_text(json.dumps({"type": "error", "content": str(e)}, ensure_ascii=False))
+                except:
+                    pass
 
-            done_msg = {"type": "done", "emotion": emotion_state.primary, "emoji": emotion_state.emoji}
-            await ws.send_text(json.dumps(done_msg))
+            # 确保 done 消息总是发送
+            try:
+                done_msg = {"type": "done", "emotion": emotion_state.primary, "emoji": emotion_state.emoji}
+                await ws.send_text(json.dumps(done_msg))
+            except:
+                pass
 
     except WebSocketDisconnect:
         pass
-    except Exception as e:
-        await ws.send_text(json.dumps({"type": "error", "content": str(e)}))
+    except Exception:
+        pass

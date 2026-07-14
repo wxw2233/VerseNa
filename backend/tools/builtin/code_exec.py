@@ -1,13 +1,14 @@
+import asyncio
 import subprocess
 from tools.base import BaseTool
 
 class CodeExecTool(BaseTool):
     name = "code_exec"
-    description = "执行 Python 代码并返回输出"
+    description = "执行 Python 代码或 shell 命令并返回输出"
     parameters = {
         "type": "object",
         "properties": {
-            "code": {"type": "string", "description": "要执行的 Python 代码"}
+            "code": {"type": "string", "description": "要执行的 Python 代码或 shell 命令"}
         },
         "required": ["code"]
     }
@@ -20,24 +21,47 @@ class CodeExecTool(BaseTool):
         code = code.strip()
         if code.startswith("```python"):
             code = code[9:]
+        elif code.startswith("```bash"):
+            code = code[7:]
         elif code.startswith("```"):
             code = code[3:]
         if code.endswith("```"):
             code = code[:-3]
         code = code.strip()
 
+        # 检测是否是 shell 命令（非 Python 语法）
+        is_shell = any(code.startswith(cmd) for cmd in [
+            'git ', 'pip ', 'npm ', 'cd ', 'mkdir ', 'rm ', 'cp ', 'mv ',
+            'ls ', 'dir ', 'cat ', 'echo ', 'curl ', 'wget ', 'apt ',
+            'sudo ', 'docker ', 'python ', 'node ',
+        ])
+
         try:
-            result = subprocess.run(
-                ["python", "-c", code],
-                capture_output=True, text=True, timeout=15,
-                encoding="utf-8", errors="replace"
-            )
+            loop = asyncio.get_event_loop()
+            if is_shell:
+                result = await loop.run_in_executor(
+                    None,
+                    lambda: subprocess.run(
+                        code, shell=True,
+                        capture_output=True, text=True, timeout=120,
+                        encoding="utf-8", errors="replace"
+                    )
+                )
+            else:
+                result = await loop.run_in_executor(
+                    None,
+                    lambda: subprocess.run(
+                        ["python", "-c", code],
+                        capture_output=True, text=True, timeout=30,
+                        encoding="utf-8", errors="replace"
+                    )
+                )
             output = result.stdout + result.stderr
             if result.returncode != 0 and output.strip():
-                return f"执行错误 (exit {result.returncode}):\n{output[:2000]}"
-            return output[:2000] or "(无输出)"
+                return f"执行错误 (exit {result.returncode}):\n{output[:3000]}"
+            return output[:3000] or "(无输出)"
         except subprocess.TimeoutExpired:
-            return "执行超时（15秒）"
+            return "执行超时（Python 代码 30 秒 / Shell 命令 120 秒）"
         except FileNotFoundError:
             return "错误：找不到 python 命令"
         except Exception as e:
