@@ -34,7 +34,7 @@
               <div class="session-name">{{ s.id }}</div>
               <div class="session-meta">{{ s.msg_count }}条</div>
               <div class="session-actions">
-                <button class="action-btn" @click.stop="startRename(s.id)" title="重命名">✏️</button>
+                <button class="action-btn" @click.stop="startEdit(s)" title="编辑">✏️</button>
                 <button class="action-btn delete" @click.stop="handleDelete(s.id)" title="删除">×</button>
               </div>
             </template>
@@ -44,8 +44,41 @@
       <div v-if="Object.keys(groupedSessions).length === 0" class="empty">暂无对话</div>
     </div>
 
-    <!-- 创建向导 -->
-    <CreationWizard ref="wizardRef" @complete="onWizardComplete" />
+    <!-- 新建会话：选择主题包 -->
+    <div v-if="showNewDialog" class="modal-overlay" @click.self="showNewDialog = false">
+      <div class="modal">
+        <div class="modal-title">选择主题包</div>
+        <div class="pack-list">
+          <div v-for="pack in themepacks" :key="pack.id" class="pack-card" @click="createWithPack(pack.id)">
+            <div class="pack-name">{{ pack.name }}</div>
+            <div class="pack-info">角色: {{ pack.persona_ref || '默认' }} | 主题: {{ pack.theme_ref || '默认' }}</div>
+          </div>
+        </div>
+        <button class="btn-cancel" @click="showNewDialog = false">取消</button>
+      </div>
+    </div>
+
+    <!-- 编辑会话：重命名 + 更改主题包 -->
+    <div v-if="showEditDialog" class="modal-overlay" @click.self="showEditDialog = false">
+      <div class="modal">
+        <div class="modal-title">编辑会话</div>
+        <div class="edit-field">
+          <label>会话名称</label>
+          <input v-model="editName" class="rename-input" placeholder="会话名称" />
+        </div>
+        <div class="edit-field">
+          <label>主题包</label>
+          <select v-model="editPackId" class="pack-select">
+            <option value="">无主题包</option>
+            <option v-for="pack in themepacks" :key="pack.id" :value="pack.id">{{ pack.name }}</option>
+          </select>
+        </div>
+        <div class="modal-actions">
+          <button class="btn-cancel" @click="showEditDialog = false">取消</button>
+          <button class="btn-save" @click="saveEdit">保存</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -55,7 +88,6 @@ import { useSessionStore } from '../stores/session'
 import { useChatStore } from '../stores/chat'
 import { usePersonaStore } from '../stores/persona'
 import { useThemeStore } from '../stores/theme'
-import CreationWizard from './CreationWizard.vue'
 
 const sessionStore = useSessionStore()
 const chatStore = useChatStore()
@@ -75,7 +107,12 @@ const sidebarBgStyle = computed(() => {
 const renamingId = ref('')
 const newName = ref('')
 const collapsedGroups = reactive({})
-const wizardRef = ref(null)
+const showNewDialog = ref(false)
+const showEditDialog = ref(false)
+const themepacks = ref([])
+const editSessionId = ref('')
+const editName = ref('')
+const editPackId = ref('')
 
 const groupedSessions = computed(() => {
   const groups = {}
@@ -96,27 +133,78 @@ function toggleGroup(persona) {
   collapsedGroups[persona] = !collapsedGroups[persona]
 }
 
-function handleNew() {
-  wizardRef.value.show()
+async function fetchThemepacks() {
+  try {
+    const resp = await fetch('/api/themepacks')
+    if (resp.ok) {
+      themepacks.value = await resp.json()
+    }
+  } catch (e) {
+    console.error('Failed to fetch themepacks:', e)
+  }
 }
 
-async function onWizardComplete({ personaId, themeId }) {
-  personaStore.switchPersona(personaId)
-  if (themeId !== themeStore.current) {
-    await themeStore.applyTheme(themeId)
-  }
-  await sessionStore.createSession()
+function handleNew() {
+  fetchThemepacks()
+  showNewDialog.value = true
+}
+
+async function createWithPack(packId) {
+  showNewDialog.value = false
+
+  // 获取主题包详情
+  const packResp = await fetch(`/api/themepacks/${packId}`)
+  const pack = await packResp.json()
+
+  // 应用主题和角色
+  if (pack.theme_ref) themeStore.applyTheme(pack.theme_ref)
+  if (pack.persona_ref) personaStore.switchPersona(pack.persona_ref)
+
+  // 创建会话（传入 theme_pack_id）
+  const resp = await fetch('/api/sessions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ theme_pack_id: packId })
+  })
+  const data = await resp.json()
+  sessionStore.switchSession(data.session_id)
+
+  // 设置元数据
+  await fetch(`/api/sessions/${data.session_id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ theme_pack_id: packId })
+  })
+
   chatStore.clearMessages()
+  await sessionStore.fetchSessions()
 }
 
 onMounted(() => {
   sessionStore.fetchSessions()
   personaStore.fetchPersonas()
   themeStore.fetchThemes()
+  fetchThemepacks()
 })
 
 async function handleSwitch(id) {
   sessionStore.switchSession(id)
+
+  // 获取会话元数据
+  const sessions = sessionStore.sessions
+  const session = sessions.find(s => s.id === id)
+
+  // 如果有绑定的主题包，应用它
+  if (session && session.theme_pack_id && session.theme_pack_id !== 'default_pack') {
+    const packResp = await fetch(`/api/themepacks/${session.theme_pack_id}`)
+    if (packResp.ok) {
+      const pack = await packResp.json()
+      if (pack.theme_ref) themeStore.applyTheme(pack.theme_ref)
+      if (pack.persona_ref) personaStore.switchPersona(pack.persona_ref)
+    }
+  }
+
+  // 加载历史
   const resp = await fetch(`/api/sessions/${id}/history`)
   const history = await resp.json()
   chatStore.clearMessages()
@@ -146,6 +234,31 @@ async function confirmRename(id) {
     await sessionStore.fetchSessions()
   } catch (e) { console.error(e) }
   renamingId.value = ''
+}
+
+function startEdit(session) {
+  editSessionId.value = session.id
+  editName.value = session.id
+  editPackId.value = session.theme_pack_id || ''
+  fetchThemepacks()
+  showEditDialog.value = true
+}
+
+async function saveEdit() {
+  const id = editSessionId.value
+  const name = editName.value.trim()
+  try {
+    await fetch(`/api/sessions/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: name || undefined,
+        theme_pack_id: editPackId.value || null
+      })
+    })
+    await sessionStore.fetchSessions()
+  } catch (e) { console.error(e) }
+  showEditDialog.value = false
 }
 </script>
 
@@ -242,4 +355,55 @@ async function confirmRename(id) {
   border-radius: 4px; padding: 4px 6px; outline: none;
 }
 .empty { padding: 20px; text-align: center; color: var(--text-secondary); font-size: 13px; }
+
+/* 弹窗 */
+.modal-overlay {
+  position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.5); display: flex;
+  align-items: center; justify-content: center; z-index: 100;
+}
+.modal {
+  background: var(--bg-secondary); border-radius: 12px;
+  padding: 20px; width: 340px; max-height: 70vh; overflow-y: auto;
+  border: 1px solid var(--border);
+}
+.modal-title {
+  font-size: 16px; font-weight: 600; color: var(--text-primary);
+  margin-bottom: 16px; text-align: center;
+}
+.pack-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+.pack-card {
+  background: var(--bg-primary); border: 1px solid var(--border);
+  border-radius: 8px; padding: 12px; cursor: pointer; transition: all 0.15s;
+}
+.pack-card:hover {
+  border-color: var(--primary); background: rgba(124, 92, 252, 0.08);
+}
+.pack-name { font-size: 14px; font-weight: 600; color: var(--text-primary); }
+.pack-info { font-size: 11px; color: var(--text-secondary); margin-top: 4px; }
+.btn-cancel, .btn-save {
+  padding: 6px 16px; border-radius: 6px; cursor: pointer;
+  font-size: 13px; border: none;
+}
+.btn-cancel {
+  background: var(--bg-primary); color: var(--text-secondary);
+  border: 1px solid var(--border);
+}
+.btn-save {
+  background: var(--primary); color: white;
+}
+.btn-cancel:hover { background: rgba(255,255,255,0.05); }
+.btn-save:hover { opacity: 0.9; }
+.edit-field { margin-bottom: 12px; }
+.edit-field label {
+  display: block; font-size: 12px; color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+.pack-select {
+  width: 100%; font-size: 13px; color: var(--text-primary);
+  background: var(--bg-primary); border: 1px solid var(--border);
+  border-radius: 4px; padding: 6px 8px; outline: none;
+}
+.pack-select:focus { border-color: var(--primary); }
+.modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 </style>
