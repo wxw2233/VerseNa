@@ -124,14 +124,28 @@
         <ThemeSwitcher />
         <ThemeCreator />
         <AssetUploader />
+      </div>
 
-        <hr class="divider" />
-        <h3>主题包</h3>
+      <!-- 主题包 (Theme Pack) -->
+      <div v-if="activeTab === 'themepack'" class="tab-content">
+        <h2>主题包</h2>
         <p class="hint">导出/导入完整主题包（包含颜色、素材、角色配置）</p>
+        <div class="themepack-grid">
+          <div v-for="t in themes" :key="t.id" class="themepack-card" :class="{ active: themeStore.current === t.id }">
+            <div class="themepack-preview" :style="{ background: t.colors?.primary || '#7c5cfc' }"></div>
+            <div class="themepack-info">
+              <div class="themepack-name">{{ t.name }}</div>
+              <div class="themepack-id">{{ t.id }}</div>
+            </div>
+            <div class="themepack-actions">
+              <button class="btn-sm" @click="exportTheme(t.id)" title="导出">📦</button>
+              <button class="btn-sm" @click="themeStore.applyTheme(t.id)" title="应用">✓</button>
+            </div>
+          </div>
+        </div>
         <div class="package-actions">
-          <button class="btn-action" @click="exportTheme">导出当前主题包</button>
           <label class="btn-action">
-            导入主题包
+            导入主题包（zip）
             <input type="file" accept=".zip" @change="importTheme" style="display:none" />
           </label>
         </div>
@@ -216,6 +230,7 @@ const activeTab = ref('persona')
 
 const menuItems = [
   { id: 'persona', icon: '🎭', label: '次元设置' },
+  { id: 'themepack', icon: '📦', label: '主题包' },
   { id: 'model', icon: '🤖', label: '模型配置' },
   { id: 'channel', icon: '📡', label: '通道管理' },
   { id: 'plugin', icon: '🔌', label: '插件管理' },
@@ -272,7 +287,7 @@ async function loadThemes() {
     const resp = await fetch('/api/themes')
     const data = await resp.json()
     if (Array.isArray(data)) {
-      themes.value = data.map(t => typeof t === 'string' ? t : t.id)
+      themes.value = data.map(t => typeof t === 'string' ? { id: t, name: t } : t)
     } else if (data.themes) {
       themes.value = data.themes
     } else {
@@ -426,8 +441,7 @@ async function resetPersona(id) {
   }
 }
 
-async function exportTheme() {
-  const themeId = themeStore.current
+async function exportTheme(themeId) {
   const resp = await fetch(`/api/themes/${themeId}/export`)
   if (resp.ok) {
     const blob = await resp.blob()
@@ -826,4 +840,34 @@ legend {
   border-color: var(--primary);
   color: var(--primary);
 }
+.themepack-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.themepack-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  transition: all 0.15s;
+}
+.themepack-card:hover { border-color: var(--primary); }
+.themepack-card.active { border-color: var(--primary); background: rgba(124,92,252,0.08); }
+.themepack-preview {
+  width: 36px; height: 36px; border-radius: 8px; flex-shrink: 0;
+}
+.themepack-info { flex: 1; min-width: 0; }
+.themepack-name { font-size: 14px; font-weight: 600; color: var(--text-primary); }
+.themepack-id { font-size: 11px; color: var(--text-secondary); }
+.themepack-actions { display: flex; gap: 4px; }
+.btn-sm {
+  width: 32px; height: 32px;
+  background: transparent; border: 1px solid var(--border); border-radius: 6px;
+  cursor: pointer; font-size: 14px; display: flex; align-items: center; justify-content: center;
+}
+.btn-sm:hover { border-color: var(--primary); }
 </style>

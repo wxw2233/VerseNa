@@ -5,6 +5,7 @@ export const useChatStore = defineStore('chat', () => {
   const messages = ref([])
   const isStreaming = ref(false)
   const currentPersona = ref('default')
+  const bgOpacity = ref(0.3)
 
   function addUserMessage(content) {
     messages.value.push({ role: 'user', content, persona: currentPersona.value })
@@ -29,5 +30,5 @@ export const useChatStore = defineStore('chat', () => {
     messages.value = []
   }
 
-  return { messages, isStreaming, currentPersona, addUserMessage, appendAgentChunk, finishStreaming, clearMessages }
+  return { messages, isStreaming, currentPersona, bgOpacity, addUserMessage, appendAgentChunk, finishStreaming, clearMessages }
 })

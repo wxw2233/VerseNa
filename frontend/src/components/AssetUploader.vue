@@ -14,8 +14,8 @@
         <button v-if="assets.bg" class="remove-btn" @click="removeAsset('bg')">移除</button>
         <div v-if="assets.bg" class="opacity-control">
           <label>不透明度</label>
-          <input type="range" min="0" max="1" step="0.1" v-model.number="bgOpacity" @input="applyBgOpacity" />
-          <span>{{ (bgOpacity * 100).toFixed(0) }}%</span>
+          <input type="range" min="0" max="1" step="0.1" v-model.number="chatStore.bgOpacity" />
+          <span>{{ (chatStore.bgOpacity * 100).toFixed(0) }}%</span>
         </div>
       </div>
 
@@ -65,9 +65,10 @@
 <script setup>
 import { ref, reactive, onMounted, watch } from 'vue'
 import { useThemeStore } from '../stores/theme'
+import { useChatStore } from '../stores/chat'
 
 const themeStore = useThemeStore()
-const bgOpacity = ref(0.3)
+const chatStore = useChatStore()
 
 const assets = reactive({
   bg: '',
@@ -134,16 +135,6 @@ async function removeAsset(type) {
   if (!confirm('确定移除这个素材？')) return
   await fetch(`/api/themes/${themeStore.current}/assets/${assetFileMap[type]}`, { method: 'DELETE' }).catch(() => {})
   assets[type] = ''
-}
-
-function applyBgOpacity() {
-  let el = document.getElementById('bg-opacity-style')
-  if (!el) {
-    el = document.createElement('style')
-    el.id = 'bg-opacity-style'
-    document.head.appendChild(el)
-  }
-  el.textContent = `.chat-main::before { opacity: ${bgOpacity.value}; }`
 }
 </script>
 

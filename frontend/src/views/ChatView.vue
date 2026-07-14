@@ -1,7 +1,8 @@
 <template>
   <div class="chat-view">
     <SessionList />
-    <div class="chat-main" :style="bgStyle">
+    <div class="chat-main">
+      <div class="bg-layer" :style="bgStyle"></div>
       <div class="messages" ref="messagesRef">
         <ChatBubble v-for="(msg, i) in store.messages" :key="i" :msg="msg" />
         <div v-if="store.messages.length === 0" class="empty">
@@ -39,6 +40,7 @@ const bgStyle = computed(() => {
     backgroundSize: 'cover',
     backgroundPosition: 'center',
     backgroundRepeat: 'no-repeat',
+    opacity: store.bgOpacity ?? 0.3,
   }
 })
 
@@ -86,6 +88,13 @@ function handleSend(content) {
   flex-direction: column;
   min-width: 0;
   position: relative;
+  overflow: hidden;
+}
+.bg-layer {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  z-index: 0;
+  pointer-events: none;
 }
 .messages {
   flex: 1;
@@ -93,6 +102,8 @@ function handleSend(content) {
   padding: 16px 20px;
   display: flex;
   flex-direction: column;
+  position: relative;
+  z-index: 1;
 }
 .empty {
   margin: auto;
