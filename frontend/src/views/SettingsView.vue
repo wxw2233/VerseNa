@@ -737,6 +737,15 @@ legend {
   cursor: pointer;
   font-size: 14px;
 }
+.btn-reset {
+  padding: 10px 28px;
+  background: #f39c12;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+}
 .btn-cancel {
   padding: 10px 28px;
   background: transparent;
