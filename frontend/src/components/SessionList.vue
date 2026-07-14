@@ -1,5 +1,5 @@
 <template>
-  <div class="session-panel">
+  <div class="session-panel" :style="sidebarBgStyle">
     <div class="session-header">
       <span>对话</span>
       <button @click="handleNew" class="new-btn">+</button>
@@ -61,6 +61,16 @@ const sessionStore = useSessionStore()
 const chatStore = useChatStore()
 const personaStore = usePersonaStore()
 const themeStore = useThemeStore()
+
+const themeId = computed(() => themeStore.current)
+
+const sidebarBgStyle = computed(() => {
+  return {
+    backgroundImage: `url(/api/themes/${themeId.value}/assets/sidebar-bg.png)`,
+    backgroundSize: 'cover',
+    backgroundPosition: 'center',
+  }
+})
 
 const renamingId = ref('')
 const newName = ref('')
@@ -202,6 +212,7 @@ async function confirmRename(id) {
   cursor: pointer;
   position: relative;
   transition: background 0.15s;
+  border-bottom: 1px solid var(--border);
 }
 .session-item:hover { background: rgba(255,255,255,0.03); }
 .session-item.active {

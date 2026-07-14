@@ -1,18 +1,40 @@
 <template>
-  <div class="input-bar">
+  <div class="input-bar" :style="inputBgStyle">
     <input type="file" ref="fileInput" style="display:none" @change="handleFile" />
     <button class="attach-btn" @click="$refs.fileInput.click()">📎</button>
     <textarea v-model="text" @keydown.enter.exact.prevent="send" placeholder="输入消息... (Enter 发送)" rows="1" ref="textareaRef"></textarea>
-    <button @click="send" :disabled="!text.trim()">发送</button>
+    <button @click="send" :disabled="!text.trim()" :style="sendBtnStyle">发送</button>
   </div>
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
+import { useThemeStore } from '../stores/theme'
+
 const emit = defineEmits(['send'])
 const text = ref('')
 const textareaRef = ref(null)
 const fileInput = ref(null)
+
+const themeStore = useThemeStore()
+const themeId = computed(() => themeStore.current)
+
+const inputBgStyle = computed(() => {
+  return {
+    backgroundImage: `url(/api/themes/${themeId.value}/assets/input-bg.png)`,
+    backgroundSize: 'cover',
+    backgroundPosition: 'center',
+  }
+})
+
+const sendBtnStyle = computed(() => {
+  return {
+    backgroundImage: `url(/api/themes/${themeId.value}/assets/send-btn.png)`,
+    backgroundSize: 'contain',
+    backgroundRepeat: 'no-repeat',
+    backgroundPosition: 'center',
+  }
+})
 
 function send() {
   if (text.value.trim()) {
