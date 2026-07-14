@@ -459,13 +459,14 @@ async function openEditor(packId) {
 }
 
 async function createNewPack() {
-  const name = prompt('请输入主题包名称')
+  const name = window.prompt('请输入主题包名称')
   if (!name) return
+  const id = name.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]/g, '_').replace(/_+/g, '_').slice(0, 32) || 'pack_' + Date.now()
   try {
     const resp = await fetch('/api/themepacks', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name })
+      body: JSON.stringify({ id, name })
     })
     if (resp.ok) {
       const data = await resp.json()
