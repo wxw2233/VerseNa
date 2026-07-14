@@ -16,7 +16,7 @@
 </template>
 
 <script setup>
-import { ref, computed, nextTick, onMounted } from 'vue'
+import { ref, computed, nextTick, onMounted, watch } from 'vue'
 import { useChatStore } from '../stores/chat'
 import { useWebSocket } from '../composables/useWebSocket'
 import { usePersonaStore } from '../stores/persona'
@@ -44,8 +44,21 @@ const bgStyle = computed(() => {
   }
 })
 
+function scrollToBottom() {
+  nextTick(() => {
+    if (messagesRef.value) {
+      messagesRef.value.scrollTop = messagesRef.value.scrollHeight
+    }
+  })
+}
+
+// 消息变化时自动滚到底部
+watch(() => store.messages.length, () => scrollToBottom())
+
+// 组件挂载时滚到底部
 onMounted(() => {
   connect()
+  scrollToBottom()
   onMessage.value = (msg) => {
     if (msg.type === 'answer') {
       store.appendAgentChunk(msg.content)
@@ -59,15 +72,14 @@ onMounted(() => {
       store.appendAgentChunk(`\n[错误] ${msg.content}`)
       store.finishStreaming()
     }
-    nextTick(() => {
-      if (messagesRef.value) messagesRef.value.scrollTop = messagesRef.value.scrollHeight
-    })
+    scrollToBottom()
   }
 })
 
 function handleSend(content) {
   store.addUserMessage(content)
   store.isStreaming = true
+  scrollToBottom()
   send({
     session_id: sessionStore.currentSessionId,
     content,
