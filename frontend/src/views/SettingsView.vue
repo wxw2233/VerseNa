@@ -16,121 +16,183 @@
 
     <!-- Content Area -->
     <section class="content">
-      <!-- 次元设置 (Persona) -->
+      <!-- 次元设置 (Persona) — 以主题包为核心 -->
       <div v-if="activeTab === 'persona'" class="tab-content">
-        <h2>角色管理</h2>
-        <div class="persona-section">
-          <div class="current-persona-label">当前角色：{{ currentPersonaName }} ✓</div>
-          <div class="persona-grid">
-            <div
-              v-for="p in personas"
-              :key="p.id"
-              class="persona-card"
-              :class="{ selected: selectedId === p.id, current: personaStore.current === p.id }"
-              @click="handleCardClick(p.id)"
-            >
-              <div class="card-name">
-                {{ p.name }}
-                <span v-if="personaStore.current === p.id" class="current-badge">✓</span>
+        <h2>次元设置</h2>
+        <button class="btn-new" @click="createNewPack">+ 新建主题包</button>
+
+        <div class="pack-grid">
+          <div
+            v-for="pack in themePacks"
+            :key="pack.id"
+            class="pack-card"
+            :class="{ selected: editingPackId === pack.id }"
+            @click="openEditor(pack.id)"
+          >
+            <div class="pack-preview" :style="{ background: pack.theme?.colors?.primary || '#7c5cfc' }"></div>
+            <div class="pack-info">
+              <div class="pack-name">{{ pack.name || pack.id }}</div>
+              <div class="pack-meta">
+                <span v-if="pack.character?.name">🎭 {{ pack.character.name }}</span>
+                <span v-if="pack.theme?.name">🎨 {{ pack.theme.name }}</span>
               </div>
-              <div class="card-desc">{{ p.description || '—' }}</div>
             </div>
           </div>
-          <div v-if="personas.length === 0" class="empty-hint">暂无角色</div>
+          <div v-if="themePacks.length === 0" class="empty-hint">暂无主题包，点击上方按钮创建</div>
         </div>
 
         <!-- Inline Editor -->
-        <div v-if="selectedId && form" class="persona-editor-inline">
-          <h3>编辑角色 — {{ form.name }}</h3>
-          <div class="form-group">
-            <label>名称</label>
-            <input v-model="form.name" placeholder="角色显示名" />
+        <div v-if="editingPackId && editingPack" class="pack-editor">
+          <h3>编辑主题包：{{ editingPack.name || editingPackId }}</h3>
+
+          <div class="editor-tabs">
+            <button
+              v-for="tab in editorTabs"
+              :key="tab.id"
+              class="tab-btn"
+              :class="{ active: editorTab === tab.id }"
+              @click="editorTab = tab.id"
+            >{{ tab.icon }} {{ tab.label }}</button>
           </div>
-          <div class="form-group">
-            <label>描述</label>
-            <input v-model="form.description" placeholder="一句话简介" />
-          </div>
-          <div class="form-group">
-            <label>人设 Prompt</label>
-            <textarea v-model="form.prompt" rows="5" placeholder="角色的系统提示词……"></textarea>
-          </div>
-          <fieldset class="form-group">
-            <legend>情感权重</legend>
-            <div v-for="key in emotionKeys" :key="key" class="slider-row">
-              <span class="slider-label">{{ emotionLabels[key] }}</span>
-              <input type="range" min="0" max="1" step="0.1" v-model.number="form.emotion_weights[key]" />
-              <span class="slider-val">{{ form.emotion_weights[key].toFixed(1) }}</span>
-            </div>
-          </fieldset>
-          <fieldset class="form-group">
-            <legend>说话风格</legend>
+
+          <!-- 角色标签 -->
+          <div v-if="editorTab === 'character'" class="tab-panel">
             <div class="form-group">
-              <label>语气</label>
-              <input v-model="form.speech_style.tone" placeholder="如：活泼、温柔、冷酷" />
+              <label>角色名称</label>
+              <input v-model="editingPack.character.name" placeholder="角色显示名" />
             </div>
             <div class="form-group">
-              <label>口头禅</label>
-              <input v-model="form.speech_style.catchphrase" placeholder="如：だよね～" />
+              <label>描述</label>
+              <input v-model="editingPack.character.description" placeholder="一句话简介" />
             </div>
             <div class="form-group">
-              <label>表情频率</label>
-              <select v-model="form.speech_style.emoji_frequency">
-                <option value="low">低</option>
-                <option value="medium">中</option>
-                <option value="high">高</option>
-              </select>
+              <label>人设 Prompt</label>
+              <textarea v-model="editingPack.character.prompt" rows="5" placeholder="角色的系统提示词……"></textarea>
             </div>
-            <div class="form-group">
-              <label>正式度</label>
-              <select v-model="form.speech_style.formality">
-                <option value="casual">随意</option>
-                <option value="polite">礼貌</option>
-                <option value="formal">正式</option>
-              </select>
-            </div>
-          </fieldset>
-          <div class="form-group">
-            <label>主题绑定</label>
-            <select v-model="form.theme_binding">
-              <option value="default">default</option>
-              <option v-for="t in themes" :key="t" :value="t">{{ t }}</option>
-            </select>
+            <fieldset class="form-group">
+              <legend>情感权重</legend>
+              <div v-for="key in emotionKeys" :key="key" class="slider-row">
+                <span class="slider-label">{{ emotionLabels[key] }}</span>
+                <input type="range" min="0" max="1" step="0.1" v-model.number="editingPack.character.emotion_weights[key]" />
+                <span class="slider-val">{{ (editingPack.character.emotion_weights[key] ?? 0).toFixed(1) }}</span>
+              </div>
+            </fieldset>
+            <fieldset class="form-group">
+              <legend>说话风格</legend>
+              <div class="form-group">
+                <label>语气</label>
+                <input v-model="editingPack.character.speech_style.tone" placeholder="如：活泼、温柔、冷酷" />
+              </div>
+              <div class="form-group">
+                <label>口头禅</label>
+                <input v-model="editingPack.character.speech_style.catchphrase" placeholder="如：だよね～" />
+              </div>
+              <div class="form-group">
+                <label>表情频率</label>
+                <select v-model="editingPack.character.speech_style.emoji_frequency">
+                  <option value="low">低</option>
+                  <option value="medium">中</option>
+                  <option value="high">高</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>正式度</label>
+                <select v-model="editingPack.character.speech_style.formality">
+                  <option value="casual">随意</option>
+                  <option value="polite">礼貌</option>
+                  <option value="formal">正式</option>
+                </select>
+              </div>
+            </fieldset>
           </div>
+
+          <!-- 主题标签 -->
+          <div v-if="editorTab === 'theme'" class="tab-panel">
+            <div class="sub-tab-bar">
+              <button
+                v-for="st in themeSubTabs"
+                :key="st.id"
+                class="sub-tab-btn"
+                :class="{ active: themeSubTab === st.id }"
+                @click="themeSubTab = st.id"
+              >{{ st.icon }} {{ st.label }}</button>
+            </div>
+
+            <!-- 颜色子标签 -->
+            <div v-if="themeSubTab === 'colors'" class="sub-panel">
+              <div class="color-grid">
+                <div class="color-item" v-for="c in colorDefs" :key="c.var">
+                  <label>{{ c.label }}</label>
+                  <div class="color-input">
+                    <input type="color" :value="toHex(editingPack.theme.colors[c.var])" @input="onColorChange(c.var, $event.target.value)" />
+                    <span class="color-val">{{ editingPack.theme.colors[c.var] }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 字体子标签 -->
+            <div v-if="themeSubTab === 'fonts'" class="sub-panel">
+              <div class="param-row">
+                <label>字体族</label>
+                <select v-model="editingPack.theme.fonts.family">
+                  <option v-for="f in fontFamilies" :key="f.value" :value="f.value">{{ f.label }}</option>
+                </select>
+              </div>
+              <div class="param-row"><label>正文字号 <span class="val-badge">{{ editingPack.theme.fonts.sizeBase }}px</span></label><input type="range" min="12" max="20" step="1" v-model.number="editingPack.theme.fonts.sizeBase" /></div>
+              <div class="param-row"><label>小字字号 <span class="val-badge">{{ editingPack.theme.fonts.sizeSmall }}px</span></label><input type="range" min="10" max="16" step="1" v-model.number="editingPack.theme.fonts.sizeSmall" /></div>
+              <div class="param-row"><label>行高 <span class="val-badge">{{ editingPack.theme.fonts.lineHeight.toFixed(1) }}</span></label><input type="range" min="1.2" max="2.0" step="0.1" v-model.number="editingPack.theme.fonts.lineHeight" /></div>
+            </div>
+
+            <!-- 间距子标签 -->
+            <div v-if="themeSubTab === 'spacing'" class="sub-panel">
+              <div class="param-row"><label>气泡圆角 <span class="val-badge">{{ editingPack.theme.spacing.bubbleRadius }}px</span></label><input type="range" min="0" max="24" step="1" v-model.number="editingPack.theme.spacing.bubbleRadius" /></div>
+              <div class="param-row"><label>气泡内距</label><input type="text" v-model="editingPack.theme.spacing.bubblePadding" placeholder="10px 14px" /></div>
+              <div class="param-row"><label>侧栏宽度 <span class="val-badge">{{ editingPack.theme.spacing.sidebarWidth }}px</span></label><input type="range" min="160" max="320" step="10" v-model.number="editingPack.theme.spacing.sidebarWidth" /></div>
+              <div class="param-row"><label>输入框圆角 <span class="val-badge">{{ editingPack.theme.spacing.inputRadius }}px</span></label><input type="range" min="0" max="16" step="1" v-model.number="editingPack.theme.spacing.inputRadius" /></div>
+            </div>
+          </div>
+
+          <!-- 素材标签 -->
+          <div v-if="editorTab === 'assets'" class="tab-panel">
+            <AssetUploader />
+          </div>
+
           <div class="actions">
-            <button class="btn-save" @click="savePersona">保存</button>
-            <button class="btn-reset" @click="resetToDefault">重置为默认</button>
-            <button v-if="form.id !== 'default'" class="btn-delete" @click="removePersona">删除</button>
+            <button class="btn-save" @click="savePack">保存</button>
+            <button class="btn-cancel" @click="cancelEdit">取消</button>
           </div>
         </div>
-
-        <hr class="divider" />
-        <h3>主题管理</h3>
-        <ThemeSwitcher />
-        <ThemeCreator />
-        <AssetUploader />
       </div>
 
-      <!-- 主题包 (Theme Pack) -->
+      <!-- 主题包管理 (Theme Pack) — 列表+操作 -->
       <div v-if="activeTab === 'themepack'" class="tab-content">
-        <h2>主题包</h2>
-        <p class="hint">导出/导入完整主题包（包含颜色、素材、角色配置）</p>
-        <div class="themepack-grid">
-          <div v-for="t in themes" :key="t.id" class="themepack-card" :class="{ active: themeStore.current === t.id }">
-            <div class="themepack-preview" :style="{ background: t.colors?.primary || '#7c5cfc' }"></div>
-            <div class="themepack-info">
-              <div class="themepack-name">{{ t.name }}</div>
-              <div class="themepack-id">{{ t.id }}</div>
+        <h2>主题包管理</h2>
+        <p class="hint">导出/导入/管理完整主题包（包含颜色、素材、角色配置）</p>
+
+        <div class="tp-grid">
+          <div v-for="pack in themePacks" :key="pack.id" class="tp-card">
+            <div class="tp-preview" :style="{ background: pack.theme?.colors?.primary || '#7c5cfc' }"></div>
+            <div class="tp-info">
+              <div class="tp-name">{{ pack.name || pack.id }}</div>
+              <div class="tp-meta">
+                <span v-if="pack.character?.name">🎭 {{ pack.character.name }}</span>
+                <span v-if="pack.theme?.name">🎨 {{ pack.theme.name }}</span>
+              </div>
             </div>
-            <div class="themepack-actions">
-              <button class="btn-sm" @click="exportTheme(t.id)" title="导出">📦</button>
-              <button class="btn-sm" @click="themeStore.applyTheme(t.id)" title="应用">✓</button>
+            <div class="tp-actions">
+              <button class="btn-sm" @click="exportPack(pack.id)" title="导出">📦</button>
+              <button class="btn-sm" @click="applyPack(pack.id)" title="一键更新关联会话">⚡</button>
+              <button class="btn-sm btn-sm-danger" @click="deletePack(pack.id)" title="删除">🗑</button>
             </div>
           </div>
+          <div v-if="themePacks.length === 0" class="empty-hint">暂无主题包</div>
         </div>
+
         <div class="package-actions">
           <label class="btn-action">
             导入主题包（zip）
-            <input type="file" accept=".zip" @change="importTheme" style="display:none" />
+            <input type="file" accept=".zip" @change="importPack" style="display:none" />
           </label>
         </div>
       </div>
@@ -205,13 +267,13 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useThemeStore } from '../stores/theme'
 import { usePersonaStore } from '../stores/persona'
-import ThemeSwitcher from '../components/ThemeSwitcher.vue'
-import ThemeCreator from '../components/ThemeCreator.vue'
 import AssetUploader from '../components/AssetUploader.vue'
 import PluginManager from '../components/PluginManager.vue'
 import QQBotConfig from '../components/QQBotConfig.vue'
 
 const activeTab = ref('persona')
+const themeStore = useThemeStore()
+const personaStore = usePersonaStore()
 
 const menuItems = [
   { id: 'persona', icon: '🎭', label: '次元设置' },
@@ -224,8 +286,6 @@ const menuItems = [
 ]
 
 // --- Model Config ---
-const themeStore = useThemeStore()
-const personaStore = usePersonaStore()
 const form_model = reactive({ api_key: '', base_url: '', model_name: '' })
 
 onMounted(async () => {
@@ -234,8 +294,7 @@ onMounted(async () => {
   form_model.base_url = data.base_url || ''
   form_model.model_name = data.model_name || ''
   form_model.api_key = data.api_key || ''
-  await loadPersonas()
-  await loadThemes()
+  await loadThemePacks()
 })
 
 async function saveModel() {
@@ -247,11 +306,36 @@ async function saveModel() {
   alert('保存成功')
 }
 
-// --- Persona Editor (from PersonaEditorView) ---
-const personas = ref([])
-const themes = ref([])
-const selectedId = ref(null)
-const form = ref(null)
+// --- Theme Packs (shared between persona & themepack tabs) ---
+const themePacks = ref([])
+
+async function loadThemePacks() {
+  try {
+    const resp = await fetch('/api/themepacks')
+    const data = await resp.json()
+    themePacks.value = Array.isArray(data) ? data : []
+  } catch {
+    themePacks.value = []
+  }
+}
+
+// --- 次元设置 tab: Editor state ---
+const editingPackId = ref(null)
+const editingPack = ref(null)
+const editorTab = ref('character')
+const themeSubTab = ref('colors')
+
+const editorTabs = [
+  { id: 'character', icon: '🎭', label: '角色' },
+  { id: 'theme', icon: '🎨', label: '主题' },
+  { id: 'assets', icon: '🖼', label: '素材' },
+]
+
+const themeSubTabs = [
+  { id: 'colors', icon: '🎨', label: '颜色' },
+  { id: 'fonts', icon: '🔤', label: '字体' },
+  { id: 'spacing', icon: '📐', label: '间距' },
+]
 
 const emotionKeys = ['cheerful', 'shy', 'curious', 'angry', 'sad']
 const emotionLabels = {
@@ -262,189 +346,233 @@ const emotionLabels = {
   sad: '悲伤',
 }
 
-async function loadPersonas() {
-  const resp = await fetch('/api/personas')
-  personas.value = await resp.json()
+// Color definitions (same as ThemeCreator)
+const colorDefs = [
+  { var: '--primary', label: '主色调' },
+  { var: '--bg-primary', label: '主背景' },
+  { var: '--bg-secondary', label: '次背景' },
+  { var: '--text-primary', label: '主文字' },
+  { var: '--text-secondary', label: '次文字' },
+  { var: '--border', label: '边框色' },
+  { var: '--bubble-user', label: '用户气泡' },
+  { var: '--bubble-agent', label: 'Agent气泡' },
+]
+
+const fontFamilies = [
+  { value: "'Noto Sans SC', sans-serif", label: 'Noto Sans SC' },
+  { value: "'Noto Sans JP', sans-serif", label: 'Noto Sans JP' },
+  { value: "system-ui, -apple-system, sans-serif", label: '系统默认' },
+]
+
+function toHex(val) {
+  if (!val) return '#000000'
+  if (val.startsWith('#') && val.length === 7) return val
+  const m = val.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/)
+  if (m) {
+    const r = parseInt(m[1]).toString(16).padStart(2, '0')
+    const g = parseInt(m[2]).toString(16).padStart(2, '0')
+    const b = parseInt(m[3]).toString(16).padStart(2, '0')
+    return '#' + r + g + b
+  }
+  return '#000000'
 }
 
-async function loadThemes() {
+function onColorChange(varName, hexVal) {
+  if (varName === '--bubble-user') {
+    const r = parseInt(hexVal.slice(1, 3), 16)
+    const g = parseInt(hexVal.slice(3, 5), 16)
+    const b = parseInt(hexVal.slice(5, 7), 16)
+    editingPack.value.theme.colors[varName] = 'rgba(' + r + ',' + g + ',' + b + ',0.15)'
+  } else if (varName === '--bubble-agent') {
+    const r = parseInt(hexVal.slice(1, 3), 16)
+    const g = parseInt(hexVal.slice(3, 5), 16)
+    const b = parseInt(hexVal.slice(5, 7), 16)
+    editingPack.value.theme.colors[varName] = 'rgba(' + r + ',' + g + ',' + b + ',0.9)'
+  } else {
+    editingPack.value.theme.colors[varName] = hexVal
+  }
+}
+
+function makeEmptyPack() {
+  return {
+    id: '',
+    name: '',
+    character: {
+      name: '',
+      description: '',
+      prompt: '',
+      emotion_weights: { cheerful: 0.5, shy: 0.2, curious: 0.5, angry: 0.1, sad: 0.1 },
+      speech_style: { tone: '友好', catchphrase: '', emoji_frequency: 'medium', formality: 'casual' },
+    },
+    theme: {
+      name: '',
+      colors: {
+        '--primary': '#7c5cfc',
+        '--bg-primary': '#0f0f1a',
+        '--bg-secondary': '#1a1a2e',
+        '--text-primary': '#e8e8f0',
+        '--text-secondary': '#8888aa',
+        '--border': '#2a2a40',
+        '--bubble-user': 'rgba(124,92,252,0.15)',
+        '--bubble-agent': 'rgba(30,30,50,0.9)',
+      },
+      fonts: { family: "'Noto Sans SC', sans-serif", sizeBase: 14, sizeSmall: 12, lineHeight: 1.6 },
+      spacing: { bubbleRadius: 12, bubblePadding: '10px 14px', sidebarWidth: 220, inputRadius: 8 },
+    },
+  }
+}
+
+function normalizePack(data) {
+  const empty = makeEmptyPack()
+  return {
+    id: data.id || '',
+    name: data.name || data.id || '',
+    character: {
+      name: data.character?.name || '',
+      description: data.character?.description || '',
+      prompt: data.character?.prompt || '',
+      emotion_weights: { ...empty.character.emotion_weights, ...(data.character?.emotion_weights || {}) },
+      speech_style: { ...empty.character.speech_style, ...(data.character?.speech_style || {}) },
+    },
+    theme: {
+      name: data.theme?.name || '',
+      colors: { ...empty.theme.colors, ...(data.theme?.colors || {}) },
+      fonts: { ...empty.theme.fonts, ...(data.theme?.fonts || {}) },
+      spacing: { ...empty.theme.spacing, ...(data.theme?.spacing || {}) },
+    },
+  }
+}
+
+async function openEditor(packId) {
+  editingPackId.value = packId
+  editorTab.value = 'character'
+  themeSubTab.value = 'colors'
   try {
-    const resp = await fetch('/api/themes')
+    const resp = await fetch(`/api/themepacks/${packId}`)
     const data = await resp.json()
-    if (Array.isArray(data)) {
-      themes.value = data.map(t => typeof t === 'string' ? { id: t, name: t } : t)
-    } else if (data.themes) {
-      themes.value = data.themes
-    } else {
-      themes.value = []
-    }
+    editingPack.value = normalizePack(data)
   } catch {
-    themes.value = []
+    // If detail endpoint not available, use list data
+    const pack = themePacks.value.find(p => p.id === packId)
+    editingPack.value = normalizePack(pack || { id: packId })
   }
 }
 
-async function selectPersona(name) {
-  selectedId.value = name
-  const resp = await fetch(`/api/personas/${name}/full`)
-  const data = await resp.json()
-  form.value = {
-    id: data.id,
-    name: data.config.name || '',
-    description: data.config.description || '',
-    prompt: data.prompt || '',
-    emotion_weights: {
-      cheerful: data.config.emotion_weights?.cheerful ?? 0.5,
-      shy: data.config.emotion_weights?.shy ?? 0.2,
-      curious: data.config.emotion_weights?.curious ?? 0.5,
-      angry: data.config.emotion_weights?.angry ?? 0.1,
-      sad: data.config.emotion_weights?.sad ?? 0.1,
-    },
-    speech_style: {
-      tone: data.config.speech_style?.tone ?? '友好',
-      catchphrase: data.config.speech_style?.catchphrase ?? '',
-      emoji_frequency: data.config.speech_style?.emoji_frequency ?? 'medium',
-      formality: data.config.speech_style?.formality ?? 'casual',
-    },
-    theme_binding: data.config.theme_binding ?? 'default',
+async function createNewPack() {
+  const name = prompt('请输入主题包名称')
+  if (!name) return
+  try {
+    const resp = await fetch('/api/themepacks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name })
+    })
+    if (resp.ok) {
+      const data = await resp.json()
+      await loadThemePacks()
+      if (data.id) openEditor(data.id)
+    } else {
+      const err = await resp.json()
+      alert(err.detail || '创建失败')
+    }
+  } catch (e) {
+    alert('创建失败: ' + e.message)
   }
 }
 
-async function savePersona() {
-  if (!form.value.id) { alert('请输入 ID'); return }
-  if (!form.value.name) { alert('请输入名称'); return }
-
-  const body = {
-    id: form.value.id,
-    name: form.value.name,
-    description: form.value.description,
-    prompt: form.value.prompt,
-    emotion_weights: { ...form.value.emotion_weights },
-    speech_style: { ...form.value.speech_style },
-    theme_binding: form.value.theme_binding,
+async function savePack() {
+  if (!editingPackId.value || !editingPack.value) return
+  try {
+    const resp = await fetch(`/api/themepacks/${editingPackId.value}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(editingPack.value)
+    })
+    if (resp.ok) {
+      alert('保存成功')
+      await loadThemePacks()
+    } else {
+      const err = await resp.json()
+      alert(err.detail || '保存失败')
+    }
+  } catch (e) {
+    alert('保存失败: ' + e.message)
   }
-
-  let resp
-  resp = await fetch(`/api/personas/${form.value.id}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  })
-
-  if (!resp.ok) {
-    const err = await resp.json()
-    alert(err.detail || '保存失败')
-    return
-  }
-
-  alert('保存成功')
-  selectedId.value = form.value.id
-  await loadPersonas()
-}
-
-async function removePersona() {
-  if (!confirm(`确定删除角色「${form.value.id}」？`)) return
-  const resp = await fetch(`/api/personas/${form.value.id}`, { method: 'DELETE' })
-  if (!resp.ok) {
-    const err = await resp.json()
-    alert(err.detail || '删除失败')
-    return
-  }
-  form.value = null
-  selectedId.value = null
-  await loadPersonas()
 }
 
 function cancelEdit() {
-  form.value = null
-  selectedId.value = null
+  editingPackId.value = null
+  editingPack.value = null
 }
 
-function handleCardClick(id) {
-  personaStore.switchPersona(id)
-  selectPersona(id)
-}
-
-const currentPersonaName = computed(() => {
-  const p = personas.value.find(x => x.id === personaStore.current)
-  return p ? p.name : personaStore.current
-})
-
-async function resetToDefault() {
-  if (!form.value || !selectedId.value) return
-  await resetPersona(selectedId.value)
-}
-
-const defaultPersonaValues = {
-  id: 'default',
-  name: '默认助手',
-  description: '一个友好的 AI 助手',
-  prompt: '你是一个友好、乐于助人的 AI 助手。',
-  emotion_weights: { cheerful: 0.5, shy: 0.2, curious: 0.5, angry: 0.1, sad: 0.1 },
-  speech_style: { tone: '友好', catchphrase: '', emoji_frequency: 'medium', formality: 'casual' },
-  theme_binding: 'default',
-}
-
-async function resetPersona(id) {
-  if (!confirm(`确定要重置角色「${id}」为默认值？`)) return
-  if (id === 'default') {
-    // Reset default persona to original values
-    const resp = await fetch('/api/personas/default', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(defaultPersonaValues),
-    })
+// --- 主题包管理 tab: Actions ---
+async function exportPack(packId) {
+  try {
+    const resp = await fetch(`/api/themepacks/${packId}/export`)
     if (resp.ok) {
-      form.value = null
-      selectedId.value = null
-      await loadPersonas()
+      const blob = await resp.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${packId}-themepack.zip`
+      a.click()
+      URL.revokeObjectURL(url)
     } else {
-      const err = await resp.json()
-      alert(err.detail || '重置失败')
+      alert('导出失败')
     }
-  } else {
-    // Custom persona: delete and reload
-    const resp = await fetch(`/api/personas/${id}`, { method: 'DELETE' })
-    if (resp.ok) {
-      if (selectedId.value === id) {
-        form.value = null
-        selectedId.value = null
-      }
-      await loadPersonas()
-    } else {
-      const err = await resp.json()
-      alert(err.detail || '重置失败')
-    }
+  } catch (e) {
+    alert('导出失败: ' + e.message)
   }
 }
 
-async function exportTheme(themeId) {
-  const resp = await fetch(`/api/themes/${themeId}/export`)
-  if (resp.ok) {
-    const blob = await resp.blob()
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `${themeId}-theme.zip`
-    a.click()
-    URL.revokeObjectURL(url)
-  } else {
-    alert('导出失败')
+async function deletePack(packId) {
+  if (!confirm(`确定删除主题包「${packId}」？`)) return
+  try {
+    const resp = await fetch(`/api/themepacks/${packId}`, { method: 'DELETE' })
+    if (resp.ok) {
+      await loadThemePacks()
+      if (editingPackId.value === packId) cancelEdit()
+    } else {
+      const err = await resp.json()
+      alert(err.detail || '删除失败')
+    }
+  } catch (e) {
+    alert('删除失败: ' + e.message)
   }
 }
 
-async function importTheme(e) {
+async function applyPack(packId) {
+  if (!confirm(`确定一键更新关联会话「${packId}」？`)) return
+  try {
+    const resp = await fetch(`/api/themepacks/${packId}/apply`, { method: 'POST' })
+    if (resp.ok) {
+      alert('已更新关联会话')
+    } else {
+      const err = await resp.json()
+      alert(err.detail || '更新失败')
+    }
+  } catch (e) {
+    alert('更新失败: ' + e.message)
+  }
+}
+
+async function importPack(e) {
   const file = e.target.files[0]
   if (!file) return
   const formData = new FormData()
   formData.append('file', file)
-  const resp = await fetch('/api/themes/import', { method: 'POST', body: formData })
-  if (resp.ok) {
-    const data = await resp.json()
-    await themeStore.fetchThemes()
-    alert(`导入成功！主题: ${data.theme_id}`)
-  } else {
-    const err = await resp.json()
-    alert(err.detail || '导入失败')
+  try {
+    const resp = await fetch('/api/themepacks/import', { method: 'POST', body: formData })
+    if (resp.ok) {
+      const data = await resp.json()
+      await loadThemePacks()
+      alert(`导入成功！主题包: ${data.name || data.id || '已导入'}`)
+    } else {
+      const err = await resp.json()
+      alert(err.detail || '导入失败')
+    }
+  } catch (e) {
+    alert('导入失败: ' + e.message)
   }
 }
 </script>
@@ -510,34 +638,18 @@ async function importTheme(e) {
   margin-bottom: 20px;
 }
 
-/* Persona cards */
-.current-persona-label {
-  font-size: 14px;
-  color: var(--primary);
-  font-weight: 600;
-  margin-bottom: 12px;
+/* Theme Pack Grid (shared) */
+.pack-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+  margin: 16px 0;
 }
 
-.persona-header {
+.pack-card {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  margin-bottom: 12px;
-}
-.persona-header h3 {
-  font-size: 15px;
-  color: var(--text-secondary);
-}
-
-.persona-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
   gap: 12px;
-  margin-bottom: 20px;
-}
-
-.persona-card {
-  position: relative;
   padding: 14px 16px;
   background: var(--bg-primary);
   border: 1px solid var(--border);
@@ -545,82 +657,170 @@ async function importTheme(e) {
   cursor: pointer;
   transition: border-color 0.15s, box-shadow 0.15s;
 }
-.persona-card:hover {
+.pack-card:hover {
   border-color: var(--primary);
 }
-.persona-card.selected {
+.pack-card.selected {
   border-color: var(--primary);
   box-shadow: 0 0 0 2px rgba(124, 92, 252, 0.2);
 }
-.persona-card.current {
-  border-color: #7c5cfc;
-  box-shadow: 0 0 0 2px rgba(124, 92, 252, 0.3);
+
+.pack-preview {
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  flex-shrink: 0;
 }
-.current-badge {
-  color: #7c5cfc;
-  font-weight: 700;
-  margin-left: 4px;
-}
-.card-name {
+
+.pack-info { flex: 1; min-width: 0; }
+.pack-name {
   font-size: 14px;
   font-weight: 600;
-  margin-bottom: 4px;
-}
-.card-desc {
-  font-size: 12px;
-  color: var(--text-secondary);
+  color: var(--text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.card-actions {
-  position: absolute;
-  top: -8px;
-  right: -8px;
-  display: flex;
-  gap: 3px;
-  opacity: 0;
-  transition: opacity 0.15s;
-}
-.persona-card:hover .card-actions {
-  opacity: 1;
-}
-.card-edit-btn, .card-reset-btn {
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  color: white;
-  border: none;
+.pack-meta {
   font-size: 12px;
-  line-height: 20px;
-  text-align: center;
-  cursor: pointer;
-  padding: 0;
-}
-.card-edit-btn {
-  background: var(--primary);
-}
-.card-edit-btn:hover {
-  background: #6a4fe0;
-}
-.card-reset-btn {
-  background: #f39c12;
-}
-.card-reset-btn:hover {
-  background: #e67e22;
+  color: var(--text-secondary);
+  margin-top: 2px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
-/* Inline persona editor */
-.persona-editor-inline {
+/* Inline pack editor */
+.pack-editor {
   background: var(--bg-secondary);
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 24px;
   margin: 20px 0;
 }
-.persona-editor-inline h3 {
+.pack-editor h3 {
   font-size: 16px;
   margin-bottom: 16px;
+}
+
+/* Editor tabs */
+.editor-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 10px;
+}
+
+.tab-btn {
+  padding: 6px 18px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 13px;
+  transition: all 0.15s;
+}
+.tab-btn.active {
+  background: var(--primary);
+  color: #fff;
+  border-color: var(--primary);
+}
+.tab-btn:hover:not(.active) {
+  border-color: var(--primary);
+}
+
+.tab-panel {
+  margin-bottom: 14px;
+}
+
+/* Sub tabs for theme */
+.sub-tab-bar {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 14px;
+}
+.sub-tab-btn {
+  padding: 5px 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.15s;
+}
+.sub-tab-btn.active {
+  background: var(--primary);
+  color: #fff;
+  border-color: var(--primary);
+}
+.sub-tab-btn:hover:not(.active) {
+  border-color: var(--primary);
+}
+
+.sub-panel {
+  margin-bottom: 10px;
+}
+
+/* Color grid */
+.color-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.color-item label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  display: block;
+  margin-bottom: 2px;
+}
+.color-input {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.color-input input[type="color"] {
+  width: 32px;
+  height: 32px;
+  border: none;
+  cursor: pointer;
+  background: none;
+}
+.color-val {
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-family: monospace;
+}
+
+/* Param rows */
+.param-row {
+  margin-bottom: 12px;
+}
+.param-row label {
+  display: block;
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+.param-row .val-badge {
+  color: var(--primary);
+  font-weight: 600;
+}
+.param-row input[type="range"] {
+  width: 100%;
+  accent-color: var(--primary);
+}
+.param-row select,
+.param-row input[type="text"] {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 13px;
 }
 
 /* Form */
@@ -686,14 +886,17 @@ legend {
 
 /* Buttons */
 .btn-new {
-  padding: 5px 14px;
-  font-size: 12px;
+  padding: 8px 20px;
+  font-size: 13px;
   background: var(--primary);
   color: #fff;
   border: none;
-  border-radius: 6px;
+  border-radius: 8px;
   cursor: pointer;
+  transition: opacity 0.15s;
 }
+.btn-new:hover { opacity: 0.85; }
+
 .btn-save {
   padding: 10px 28px;
   background: var(--primary);
@@ -703,23 +906,17 @@ legend {
   cursor: pointer;
   font-size: 14px;
 }
-.btn-delete {
+.btn-cancel {
   padding: 10px 28px;
-  background: #e74c3c;
-  color: #fff;
-  border: none;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
   border-radius: 8px;
   cursor: pointer;
   font-size: 14px;
 }
-.btn-reset {
-  padding: 10px 28px;
-  background: #f39c12;
-  color: #fff;
-  border: none;
-  border-radius: 8px;
-  cursor: pointer;
-  font-size: 14px;
+.btn-cancel:hover {
+  border-color: var(--primary);
 }
 .actions {
   margin-top: 20px;
@@ -727,6 +924,84 @@ legend {
   gap: 12px;
 }
 
+/* 主题包管理 tab */
+.tp-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.tp-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  transition: all 0.15s;
+  background: var(--bg-primary);
+}
+.tp-card:hover { border-color: var(--primary); }
+.tp-preview {
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+.tp-info { flex: 1; min-width: 0; }
+.tp-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.tp-meta {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+  display: flex;
+  gap: 8px;
+}
+.tp-actions { display: flex; gap: 4px; }
+
+.btn-sm {
+  width: 36px;
+  height: 36px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+}
+.btn-sm:hover { border-color: var(--primary); }
+.btn-sm-danger:hover { border-color: #e74c3c; }
+
+.package-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+}
+.btn-action {
+  flex: 1;
+  padding: 10px 16px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 13px;
+  text-align: center;
+  transition: all 0.2s;
+}
+.btn-action:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+/* Divider */
 .divider {
   border: none;
   border-top: 1px solid var(--border);
@@ -811,55 +1086,4 @@ legend {
   color: var(--text-secondary);
   margin-bottom: 12px;
 }
-.package-actions {
-  display: flex;
-  gap: 10px;
-  margin-top: 8px;
-}
-.btn-action {
-  flex: 1;
-  padding: 8px 16px;
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--text-secondary);
-  cursor: pointer;
-  font-size: 13px;
-  text-align: center;
-  transition: all 0.2s;
-}
-.btn-action:hover {
-  border-color: var(--primary);
-  color: var(--primary);
-}
-.themepack-grid {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-bottom: 16px;
-}
-.themepack-card {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 12px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  transition: all 0.15s;
-}
-.themepack-card:hover { border-color: var(--primary); }
-.themepack-card.active { border-color: var(--primary); background: rgba(124,92,252,0.08); }
-.themepack-preview {
-  width: 36px; height: 36px; border-radius: 8px; flex-shrink: 0;
-}
-.themepack-info { flex: 1; min-width: 0; }
-.themepack-name { font-size: 14px; font-weight: 600; color: var(--text-primary); }
-.themepack-id { font-size: 11px; color: var(--text-secondary); }
-.themepack-actions { display: flex; gap: 4px; }
-.btn-sm {
-  width: 32px; height: 32px;
-  background: transparent; border: 1px solid var(--border); border-radius: 6px;
-  cursor: pointer; font-size: 14px; display: flex; align-items: center; justify-content: center;
-}
-.btn-sm:hover { border-color: var(--primary); }
 </style>
