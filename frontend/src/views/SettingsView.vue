@@ -251,7 +251,6 @@ async function saveModel() {
 const personas = ref([])
 const themes = ref([])
 const selectedId = ref(null)
-const isCreate = ref(false)
 const form = ref(null)
 
 const emotionKeys = ['cheerful', 'shy', 'curious', 'angry', 'sad']
@@ -286,7 +285,6 @@ async function loadThemes() {
 
 async function selectPersona(name) {
   selectedId.value = name
-  isCreate.value = false
   const resp = await fetch(`/api/personas/${name}/full`)
   const data = await resp.json()
   form.value = {
@@ -311,20 +309,6 @@ async function selectPersona(name) {
   }
 }
 
-function startCreate() {
-  selectedId.value = null
-  isCreate.value = true
-  form.value = {
-    id: '',
-    name: '',
-    description: '',
-    prompt: '',
-    emotion_weights: { cheerful: 0.5, shy: 0.2, curious: 0.5, angry: 0.1, sad: 0.1 },
-    speech_style: { tone: '友好', catchphrase: '', emoji_frequency: 'medium', formality: 'casual' },
-    theme_binding: 'default',
-  }
-}
-
 async function savePersona() {
   if (!form.value.id) { alert('请输入 ID'); return }
   if (!form.value.name) { alert('请输入名称'); return }
@@ -340,19 +324,11 @@ async function savePersona() {
   }
 
   let resp
-  if (isCreate.value) {
-    resp = await fetch('/api/personas/create', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    })
-  } else {
-    resp = await fetch(`/api/personas/${form.value.id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    })
-  }
+  resp = await fetch(`/api/personas/${form.value.id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
 
   if (!resp.ok) {
     const err = await resp.json()
@@ -361,7 +337,6 @@ async function savePersona() {
   }
 
   alert('保存成功')
-  isCreate.value = false
   selectedId.value = form.value.id
   await loadPersonas()
 }
@@ -742,15 +717,6 @@ legend {
   background: #f39c12;
   color: #fff;
   border: none;
-  border-radius: 8px;
-  cursor: pointer;
-  font-size: 14px;
-}
-.btn-cancel {
-  padding: 10px 28px;
-  background: transparent;
-  color: var(--text-secondary);
-  border: 1px solid var(--border);
   border-radius: 8px;
   cursor: pointer;
   font-size: 14px;
