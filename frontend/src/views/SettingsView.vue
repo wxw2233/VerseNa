@@ -124,6 +124,17 @@
         <ThemeSwitcher />
         <ThemeCreator />
         <AssetUploader />
+
+        <hr class="divider" />
+        <h3>主题包</h3>
+        <p class="hint">导出/导入完整主题包（包含颜色、素材、角色配置）</p>
+        <div class="package-actions">
+          <button class="btn-action" @click="exportTheme">导出当前主题包</button>
+          <label class="btn-action">
+            导入主题包
+            <input type="file" accept=".zip" @change="importTheme" style="display:none" />
+          </label>
+        </div>
       </div>
 
       <!-- 模型配置 (Model) -->
@@ -194,6 +205,7 @@
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
+import { useThemeStore } from '../stores/theme'
 import ThemeSwitcher from '../components/ThemeSwitcher.vue'
 import ThemeCreator from '../components/ThemeCreator.vue'
 import AssetUploader from '../components/AssetUploader.vue'
@@ -212,6 +224,7 @@ const menuItems = [
 ]
 
 // --- Model Config ---
+const themeStore = useThemeStore()
 const form_model = reactive({ api_key: '', base_url: '', model_name: '' })
 
 onMounted(async () => {
@@ -410,6 +423,38 @@ async function resetPersona(id) {
       const err = await resp.json()
       alert(err.detail || '重置失败')
     }
+  }
+}
+
+async function exportTheme() {
+  const themeId = themeStore.current
+  const resp = await fetch(`/api/themes/${themeId}/export`)
+  if (resp.ok) {
+    const blob = await resp.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${themeId}-theme.zip`
+    a.click()
+    URL.revokeObjectURL(url)
+  } else {
+    alert('导出失败')
+  }
+}
+
+async function importTheme(e) {
+  const file = e.target.files[0]
+  if (!file) return
+  const formData = new FormData()
+  formData.append('file', file)
+  const resp = await fetch('/api/themes/import', { method: 'POST', body: formData })
+  if (resp.ok) {
+    const data = await resp.json()
+    await themeStore.fetchThemes()
+    alert(`导入成功！主题: ${data.theme_id}`)
+  } else {
+    const err = await resp.json()
+    alert(err.detail || '导入失败')
   }
 }
 </script>
@@ -754,5 +799,31 @@ legend {
   padding: 24px;
   color: var(--text-secondary);
   font-size: 14px;
+}
+.hint {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 12px;
+}
+.package-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 8px;
+}
+.btn-action {
+  flex: 1;
+  padding: 8px 16px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 13px;
+  text-align: center;
+  transition: all 0.2s;
+}
+.btn-action:hover {
+  border-color: var(--primary);
+  color: var(--primary);
 }
 </style>

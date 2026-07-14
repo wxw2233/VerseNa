@@ -59,15 +59,6 @@
         <button v-if="assets['bubble-agent']" class="remove-btn" @click="removeAsset('bubble-agent')">移除</button>
       </div>
     </div>
-
-    <!-- 导出/导入 -->
-    <div class="package-actions">
-      <button class="btn-export" @click="exportTheme">导出主题包</button>
-      <label class="btn-import">
-        导入主题包
-        <input type="file" accept=".zip" @change="importTheme" style="display:none" />
-      </label>
-    </div>
   </div>
 </template>
 
@@ -154,33 +145,6 @@ function applyBgOpacity() {
   }
   el.textContent = `.chat-main::before { opacity: ${bgOpacity.value}; }`
 }
-
-async function exportTheme() {
-  const resp = await fetch(`/api/themes/${themeStore.current}/export`)
-  if (resp.ok) {
-    const blob = await resp.blob()
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `${themeStore.current}-theme.zip`
-    a.click()
-    URL.revokeObjectURL(url)
-  }
-}
-
-async function importTheme(e) {
-  const file = e.target.files[0]
-  if (!file) return
-  const formData = new FormData()
-  formData.append('file', file)
-  const resp = await fetch('/api/themes/import', { method: 'POST', body: formData })
-  if (resp.ok) {
-    await themeStore.fetchThemes()
-    alert('导入成功！')
-  } else {
-    alert('导入失败')
-  }
-}
 </script>
 
 <style scoped>
@@ -212,12 +176,4 @@ async function importTheme(e) {
 .opacity-control label { font-size: 11px; color: var(--text-secondary); }
 .opacity-control input { flex: 1; }
 .opacity-control span { font-size: 11px; color: var(--text-secondary); min-width: 30px; }
-.package-actions { display: flex; gap: 10px; margin-top: 16px; }
-.btn-export, .btn-import {
-  flex: 1; padding: 8px 12px; background: transparent;
-  border: 1px solid var(--border); border-radius: 6px;
-  color: var(--text-secondary); cursor: pointer; font-size: 13px;
-  text-align: center;
-}
-.btn-export:hover, .btn-import:hover { border-color: var(--primary); color: var(--primary); }
 </style>
