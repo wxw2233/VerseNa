@@ -1,105 +1,104 @@
 <template>
   <div class="asset-uploader">
     <h3>素材装饰</h3>
-    <p class="hint">上传图片装饰你的聊天界面</p>
-    
-    <div class="asset-grid">
-      <!-- 聊天背景图 -->
-      <div class="asset-item">
-        <div class="asset-label">聊天背景</div>
-        <div class="asset-preview" @click="uploadAsset('bg')">
-          <img v-if="assets.bg" :src="assets.bg" class="preview-img bg-preview" />
-          <div v-else class="placeholder">点击上传</div>
+    <p class="hint">点击示意图位置或下方素材行上传图片</p>
+
+    <!-- 示意图 -->
+    <div class="diagram">
+      <div class="diagram-sidebar">
+        <div class="diagram-label clickable" @click="scrollToAsset('sidebar-bg')">⑥ 侧栏</div>
+        <div class="diagram-divider clickable" @click="scrollToAsset('divider')">⑦</div>
+      </div>
+      <div class="diagram-main">
+        <div class="diagram-chat" @click="scrollToAsset('bg')">
+          <span class="diagram-label">① 背景</span>
+          <div class="diagram-bubble-user" @click.stop="scrollToAsset('bubble-user')">④</div>
+          <div class="diagram-bubble-agent" @click.stop="scrollToAsset('bubble-agent')">⑤</div>
         </div>
-        <button v-if="assets.bg" class="remove-btn" @click="removeAsset('bg')">移除</button>
-        <div v-if="assets.bg" class="opacity-control">
+        <div class="diagram-avatar" @click="scrollToAsset('avatar')">②③</div>
+        <div class="diagram-input" @click="scrollToAsset('input-bg')">
+          <span>⑧</span>
+          <span class="diagram-send" @click.stop="scrollToAsset('send-btn')">⑨</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 9 个素材上传行 -->
+    <div class="asset-rows">
+      <div
+        v-for="(info, key) in assetList"
+        :key="key"
+        :ref="el => { if (el) rowRefs[key] = el }"
+        class="asset-row"
+      >
+        <span class="row-num">{{ info.num }}</span>
+        <span class="row-label">{{ info.label }}</span>
+        <div class="row-preview" @click="uploadAsset(key)">
+          <img v-if="assets[key]" :src="assets[key]" class="thumb" />
+          <div v-else class="thumb-placeholder">+</div>
+        </div>
+        <label class="upload-btn">
+          上传
+          <input type="file" accept="image/*" class="hidden-input" @change="onFileChange($event, key)" />
+        </label>
+        <button v-if="assets[key]" class="remove-btn" @click="removeAsset(key)">移除</button>
+        <span v-else class="remove-placeholder"></span>
+
+        <!-- 不透明度滑块（仅聊天背景） -->
+        <div v-if="key === 'bg' && assets.bg" class="opacity-control">
           <label>不透明度</label>
           <input type="range" min="0" max="1" step="0.1" v-model.number="chatStore.bgOpacity" />
           <span>{{ (chatStore.bgOpacity * 100).toFixed(0) }}%</span>
         </div>
-      </div>
-
-      <!-- 角色头像 -->
-      <div class="asset-item">
-        <div class="asset-label">角色头像</div>
-        <div class="asset-preview avatar-preview" @click="uploadAsset('avatar')">
-          <img v-if="assets.avatar" :src="assets.avatar" class="preview-img avatar-img" />
-          <div v-else class="placeholder">点击上传</div>
-        </div>
-        <button v-if="assets.avatar" class="remove-btn" @click="removeAsset('avatar')">移除</button>
-      </div>
-
-      <!-- 头像框 -->
-      <div class="asset-item">
-        <div class="asset-label">头像框</div>
-        <div class="asset-preview avatar-preview" @click="uploadAsset('avatar-frame')">
-          <img v-if="assets['avatar-frame']" :src="assets['avatar-frame']" class="preview-img" />
-          <div v-else class="placeholder">点击上传</div>
-        </div>
-        <button v-if="assets['avatar-frame']" class="remove-btn" @click="removeAsset('avatar-frame')">移除</button>
-      </div>
-
-      <!-- 用户气泡装饰 -->
-      <div class="asset-item">
-        <div class="asset-label">用户气泡装饰</div>
-        <div class="asset-preview" @click="uploadAsset('bubble-user')">
-          <img v-if="assets['bubble-user']" :src="assets['bubble-user']" class="preview-img small" />
-          <div v-else class="placeholder">点击上传</div>
-        </div>
-        <button v-if="assets['bubble-user']" class="remove-btn" @click="removeAsset('bubble-user')">移除</button>
-      </div>
-
-      <!-- Agent 气泡装饰 -->
-      <div class="asset-item">
-        <div class="asset-label">Agent 气泡装饰</div>
-        <div class="asset-preview" @click="uploadAsset('bubble-agent')">
-          <img v-if="assets['bubble-agent']" :src="assets['bubble-agent']" class="preview-img small" />
-          <div v-else class="placeholder">点击上传</div>
-        </div>
-        <button v-if="assets['bubble-agent']" class="remove-btn" @click="removeAsset('bubble-agent')">移除</button>
       </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, watch } from 'vue'
+import { reactive, onMounted, watch } from 'vue'
 import { useThemeStore } from '../stores/theme'
 import { useChatStore } from '../stores/chat'
 
 const themeStore = useThemeStore()
 const chatStore = useChatStore()
 
-const assets = reactive({
-  bg: '',
-  avatar: '',
-  'avatar-frame': '',
-  'bubble-user': '',
-  'bubble-agent': '',
-})
+const assetList = {
+  bg: { num: '①', label: '聊天背景' },
+  avatar: { num: '②', label: '角色头像' },
+  'avatar-frame': { num: '③', label: '头像框' },
+  'bubble-user': { num: '④', label: '用户气泡装饰' },
+  'bubble-agent': { num: '⑤', label: 'Agent气泡装饰' },
+  'sidebar-bg': { num: '⑥', label: '侧栏背景' },
+  divider: { num: '⑦', label: '会话分隔线' },
+  'input-bg': { num: '⑧', label: '输入框背景' },
+  'send-btn': { num: '⑨', label: '发送按钮' },
+}
 
-const assetFileMap = {
-  'bg': 'bg.png',
-  'avatar': 'avatar.png',
-  'avatar-frame': 'avatar-frame.png',
-  'bubble-user': 'bubble-user.png',
-  'bubble-agent': 'bubble-agent.png',
+const assets = reactive({})
+const rowRefs = {}
+
+const assetFileMap = {}
+for (const key of Object.keys(assetList)) {
+  assets[key] = ''
+  assetFileMap[key] = `${key}.png`
 }
 
 watch(() => themeStore.current, () => loadAssets())
-
 onMounted(() => loadAssets())
+
+function scrollToAsset(key) {
+  const el = rowRefs[key]
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+}
 
 async function loadAssets() {
   const themeId = themeStore.current
-  for (const [key, filename] of Object.entries(assetFileMap)) {
+  for (const key of Object.keys(assetList)) {
+    const filename = assetFileMap[key]
     try {
       const resp = await fetch(`/api/themes/${themeId}/assets/${filename}`)
-      if (resp.ok) {
-        assets[key] = `/api/themes/${themeId}/assets/${filename}`
-      } else {
-        assets[key] = ''
-      }
+      assets[key] = resp.ok ? `/api/themes/${themeId}/assets/${filename}` : ''
     } catch {
       assets[key] = ''
     }
@@ -110,25 +109,28 @@ async function uploadAsset(type) {
   const input = document.createElement('input')
   input.type = 'file'
   input.accept = 'image/*'
-  input.onchange = async (e) => {
-    const file = e.target.files[0]
-    if (!file) return
-    
-    // 用固定文件名保存
-    const targetName = assetFileMap[type]
-    const renamedFile = new File([file], targetName, { type: file.type })
-    const formData = new FormData()
-    formData.append('file', renamedFile)
-    
-    const resp = await fetch(`/api/themes/${themeStore.current}/upload`, {
-      method: 'POST',
-      body: formData,
-    })
-    if (resp.ok) {
-      assets[type] = `/api/themes/${themeStore.current}/assets/${targetName}?t=${Date.now()}`
-    }
-  }
+  input.onchange = (e) => doUpload(e.target.files[0], type)
   input.click()
+}
+
+function onFileChange(e, type) {
+  doUpload(e.target.files[0], type)
+}
+
+async function doUpload(file, type) {
+  if (!file) return
+  const targetName = assetFileMap[type]
+  const renamedFile = new File([file], targetName, { type: file.type })
+  const formData = new FormData()
+  formData.append('file', renamedFile)
+
+  const resp = await fetch(`/api/themes/${themeStore.current}/upload`, {
+    method: 'POST',
+    body: formData,
+  })
+  if (resp.ok) {
+    assets[type] = `/api/themes/${themeStore.current}/assets/${targetName}?t=${Date.now()}`
+  }
 }
 
 async function removeAsset(type) {
@@ -139,32 +141,227 @@ async function removeAsset(type) {
 </script>
 
 <style scoped>
-.asset-uploader { margin-bottom: 24px; }
-.asset-uploader h3 { font-size: 16px; margin-bottom: 4px; color: var(--text-primary); }
-.hint { font-size: 12px; color: var(--text-secondary); margin-bottom: 12px; }
-.asset-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.asset-item { display: flex; flex-direction: column; gap: 6px; }
-.asset-label { font-size: 12px; color: var(--text-secondary); }
-.asset-preview {
-  width: 100%; height: 80px; border: 1px dashed var(--border); border-radius: 8px;
-  display: flex; align-items: center; justify-content: center; cursor: pointer;
-  overflow: hidden; transition: border-color 0.2s;
+.asset-uploader {
+  margin-bottom: 24px;
 }
-.asset-preview:hover { border-color: var(--primary); }
-.placeholder { font-size: 12px; color: var(--text-secondary); }
-.preview-img { width: 100%; height: 100%; object-fit: cover; }
-.preview-img.small { width: 48px; height: 48px; object-fit: contain; }
-.bg-preview { object-fit: cover; opacity: 0.5; }
-.avatar-preview { height: 80px; width: 80px; border-radius: 50%; }
-.avatar-img { border-radius: 50%; }
-.remove-btn {
-  padding: 2px 8px; background: transparent; border: 1px solid #ff4757;
-  border-radius: 4px; color: #ff4757; cursor: pointer; font-size: 11px;
+.asset-uploader h3 {
+  font-size: 16px;
+  margin-bottom: 4px;
+  color: var(--text-primary);
+}
+.hint {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 12px;
+}
+
+/* ===== 示意图 ===== */
+.diagram {
+  display: flex;
+  border: 2px dashed var(--border, #444);
+  border-radius: 10px;
+  background: var(--bg-secondary, #1a1a2e);
+  padding: 16px;
+  gap: 12px;
+  margin-bottom: 20px;
+  min-height: 200px;
+  font-size: 12px;
+  color: var(--text-secondary, #aaa);
+}
+.diagram-sidebar {
+  width: 64px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+}
+.diagram-sidebar .diagram-label {
+  padding: 8px 4px;
+  border: 1px dashed var(--border, #555);
+  border-radius: 6px;
+  text-align: center;
+  width: 100%;
+}
+.diagram-sidebar .diagram-divider {
+  flex: 1;
+  width: 100%;
+  border: 1px dashed var(--border, #555);
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.diagram-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  position: relative;
+}
+.diagram-chat {
+  flex: 1;
+  border: 1px dashed var(--border, #555);
+  border-radius: 8px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  cursor: pointer;
+  position: relative;
+  min-height: 80px;
+}
+.diagram-chat:hover { border-color: var(--primary, #5b7fff); }
+.diagram-chat > .diagram-label { align-self: flex-start; }
+.diagram-bubble-user {
+  align-self: flex-end;
+  background: var(--primary, #5b7fff);
+  color: #fff;
+  padding: 4px 10px;
+  border-radius: 8px 8px 2px 8px;
+  cursor: pointer;
+  max-width: 60%;
+  text-align: center;
+}
+.diagram-bubble-agent {
   align-self: flex-start;
+  background: var(--bg-tertiary, #2a2a3e);
+  color: var(--text-primary, #eee);
+  padding: 4px 10px;
+  border-radius: 8px 8px 8px 2px;
+  cursor: pointer;
+  max-width: 60%;
+  text-align: center;
+}
+.diagram-avatar {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 44px;
+  height: 44px;
+  border: 2px dashed var(--border, #555);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  cursor: pointer;
+  background: var(--bg-secondary, #1a1a2e);
+}
+.diagram-avatar:hover { border-color: var(--primary, #5b7fff); }
+.diagram-input {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px dashed var(--border, #555);
+  border-radius: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+.diagram-input:hover { border-color: var(--primary, #5b7fff); }
+.diagram-input span:first-child { flex: 1; }
+.diagram-send {
+  background: var(--primary, #5b7fff);
+  color: #fff;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+/* ===== 素材行 ===== */
+.asset-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.asset-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.row-num {
+  width: 24px;
+  text-align: center;
+  font-size: 14px;
+  color: var(--primary, #5b7fff);
+  flex-shrink: 0;
+}
+.row-label {
+  width: 100px;
+  font-size: 13px;
+  color: var(--text-primary, #eee);
+  flex-shrink: 0;
+}
+.row-preview {
+  width: 48px;
+  height: 48px;
+  border: 1px dashed var(--border, #444);
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  overflow: hidden;
+  flex-shrink: 0;
+  transition: border-color 0.2s;
+}
+.row-preview:hover { border-color: var(--primary, #5b7fff); }
+.thumb {
+  width: 48px;
+  height: 48px;
+  object-fit: cover;
+}
+.thumb-placeholder {
+  font-size: 18px;
+  color: var(--text-secondary, #777);
+}
+.upload-btn {
+  padding: 4px 12px;
+  border: 1px solid var(--border, #444);
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  color: var(--text-primary, #eee);
+  background: transparent;
+  transition: background 0.2s;
+}
+.upload-btn:hover { background: var(--bg-tertiary, #2a2a3e); }
+.hidden-input {
+  display: none;
+}
+.remove-btn {
+  padding: 4px 12px;
+  background: transparent;
+  border: 1px solid #ff4757;
+  border-radius: 6px;
+  color: #ff4757;
+  cursor: pointer;
+  font-size: 12px;
 }
 .remove-btn:hover { background: #ff4757; color: white; }
-.opacity-control { display: flex; align-items: center; gap: 6px; }
-.opacity-control label { font-size: 11px; color: var(--text-secondary); }
-.opacity-control input { flex: 1; }
-.opacity-control span { font-size: 11px; color: var(--text-secondary); min-width: 30px; }
+.remove-placeholder {
+  width: 48px;
+}
+
+/* 不透明度 */
+.opacity-control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-basis: 100%;
+  padding-left: 34px;
+}
+.opacity-control label {
+  font-size: 11px;
+  color: var(--text-secondary, #777);
+}
+.opacity-control input[type="range"] {
+  flex: 1;
+  max-width: 200px;
+}
+.opacity-control span {
+  font-size: 11px;
+  color: var(--text-secondary, #777);
+  min-width: 32px;
+}
 </style>
