@@ -69,3 +69,4 @@ app.include_router(theme_package_router)
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host=settings.HOST, port=settings.PORT, reload=settings.DEBUG)
+from api.themepack_api import router as themepack_router; app.include_router(themepack_router)
