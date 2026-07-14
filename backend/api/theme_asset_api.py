@@ -1,4 +1,3 @@
-import uuid
 from pathlib import Path
 from fastapi import APIRouter, UploadFile, File, HTTPException
 from fastapi.responses import FileResponse
@@ -16,15 +15,9 @@ async def upload_asset(theme_id: str, file: UploadFile = File(...)):
     assets_dir = theme_dir / "assets"
     assets_dir.mkdir(exist_ok=True)
     
-    # 保留原始文件名，冲突时加后缀
+    # 保留原始文件名，同名直接覆盖
     filename = file.filename
     target = assets_dir / filename
-    counter = 1
-    while target.exists():
-        stem = Path(filename).stem
-        suffix = Path(filename).suffix
-        target = assets_dir / f"{stem}_{counter}{suffix}"
-        counter += 1
     
     content = await file.read()
     target.write_bytes(content)

@@ -121,21 +121,19 @@ async function uploadAsset(type) {
   input.onchange = async (e) => {
     const file = e.target.files[0]
     if (!file) return
-    const formData = new FormData()
-    formData.append('file', file)
     
-    // 先删除旧的
-    if (assets[type]) {
-      await fetch(`/api/themes/${themeStore.current}/assets/${assetFileMap[type]}`, { method: 'DELETE' }).catch(() => {})
-    }
+    // 用固定文件名保存
+    const targetName = assetFileMap[type]
+    const renamedFile = new File([file], targetName, { type: file.type })
+    const formData = new FormData()
+    formData.append('file', renamedFile)
     
     const resp = await fetch(`/api/themes/${themeStore.current}/upload`, {
       method: 'POST',
       body: formData,
     })
     if (resp.ok) {
-      const data = await resp.json()
-      assets[type] = `/api/themes/${themeStore.current}/assets/${data.filename}?t=${Date.now()}`
+      assets[type] = `/api/themes/${themeStore.current}/assets/${targetName}?t=${Date.now()}`
     }
   }
   input.click()

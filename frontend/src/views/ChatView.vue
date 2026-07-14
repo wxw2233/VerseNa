@@ -1,7 +1,7 @@
 <template>
   <div class="chat-view">
     <SessionList />
-    <div class="chat-main">
+    <div class="chat-main" :style="bgStyle">
       <div class="messages" ref="messagesRef">
         <ChatBubble v-for="(msg, i) in store.messages" :key="i" :msg="msg" />
         <div v-if="store.messages.length === 0" class="empty">
@@ -15,11 +15,12 @@
 </template>
 
 <script setup>
-import { ref, nextTick, onMounted } from 'vue'
+import { ref, computed, nextTick, onMounted } from 'vue'
 import { useChatStore } from '../stores/chat'
 import { useWebSocket } from '../composables/useWebSocket'
 import { usePersonaStore } from '../stores/persona'
 import { useSessionStore } from '../stores/session'
+import { useThemeStore } from '../stores/theme'
 import ChatBubble from '../components/ChatBubble.vue'
 import ChatInput from '../components/ChatInput.vue'
 import SessionList from '../components/SessionList.vue'
@@ -27,8 +28,19 @@ import SessionList from '../components/SessionList.vue'
 const store = useChatStore()
 const personaStore = usePersonaStore()
 const sessionStore = useSessionStore()
+const themeStore = useThemeStore()
 const messagesRef = ref(null)
 const { connect, send, onMessage } = useWebSocket()
+
+const bgStyle = computed(() => {
+  const themeId = themeStore.current
+  return {
+    backgroundImage: `url(/api/themes/${themeId}/assets/bg.png)`,
+    backgroundSize: 'cover',
+    backgroundPosition: 'center',
+    backgroundRepeat: 'no-repeat',
+  }
+})
 
 onMounted(() => {
   connect()
@@ -73,6 +85,7 @@ function handleSend(content) {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  position: relative;
 }
 .messages {
   flex: 1;
