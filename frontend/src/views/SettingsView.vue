@@ -257,6 +257,27 @@
             </div>
             <span class="tool-badge builtin">内置</span>
           </div>
+          <div class="tool-card">
+            <div class="tool-icon">📁</div>
+            <div class="tool-info">
+              <div class="tool-name">file_manager</div>
+              <div class="tool-desc">文件管理器，支持读取、写入、搜索、编辑、复制、移动、删除等操作</div>
+            </div>
+            <span class="tool-badge builtin">内置</span>
+          </div>
+        </div>
+
+        <hr class="divider" />
+        <h3>信任模式</h3>
+        <div class="trust-mode-row">
+          <div class="trust-info">
+            <div class="trust-label">🔒 信任模式</div>
+            <div class="trust-desc">开启后，除系统核心文件外，所有文件操作无需确认直接执行。</div>
+          </div>
+          <label class="toggle-switch">
+            <input type="checkbox" v-model="trustMode" @change="saveTrustMode" />
+            <span class="toggle-slider"></span>
+          </label>
         </div>
       </div>
     </section>
@@ -287,6 +308,27 @@ const menuItems = [
 
 // --- Model Config ---
 const form_model = reactive({ api_key: '', base_url: '', model_name: '' })
+const trustMode = ref(false)
+
+async function loadTrustMode() {
+  try {
+    const resp = await fetch('/api/config/trust_mode')
+    const data = await resp.json()
+    trustMode.value = data.enabled === true || data.enabled === 'true'
+  } catch { trustMode.value = false }
+}
+
+async function saveTrustMode() {
+  try {
+    await fetch('/api/config/trust_mode', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: trustMode.value })
+    })
+  } catch {}
+}
+
+loadTrustMode()
 
 onMounted(async () => {
   const resp = await fetch('/api/config/model')
@@ -1087,4 +1129,41 @@ legend {
   color: var(--text-secondary);
   margin-bottom: 12px;
 }
+.trust-mode-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px;
+  background: var(--bg-primary);
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+.trust-label { font-size: 14px; font-weight: 600; color: var(--text-primary); }
+.trust-desc { font-size: 12px; color: var(--text-secondary); margin-top: 4px; }
+.toggle-switch {
+  position: relative;
+  width: 44px;
+  height: 24px;
+  flex-shrink: 0;
+}
+.toggle-switch input { opacity: 0; width: 0; height: 0; }
+.toggle-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: var(--border);
+  border-radius: 12px;
+  transition: 0.2s;
+}
+.toggle-slider::before {
+  content: '';
+  position: absolute;
+  height: 18px; width: 18px;
+  left: 3px; bottom: 3px;
+  background: white;
+  border-radius: 50%;
+  transition: 0.2s;
+}
+.toggle-switch input:checked + .toggle-slider { background: var(--primary); }
+.toggle-switch input:checked + .toggle-slider::before { transform: translateX(20px); }
 </style>

@@ -73,6 +73,9 @@ class ReActAgent:
                     messages.append({"role": "tool", "tool_call_id": tc.get("id", ""), "content": result})
                     yield {"type": "tool_result", "content": result}
 
+                # 工具执行完毕，继续下一轮 LLM 调用获取响应
+                # 不在这里 break，让循环继续到下一轮 LLM 调用
+
         except Exception as e:
             yield {"type": "answer", "content": f"\n[错误] {e}"}
 

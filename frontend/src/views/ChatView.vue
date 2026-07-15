@@ -53,7 +53,7 @@ const personaStore = usePersonaStore()
 const sessionStore = useSessionStore()
 const themeStore = useThemeStore()
 const messagesRef = ref(null)
-const { connect, send, onMessage } = useWebSocket()
+const { connect, send, onMessage, ws } = useWebSocket()
 
 const confirmDialog = reactive({
   visible: false,
@@ -124,11 +124,17 @@ onMounted(() => {
 function onConfirm(confirmed) {
   const requestId = confirmDialog.requestId
   confirmDialog.visible = false
-  send({
+  const msg = JSON.stringify({
     type: 'confirm_response',
     request_id: requestId,
     confirmed: confirmed
   })
+  // 直接通过 WebSocket 发送，不依赖 connected 状态
+  if (ws && ws.value && ws.value.readyState === WebSocket.OPEN) {
+    ws.value.send(msg)
+  } else {
+    send({ type: 'confirm_response', request_id: requestId, confirmed: confirmed })
+  }
 }
 
 function handleSend(content) {
