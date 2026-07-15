@@ -1,4 +1,4 @@
-# 次元人格 — file_manager 工具设计（v2）
+# 次元人格 — file_manager 工具设计（v3）
 
 > 日期：2026-07-15
 
@@ -23,9 +23,9 @@ description = "文件管理器：读取、写入、列出目录、搜索、编�
 | path | string | read/write/list/search/find_replace/delete/info | 目标路径 |
 | content | string | write | 写入内容 |
 | mode | string | write | overwrite(默认)/append |
-| old | string | find_replace | 查找文本 |
+| old | string | find_replace | 查找文本（全文本匹配，不支持正则） |
 | new | string | find_replace | 替换文本 |
-| pattern | string | search | glob 模式（如 `*.py`） |
+| pattern | string | search | 标准 glob 模式（`*.py`, `**/*.json`） |
 | recursive | bool | search(默认true), delete(默认false) | 是否递归 |
 | src | string | copy/move | 源路径 |
 | dst | string | copy/move | 目标路径 |
@@ -35,56 +35,84 @@ description = "文件管理器：读取、写入、列出目录、搜索、编�
 
 ### 2.3 返回格式
 
-成功：
-```json
-{"success": true, "data": {...}}
-```
+成功：`{"success": true, "data": {...}}`
+失败：`{"success": false, "error": "错误码", "message": "人类可读描述"}`
 
-失败：
-```json
-{"success": false, "error": "FILE_NOT_FOUND", "message": "文件不存在"}
-```
+错误码：`FILE_NOT_FOUND`, `PERMISSION_DENIED`, `DISK_FULL`, `ENCODING_ERROR`, `PATH_FORBIDDEN`, `FILE_TOO_LARGE`, `CONFIRM_REQUIRED`, `CONFIRM_TIMEOUT`, `PATH_IS_DIRECTORY`, `PATH_IS_FILE`, `DEST_EXISTS`, `INVALID_PATH`
 
-错误类型：`FILE_NOT_FOUND`, `PERMISSION_DENIED`, `DISK_FULL`, `ENCODING_ERROR`, `PATH_FORBIDDEN`, `FILE_TOO_LARGE`, `CONFIRM_REQUIRED`
+### 2.4 九个 action 语义
 
-### 2.4 九个 action
-
-| action | 必需参数 | 可选参数 | 返回 data |
-|--------|---------|---------|-----------|
-| read | path | encoding, max_size | {content: str, truncated: bool, size: int} |
-| write | path, content | mode, encoding | {bytes_written: int, created_dirs: bool} |
-| list | path | limit | {items: [{name, type, size}...], total: int} |
-| search | path, pattern | recursive | {matches: [str...], count: int} |
-| find_replace | path, old, new | — | {replacements: int, preview: str(前500字)} |
-| copy | src, dst | — | {copied: int(bytes)} |
+| action | 必需 | 可选 | 返回 data |
+|--------|------|------|-----------|
+| read | path | encoding, max_size | {content, truncated, size} — 空文件返回 content="", truncated=false |
+| write | path, content | mode, encoding | {bytes_written, created_dirs} |
+| list | path | limit | {items: [{name,type,size}], total} — 空目录 items=[], total=0 |
+| search | path, pattern | recursive | {matches: [str], count} — 按 glob 匹配文件名 |
+| find_replace | path, old, new | — | {replacements, preview(前500字)} — 全文本全局替换 |
+| copy | src, dst | — | {copied(bytes)} |
 | move | src, dst | — | {moved: true} |
 | delete | path | recursive | {deleted: true} |
-| info | path | — | {size, modified, type, permissions, is_symlink} |
+| info | path | — | {size, modified(Unix时间戳), type, permissions(八进制), is_symlink} |
+
+### 2.5 copy/move 目标语义
+
+对齐系统 cp/mv：
+- dst 为已存在目录：将 src 放入 dst 内，保留原名
+- dst 为不存在路径：将 src 重命名为 dst
+- dst 为已存在文件：触发覆盖确认（同 write 覆盖规则）
+- 跨分区 move：自动降级为 copy + delete
+
+### 2.6 search 语义
+
+- 按 glob 模式匹配**文件名**（非文件内容）
+- pattern 使用标准 glob 语法：`*.py`, `**/*.json`, `test_*.py`
+- `**` 表示递归匹配任意层级
+- recursive 参数控制是否递归子目录（默认 true）
+
+### 2.7 find_replace 语义
+
+- 全文本全局替换（替换所有匹配项）
+- 不支持正则，纯文本匹配
+- 纳入「修改类操作」，敏感路径下触发确认
+- 大文件（>500KB）拒绝执行，返回 FILE_TOO_LARGE
 
 ---
 
 ## 3. 安全机制
 
-### 3.1 路径规范化
+### 3.1 路径处理（校验 vs 操作分离）
 
-所有路径执行：
-1. 统一转正斜杠 `/`
-2. `os.path.abspath()` 规范化
-3. 解析符号链接 `os.path.realpath()`
-4. 检查是否在禁止路径内
+**安全校验阶段：**
+1. `os.path.abspath(path)` — 绝对化
+2. 展开 `~` 为用户主目录
+3. `os.path.realpath(path)` — 解析符号链接
+4. 用解析后路径匹配禁止/敏感路径
 
-### 3.2 禁止访问路径
+**实际操作阶段：**
+- 使用 abspath 后的**原始路径**（不解析符号链接）
+- 这样删除软链接只删除链接本身，不删除目标文件
 
-**硬禁止（直接拒绝，不可信任模式放行）：**
-- Linux: `/proc`, `/sys`, `/dev`, `/etc/shadow`, `/etc/passwd`
-- Windows: `C:\Windows\System32`, `C:\Program Files`, `C:\ProgramData`
-- 跨平台: `~/.ssh`, `~/.gnupg`
+### 3.2 禁止路径（硬禁止，不可信任模式放行）
+
+统一前缀匹配，realpath 后的路径以禁止路径开头即拦截：
+
+**Linux:**
+- `/proc`, `/sys`, `/dev`
+- `/etc/shadow`, `/etc/passwd`
+
+**Windows:**
+- `c:\windows\system32`, `c:\program files`, `c:\programdata`（转小写匹配）
+
+**跨平台:**
+- `{home}/.ssh`, `{home}/.gnupg`
+
+Windows 路径统一转小写后匹配，兼容盘符大小写。
 
 ### 3.3 敏感路径（信任模式关闭时需确认）
 
+- 用户主目录下所有以 `.` 开头的隐藏文件与目录
 - `/etc` 下其他文件
 - `C:\Windows` 下其他文件
-- 用户主目录配置文件（`.bashrc`, `.gitconfig` 等）
 
 ### 3.4 信任模式
 
@@ -93,8 +121,9 @@ description = "文件管理器：读取、写入、列出目录、搜索、编�
 **关闭（默认）：**
 - delete → 需确认
 - write 覆盖已有文件 → 需确认（append 不需确认）
-- 敏感路径修改 → 需确认
-- delete 目录 + recursive → 强制确认（无论信任模式）
+- find_replace 在敏感路径 → 需确认
+- copy/move 目标已存在文件 → 需确认
+- delete 目录 + recursive → 强制确认（无论信任模式），确认消息显示文件/目录总数
 
 **开启：**
 - 只有硬禁止路径修改需确认
@@ -118,13 +147,14 @@ description = "文件管理器：读取、写入、列出目录、搜索、编�
 {"type": "confirm_response", "request_id": "uuid", "confirmed": true}
 ```
 
+**超时：** 60 秒未收到响应，自动取消，返回 CONFIRM_TIMEOUT。
+
 ### 3.6 读写限制
 
 - 读取：默认最大 50KB，超过截断
 - 二进制文件：检测前 8KB 有 null 字节则跳过
 - 写入：单次最大 1MB
 - 自动创建父目录
-- find_replace：大文件（>500KB）拒绝执行，返回 FILE_TOO_LARGE
 
 ### 3.7 操作审计日志
 
@@ -143,7 +173,7 @@ description = "文件管理器：读取、写入、列出目录、搜索、编�
 
 ### 4.2 确认对话框
 
-收到 `confirm` 消息时显示模态确认框，带回 `request_id`。
+收到 `confirm` 消息时显示模态确认框，带回 `request_id`。显示操作描述 + 文件路径 + 文件/目录总数（递归删除时）。
 
 ---
 
@@ -151,6 +181,6 @@ description = "文件管理器：读取、写入、列出目录、搜索、编�
 
 | 阶段 | 内容 |
 |------|------|
-| T0 | file_manager 工具（9 action + 安全检查 + 审计日志） |
-| T1 | 信任模式后端（config API + 确认机制 + request_id） |
+| T0 | 只读 action（read/list/search/info）+ 路径安全校验 + 审计日志 |
+| T1 | 写入 action（write/find_replace/copy/move/delete）+ 确认机制 + 信任模式后端 |
 | T2 | 前端（信任模式开关 + 确认对话框） |
