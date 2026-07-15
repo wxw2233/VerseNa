@@ -1,4 +1,4 @@
-# 次元人格 — 消息展示改造设计（segments 结构）
+# 次元人格 — 消息展示改造设计（segments 结构 v2）
 
 > 日期：2026-07-15
 
@@ -8,43 +8,39 @@
 
 ## 2. 消息数据结构
 
-### 2.1 segment 结构
-
-一条消息包含多个 segment：
+### 2.1 消息根级
 
 ```javascript
 {
   role: 'assistant',
-  segments: [
-    { type: 'text', content: '我来帮你搜索一下。' },
-    {
-      type: 'tool',
-      tool_name: 'web_search',
-      tool_args: { query: 'Python教程' },
-      status: 'running',  // running / done / error
-      result_summary: '找到 5 条结果',
-      result_detail: '...'  // 完整结果，可展开
-    },
-    { type: 'text', content: '根据搜索结果，...' }
-  ],
+  version: 2,  // 消息格式版本号，便于后续兼容
+  segments: [...],
   emoji: '😊',
-  streaming: false
+  streaming: true
 }
 ```
 
-### 2.2 segment 类型
+### 2.2 segment 结构
 
-| 类型 | 字段 | 说明 |
-|------|------|------|
-| text | content | 文本内容，Markdown 渲染 |
-| tool | tool_name, tool_args, status, result_summary, result_detail | 工具调用，渲染为时间线节点 |
+```javascript
+// 文本段
+{ type: 'text', content: '我来帮你搜索一下。' }
 
-### 2.3 tool status 状态机
-
+// 工具段
+{
+  type: 'tool',
+  tool_call_id: 'tc_001',  // 唯一标识，UUID 或递增 ID
+  tool_name: 'web_search',
+  tool_args: { query: 'Python教程' },
+  status: 'running',  // running / done / error
+  result_summary: '找到 5 条结果',
+  result_detail: '...'
+}
 ```
-running → done
-running → error
-```
+
+### 2.3 匹配规则
+
+**所有工具段匹配使用 `tool_call_id`**，不使用 tool_name。后端每次工具调用生成唯一 tool_call_id，前端按此 ID 匹配更新。
 
 ---
 
@@ -53,90 +49,129 @@ running → error
 ### 3.1 react.py yield 格式
 
 ```python
-# 文本段（流式追加，每个 chunk 是一个 text segment）
+# 文本段
 yield {"type": "segment", "segment": {"type": "text", "content": chunk.content}}
 
-# 工具调用段（开始）
+# 工具段（开始）
 yield {"type": "segment", "segment": {
     "type": "tool",
+    "tool_call_id": "tc_001",
     "tool_name": "web_search",
     "tool_args": {"query": "Python教程"},
     "status": "running"
 }}
 
-# 工具调用段（完成，更新同名 tool segment）
+# 工具段（完成）
 yield {"type": "segment", "segment": {
     "type": "tool",
-    "tool_name": "web_search",
+    "tool_call_id": "tc_001",
     "status": "done",
     "result_summary": "找到 5 条结果",
     "result_detail": "1. Python官方教程\n2. 廖雪峰..."
-}}
-
-# 工具调用段（错误）
-yield {"type": "segment", "segment": {
-    "type": "tool",
-    "tool_name": "web_search",
-    "status": "error",
-    "result_summary": "搜索失败：网络超时"
 }}
 ```
 
 ### 3.2 合并逻辑
 
-连续的 text segment chunks 合并为一个 text segment：
-- 第一个 chunk 创建新 text segment
-- 后续 chunk 追加到当前 text segment 的 content
+- 连续 text segment chunks 合并为一个 text segment
+- 工具段按 tool_call_id 匹配更新，不按 tool_name
 
-tool segment 按 tool_name 匹配更新：
-- 收到 status=running → 新增 tool segment
-- 收到 status=done/error → 更新同名 tool segment 的 status 和 result
+### 3.3 工具调用时机
+
+尽量在 Markdown 语义边界（段落结束、列表完结）处触发工具调用，避免拆分代码块、表格等复合结构。
 
 ---
 
-## 4. 前端渲染
+## 4. 前端 store
 
-### 4.1 ChatBubble 改造
+### 4.1 appendSegment（immutable 更新）
 
-遍历 segments 渲染：
+```javascript
+function appendSegment(segment) {
+  const messages = [...messagesRef.value]
+  const last = messages[messages.length - 1]
 
-```vue
-<div v-for="(seg, i) in msg.segments" :key="i">
-  <!-- 文本段 -->
-  <div v-if="seg.type === 'text'" class="text-seg" v-html="renderMarkdown(seg.content)" />
-
-  <!-- 工具调用段时间线节点 -->
-  <div v-if="seg.type === 'tool'" class="tool-seg">
-    <div class="tool-header">
-      <span class="tool-icon">{{ toolIcon(seg.tool_name) }}</span>
-      <span class="tool-name">{{ seg.tool_name }}</span>
-      <span class="tool-args">{{ summarizeArgs(seg.tool_args) }}</span>
-      <span class="tool-status">
-        <span v-if="seg.status === 'running'" class="spinner">⏳</span>
-        <span v-if="seg.status === 'done'">✅</span>
-        <span v-if="seg.status === 'error'">❌</span>
-      </span>
-    </div>
-    <div class="tool-summary" v-if="seg.result_summary">{{ seg.result_summary }}</div>
-    <div class="tool-detail" v-if="expandedTools[i]">
-      <pre>{{ seg.result_detail }}</pre>
-    </div>
-    <button class="tool-expand" @click="toggleExpand(i)" v-if="seg.result_detail">
-      {{ expandedTools[i] ? '收起' : '展开' }}
-    </button>
-  </div>
-</div>
+  if (!last || last.role !== 'assistant' || !last.streaming) {
+    messages.push({
+      role: 'assistant', version: 2,
+      segments: [{ ...segment }],
+      streaming: true, emoji: null
+    })
+  } else {
+    const segs = [...last.segments]
+    if (segment.type === 'text') {
+      const lastSeg = segs[segs.length - 1]
+      if (lastSeg?.type === 'text') {
+        segs[segs.length - 1] = { ...lastSeg, content: lastSeg.content + segment.content }
+      } else {
+        segs.push({ ...segment })
+      }
+    } else if (segment.type === 'tool') {
+      const idx = segs.findIndex(s => s.type === 'tool' && s.tool_call_id === segment.tool_call_id)
+      if (idx >= 0 && segment.status !== 'running') {
+        segs[idx] = { ...segs[idx], ...segment }
+      } else {
+        segs.push({ ...segment })
+      }
+    }
+    messages[messages.length - 1] = { ...last, segments: segs }
+  }
+  messagesRef.value = messages
+}
 ```
 
-### 4.2 工具图标映射
+### 4.2 流式结束
 
-| 工具 | 图标 |
-|------|------|
-| web_search | 🔍 |
-| code_exec | 💻 |
-| file_manager | 📁 |
+收到 done 事件时：
+1. `streaming` 置为 false
+2. 所有残留 status=running 的 tool segment 兜底为 status=error + result_summary='执行超时或断流'
 
-### 4.3 CSS 样式
+---
+
+## 5. 前端渲染
+
+### 5.1 ChatBubble 时间线
+
+```
+┌─────────────────────────────────────────┐
+│  🤖 Agent 消息                          │
+│                                         │
+│  我来帮你搜索一下。                       │
+│                                         │
+│  │ ┌─ 🔍 web_search ───────────────┐   │
+│  │ │  搜索「Python教程」               │   │
+│  │ │  ✅ 找到 5 条结果          [展开] │   │
+│  │ └────────────────────────────────┘   │
+│  │                                      │
+│  │ ┌─ 💻 code_exec ────────────────┐   │
+│  │ │  python -c "print('hello')"     │   │
+│  │ │  ✅ hello                [展开] │   │
+│  │ └────────────────────────────────┘   │
+│                                         │
+│  根据搜索结果，Python 教程推荐...        │
+│                                    😊   │
+└─────────────────────────────────────────┘
+```
+
+- 连续 tool segment 之间有左侧纵向连接线
+- 不同状态不同配色：running（蓝色脉冲）、done（绿色）、error（红色）
+- 展开状态用 tool_call_id 作为 key（不用数组索引）
+
+### 5.2 结果按工具类型格式化
+
+| 工具 | result_detail 格式 |
+|------|-------------------|
+| web_search | 标题 + 链接列表 |
+| code_exec | 代码块 + 语法高亮 |
+| file_manager | JSON 格式化 + 层级折叠 |
+| 其他 | 纯文本 |
+
+### 5.3 操作入口
+
+- 错误状态的 tool segment 显示「重试」按钮
+- 气泡顶部显示「折叠全部工具」总开关
+
+### 5.4 CSS
 
 ```css
 .tool-seg {
@@ -146,72 +181,42 @@ tool segment 按 tool_name 匹配更新：
   border-left: 3px solid var(--primary);
   border-radius: 0 8px 8px 0;
   font-size: 13px;
+  position: relative;
 }
-.tool-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+/* 纵向连接线 */
+.tool-seg + .tool-seg::before {
+  content: '';
+  position: absolute;
+  left: -3px;
+  top: -8px;
+  width: 3px;
+  height: 8px;
+  background: var(--primary);
 }
+/* 状态配色 */
+.tool-seg[data-status="running"] { border-left-color: #3b82f6; }
+.tool-seg[data-status="done"] { border-left-color: #22c55e; }
+.tool-seg[data-status="error"] { border-left-color: #ef4444; }
+.tool-header { display: flex; align-items: center; gap: 6px; }
 .tool-icon { font-size: 14px; }
 .tool-name { font-weight: 600; color: var(--primary); }
 .tool-args { color: var(--text-secondary); font-size: 12px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tool-status { flex-shrink: 0; }
 .tool-summary { margin-top: 4px; color: var(--text-secondary); font-size: 12px; }
 .tool-detail { margin-top: 8px; padding: 8px; background: var(--bg-primary); border-radius: 4px; font-size: 12px; max-height: 200px; overflow-y: auto; }
-.tool-expand { margin-top: 4px; background: none; border: none; color: var(--primary); cursor: pointer; font-size: 12px; }
-.spinner { animation: spin 1s linear infinite; }
+.tool-actions { margin-top: 4px; display: flex; gap: 8px; }
+.tool-expand, .tool-retry { background: none; border: none; color: var(--primary); cursor: pointer; font-size: 12px; }
+.spinner { animation: spin 1s linear infinite; display: inline-block; }
 @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-```
-
----
-
-## 5. 前端 store 改造
-
-### 5.1 chat.js
-
-```javascript
-// appendAgentChunk 改为 appendSegment
-function appendSegment(segment) {
-  const last = messages.value[messages.value.length - 1]
-  if (!last || last.role !== 'assistant' || !last.streaming) {
-    // 新建 assistant 消息
-    messages.value.push({
-      role: 'assistant',
-      segments: [segment],
-      streaming: true,
-      emoji: null
-    })
-  } else {
-    // 追加到现有消息
-    if (segment.type === 'text') {
-      // 合并连续 text segment
-      const lastSeg = last.segments[last.segments.length - 1]
-      if (lastSeg && lastSeg.type === 'text') {
-        lastSeg.content += segment.content
-      } else {
-        last.segments.push(segment)
-      }
-    } else if (segment.type === 'tool') {
-      // 查找同名 tool segment
-      const existing = last.segments.find(s => s.type === 'tool' && s.tool_name === segment.tool_name && s.status === 'running')
-      if (existing && segment.status !== 'running') {
-        // 更新状态
-        Object.assign(existing, segment)
-      } else {
-        last.segments.push(segment)
-      }
-    }
-  }
-}
 ```
 
 ---
 
 ## 6. 兼容性
 
-- 旧消息（无 segments 字段）自动转换：`segments = [{ type: 'text', content: msg.content }]`
+- 旧消息（无 version 字段）自动转换：`segments = [{ type: 'text', content: msg.content }]`
 - 确认（confirm）和完成（done）消息格式不变
-- 错误消息也改为 segment：`{ type: 'text', content: '[错误] ...' }`
+- 错误消息也改为 segment
 
 ---
 
@@ -219,6 +224,7 @@ function appendSegment(segment) {
 
 | 阶段 | 内容 |
 |------|------|
-| S0 | 后端 react.py 改为 segment yield 格式 |
-| S1 | 前端 chat store 改为 appendSegment |
-| S2 | 前端 ChatBubble 改为 segments 渲染 + 时间线样式 |
+| S0 | 后端 react.py 改为 segment yield + tool_call_id |
+| S1 | 前端 chat store 改为 appendSegment（immutable）+ done 兜底 |
+| S2 | 前端 ChatBubble 改为 segments 渲染 + 时间线 + 结果格式化 + 重试按钮 |
+| S3 | 测试：并发工具、乱序返回、长消息渲染、流式结束兜底 |
