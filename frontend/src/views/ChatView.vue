@@ -92,7 +92,10 @@ onMounted(() => {
   connect()
   scrollToBottom()
   onMessage.value = (msg) => {
-    if (msg.type === 'answer') {
+    if (msg.type === 'segment') {
+      store.appendSegment(msg.segment)
+    } else if (msg.type === 'answer') {
+      // 旧格式兼容
       store.appendSegment({ type: 'text', content: msg.content })
     } else if (msg.type === 'confirm') {
       // 显示确认对话框

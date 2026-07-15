@@ -37,6 +37,6 @@ async def test_react_simple_response():
     async for event in agent.run("test-session", "你好"):
         results.append(event)
 
-    answers = [r for r in results if r["type"] == "answer"]
+    answers = [r for r in results if r["type"] == "segment" and r["segment"]["type"] == "text"]
     assert len(answers) > 0
-    assert "你好" in "".join(r["content"] for r in answers)
+    assert "你好" in "".join(r["segment"]["content"] for r in answers)
