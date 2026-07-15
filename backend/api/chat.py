@@ -1,4 +1,5 @@
 import json
+import asyncio
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from agent.react import ReActAgent
 from agent.models.openai_adapter import OpenAIAdapter
@@ -8,6 +9,9 @@ from persona.manager import persona_manager
 from tools.registry import tool_registry
 
 router = APIRouter()
+
+# 待确认的请求 {request_id: asyncio.Future}
+pending_confirms = {}
 
 def create_agent(api_key: str = None, base_url: str = None, model_name: str = None) -> ReActAgent:
     key = api_key or settings.DEFAULT_API_KEY
@@ -22,10 +26,31 @@ async def websocket_chat(ws: WebSocket):
     await ws.accept()
     agent = create_agent()
 
+    async def confirm_callback(confirm_data):
+        """等待前端确认的回调"""
+        request_id = confirm_data.get('request_id', '')
+        loop = asyncio.get_event_loop()
+        future = loop.create_future()
+        pending_confirms[request_id] = future
+        try:
+            return await asyncio.wait_for(future, timeout=60)
+        except asyncio.TimeoutError:
+            return False
+        finally:
+            pending_confirms.pop(request_id, None)
+
     try:
         while True:
             data = await ws.receive_text()
             msg = json.loads(data)
+
+            # 处理前端确认响应
+            if msg.get('type') == 'confirm_response':
+                request_id = msg.get('request_id', '')
+                future = pending_confirms.get(request_id)
+                if future and not future.done():
+                    future.set_result(msg.get('confirmed', False))
+                continue
 
             session_id = msg.get("session_id", "default")
             content = msg.get("content", "")
@@ -38,19 +63,19 @@ async def websocket_chat(ws: WebSocket):
             emotion_state = emotion.pick_emotion()
 
             try:
-                async for event in agent.run(session_id, content, system_prompt=system_prompt, tools=tool_registry.get_tools(), persona=persona_name):
+                async for event in agent.run(session_id, content, system_prompt=system_prompt, tools=tool_registry.get_tools(), persona=persona_name, confirm_callback=confirm_callback):
                     await ws.send_text(json.dumps(event, ensure_ascii=False))
             except Exception as e:
                 try:
                     await ws.send_text(json.dumps({"type": "error", "content": str(e)}, ensure_ascii=False))
-                except:
+                except Exception:
                     pass
 
             # 确保 done 消息总是发送
             try:
                 done_msg = {"type": "done", "emotion": emotion_state.primary, "emoji": emotion_state.emoji}
                 await ws.send_text(json.dumps(done_msg))
-            except:
+            except Exception:
                 pass
 
     except WebSocketDisconnect:

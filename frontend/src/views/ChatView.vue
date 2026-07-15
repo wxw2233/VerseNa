@@ -12,11 +12,33 @@
       </div>
       <ChatInput @send="handleSend" />
     </div>
+
+    <!-- Confirm Dialog -->
+    <div v-if="confirmDialog.visible" class="confirm-overlay" @click.self="onConfirm(false)">
+      <div class="confirm-dialog">
+        <div class="confirm-header">⚠️ 操作确认</div>
+        <div class="confirm-body">
+          <p class="confirm-message">{{ confirmDialog.message }}</p>
+          <div v-if="confirmDialog.action" class="confirm-meta">
+            <span class="confirm-action">{{ confirmDialog.action }}</span>
+            <span v-if="confirmDialog.path" class="confirm-path">{{ confirmDialog.path }}</span>
+            <span v-if="confirmDialog.src" class="confirm-path">{{ confirmDialog.src }} → {{ confirmDialog.dst }}</span>
+            <span v-if="confirmDialog.file_count !== undefined" class="confirm-count">
+              {{ confirmDialog.file_count }} 个文件, {{ confirmDialog.dir_count }} 个目录
+            </span>
+          </div>
+        </div>
+        <div class="confirm-actions">
+          <button class="btn-confirm-cancel" @click="onConfirm(false)">取消</button>
+          <button class="btn-confirm-ok" @click="onConfirm(true)">确认执行</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, nextTick, onMounted, watch } from 'vue'
+import { ref, reactive, computed, nextTick, onMounted, watch } from 'vue'
 import { useChatStore } from '../stores/chat'
 import { useWebSocket } from '../composables/useWebSocket'
 import { usePersonaStore } from '../stores/persona'
@@ -32,6 +54,18 @@ const sessionStore = useSessionStore()
 const themeStore = useThemeStore()
 const messagesRef = ref(null)
 const { connect, send, onMessage } = useWebSocket()
+
+const confirmDialog = reactive({
+  visible: false,
+  requestId: '',
+  message: '',
+  action: '',
+  path: '',
+  src: '',
+  dst: '',
+  file_count: undefined,
+  dir_count: undefined
+})
 
 const bgStyle = computed(() => {
   const themeId = themeStore.current
@@ -52,16 +86,26 @@ function scrollToBottom() {
   })
 }
 
-// 消息变化时自动滚到底部
 watch(() => store.messages.length, () => scrollToBottom())
 
-// 组件挂载时滚到底部
 onMounted(() => {
   connect()
   scrollToBottom()
   onMessage.value = (msg) => {
     if (msg.type === 'answer') {
       store.appendAgentChunk(msg.content)
+    } else if (msg.type === 'confirm') {
+      // 显示确认对话框
+      const data = msg.data || msg
+      confirmDialog.requestId = data.request_id || ''
+      confirmDialog.message = data.message || '确认执行此操作？'
+      confirmDialog.action = data.action || ''
+      confirmDialog.path = data.path || ''
+      confirmDialog.src = data.src || ''
+      confirmDialog.dst = data.dst || ''
+      confirmDialog.file_count = data.file_count
+      confirmDialog.dir_count = data.dir_count
+      confirmDialog.visible = true
     } else if (msg.type === 'done') {
       store.finishStreaming()
       if (msg.emoji) {
@@ -69,12 +113,23 @@ onMounted(() => {
         if (last) last.emoji = msg.emoji
       }
     } else if (msg.type === 'error') {
-      store.appendAgentChunk(`\n[错误] ${msg.content}`)
+      store.appendAgentChunk(`
+[错误] ${msg.content}`)
       store.finishStreaming()
     }
     scrollToBottom()
   }
 })
+
+function onConfirm(confirmed) {
+  const requestId = confirmDialog.requestId
+  confirmDialog.visible = false
+  send({
+    type: 'confirm_response',
+    request_id: requestId,
+    confirmed: confirmed
+  })
+}
 
 function handleSend(content) {
   store.addUserMessage(content)
@@ -124,4 +179,93 @@ function handleSend(content) {
 }
 .empty p { font-size: 24px; }
 .empty .sub { font-size: 14px; margin-top: 8px; }
+
+/* Confirm Dialog */
+.confirm-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+.confirm-dialog {
+  background: var(--bg-secondary, #1e1e2e);
+  border: 1px solid var(--border, #2a2a40);
+  border-radius: 14px;
+  padding: 24px;
+  min-width: 380px;
+  max-width: 520px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+.confirm-header {
+  font-size: 18px;
+  font-weight: 600;
+  margin-bottom: 16px;
+  color: var(--text-primary, #e8e8f0);
+}
+.confirm-body {
+  margin-bottom: 20px;
+}
+.confirm-message {
+  font-size: 14px;
+  color: var(--text-primary, #e8e8f0);
+  line-height: 1.6;
+  margin-bottom: 12px;
+}
+.confirm-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 14px;
+  background: var(--bg-primary, #0f0f1a);
+  border-radius: 8px;
+  font-size: 13px;
+}
+.confirm-action {
+  color: var(--primary, #7c5cfc);
+  font-weight: 600;
+  text-transform: uppercase;
+  font-family: monospace;
+}
+.confirm-path {
+  color: var(--text-secondary, #8888aa);
+  font-family: monospace;
+  word-break: break-all;
+}
+.confirm-count {
+  color: var(--text-secondary, #8888aa);
+}
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+.btn-confirm-cancel {
+  padding: 8px 20px;
+  border: 1px solid var(--border, #2a2a40);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary, #8888aa);
+  cursor: pointer;
+  font-size: 14px;
+  transition: border-color 0.15s;
+}
+.btn-confirm-cancel:hover {
+  border-color: var(--primary, #7c5cfc);
+}
+.btn-confirm-ok {
+  padding: 8px 20px;
+  border: none;
+  border-radius: 8px;
+  background: var(--primary, #7c5cfc);
+  color: #fff;
+  cursor: pointer;
+  font-size: 14px;
+  transition: opacity 0.15s;
+}
+.btn-confirm-ok:hover {
+  opacity: 0.85;
+}
 </style>

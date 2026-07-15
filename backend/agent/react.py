@@ -10,7 +10,7 @@ class ReActAgent:
         self.memory = memory
         self.tool_registry = tool_registry
 
-    async def run(self, session_id: str, user_message: str, system_prompt: str = "", tools: list = None, persona: str = "default") -> AsyncGenerator[dict, None]:
+    async def run(self, session_id: str, user_message: str, system_prompt: str = "", tools: list = None, persona: str = "default", confirm_callback=None) -> AsyncGenerator[dict, None]:
         await self.memory.add_message(session_id, "user", user_message, persona=persona)
         messages = await self.memory.get_context(session_id, system_prompt)
 
@@ -55,6 +55,21 @@ class ReActAgent:
                     yield {"type": "tool_call", "content": json.dumps({"name": tool_name, "args": tool_args}, ensure_ascii=False)}
 
                     result = await self.tool_registry.execute(tool_name, tool_args)
+
+                    # 检查是否为 confirm 类型的返回
+                    try:
+                        result_data = json.loads(result)
+                        if result_data.get("type") == "confirm" and confirm_callback:
+                            yield {"type": "confirm", "data": result_data}
+                            confirmed = await confirm_callback(result_data)
+                            if confirmed:
+                                tool_args["confirmed"] = True
+                                result = await self.tool_registry.execute(tool_name, tool_args)
+                            else:
+                                result = json.dumps({"success": False, "error": "USER_DENIED", "message": "用户取消了操作"}, ensure_ascii=False)
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+
                     messages.append({"role": "tool", "tool_call_id": tc.get("id", ""), "content": result})
                     yield {"type": "tool_result", "content": result}
 
