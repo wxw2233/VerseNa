@@ -1,4 +1,4 @@
-# 次元人格 — file_manager 工具设计
+# 次元人格 — file_manager 工具设计（v2）
 
 > 日期：2026-07-15
 
@@ -13,82 +13,125 @@
 ```python
 name = "file_manager"
 description = "文件管理器：读取、写入、列出目录、搜索、编辑、复制、移动、删除、获取信息"
-parameters = {
-    "type": "object",
-    "properties": {
-        "action": {"type": "string", "enum": ["read","write","list","search","find_replace","copy","move","delete","info"]},
-        "path": {"type": "string", "description": "目标路径"},
-        "content": {"type": "string", "description": "写入内容（write）"},
-        "old": {"type": "string", "description": "查找文本（find_replace）"},
-        "new": {"type": "string", "description": "替换文本（find_replace）"},
-        "pattern": {"type": "string", "description": "搜索模式（search, glob）"},
-        "src": {"type": "string", "description": "源路径（copy/move）"},
-        "dst": {"type": "string", "description": "目标路径（copy/move）"},
-        "encoding": {"type": "string", "default": "utf-8"},
-        "max_size": {"type": "integer", "default": 50000}
-    },
-    "required": ["action", "path"]
-}
 ```
 
-### 2.2 九个 action
+### 2.2 参数（按 action 区分必填）
 
-| action | 必需参数 | 可选参数 | 返回 |
-|--------|---------|---------|------|
-| read | path | encoding, max_size | 文件内容（截断到 max_size） |
-| write | path, content | encoding | 写入字节数 |
-| list | path | — | 文件/目录列表（名称+类型+大小） |
-| search | path, pattern | — | 匹配的文件路径列表 |
-| find_replace | path, old, new | — | 替换次数 + 替换后内容预览 |
-| copy | src, dst | — | 复制结果 |
-| move | src, dst | — | 移动结果 |
-| delete | path | — | 删除结果（需确认） |
-| info | path | — | 大小/修改时间/类型/权限 |
+| 参数 | 类型 | 必填于 | 说明 |
+|------|------|--------|------|
+| action | string | 所有 | read/write/list/search/find_replace/copy/move/delete/info |
+| path | string | read/write/list/search/find_replace/delete/info | 目标路径 |
+| content | string | write | 写入内容 |
+| mode | string | write | overwrite(默认)/append |
+| old | string | find_replace | 查找文本 |
+| new | string | find_replace | 替换文本 |
+| pattern | string | search | glob 模式（如 `*.py`） |
+| recursive | bool | search(默认true), delete(默认false) | 是否递归 |
+| src | string | copy/move | 源路径 |
+| dst | string | copy/move | 目标路径 |
+| encoding | string | read/write | 默认 utf-8 |
+| max_size | int | read | 默认 50000 |
+| limit | int | list | 最大返回条数，默认 200 |
+
+### 2.3 返回格式
+
+成功：
+```json
+{"success": true, "data": {...}}
+```
+
+失败：
+```json
+{"success": false, "error": "FILE_NOT_FOUND", "message": "文件不存在"}
+```
+
+错误类型：`FILE_NOT_FOUND`, `PERMISSION_DENIED`, `DISK_FULL`, `ENCODING_ERROR`, `PATH_FORBIDDEN`, `FILE_TOO_LARGE`, `CONFIRM_REQUIRED`
+
+### 2.4 九个 action
+
+| action | 必需参数 | 可选参数 | 返回 data |
+|--------|---------|---------|-----------|
+| read | path | encoding, max_size | {content: str, truncated: bool, size: int} |
+| write | path, content | mode, encoding | {bytes_written: int, created_dirs: bool} |
+| list | path | limit | {items: [{name, type, size}...], total: int} |
+| search | path, pattern | recursive | {matches: [str...], count: int} |
+| find_replace | path, old, new | — | {replacements: int, preview: str(前500字)} |
+| copy | src, dst | — | {copied: int(bytes)} |
+| move | src, dst | — | {moved: true} |
+| delete | path | recursive | {deleted: true} |
+| info | path | — | {size, modified, type, permissions, is_symlink} |
 
 ---
 
 ## 3. 安全机制
 
-### 3.1 禁止访问路径
+### 3.1 路径规范化
 
-- Linux: `/proc`, `/sys`, `/dev`
+所有路径执行：
+1. 统一转正斜杠 `/`
+2. `os.path.abspath()` 规范化
+3. 解析符号链接 `os.path.realpath()`
+4. 检查是否在禁止路径内
+
+### 3.2 禁止访问路径
+
+**硬禁止（直接拒绝，不可信任模式放行）：**
+- Linux: `/proc`, `/sys`, `/dev`, `/etc/shadow`, `/etc/passwd`
 - Windows: `C:\Windows\System32`, `C:\Program Files`, `C:\ProgramData`
+- 跨平台: `~/.ssh`, `~/.gnupg`
 
-访问这些路径直接返回错误，不执行。
+### 3.3 敏感路径（信任模式关闭时需确认）
 
-### 3.2 信任模式
+- `/etc` 下其他文件
+- `C:\Windows` 下其他文件
+- 用户主目录配置文件（`.bashrc`, `.gitconfig` 等）
+
+### 3.4 信任模式
 
 存储于 `app_config` 表，key = `file_trust_mode`。
 
 **关闭（默认）：**
-- `delete` → 需确认
-- `write` 覆盖已有文件 → 需确认
-- 修改系统目录（`/etc`, `C:\Windows`, `C:\Program Files`）→ 需确认
+- delete → 需确认
+- write 覆盖已有文件 → 需确认（append 不需确认）
+- 敏感路径修改 → 需确认
+- delete 目录 + recursive → 强制确认（无论信任模式）
 
 **开启：**
-- 只有系统核心文件（`/etc`, `C:\Windows`, `C:\Program Files`）需确认
+- 只有硬禁止路径修改需确认
 - 其他操作直接执行
 
-### 3.3 确认机制
+### 3.5 确认机制
 
 后端返回：
 ```json
-{"type": "confirm", "action": "delete", "path": "/some/file", "message": "确认删除文件 /some/file？"}
+{
+  "type": "confirm",
+  "request_id": "uuid",
+  "action": "delete",
+  "path": "/some/file",
+  "message": "确认删除文件 /some/file？"
+}
 ```
 
-前端显示确认对话框，用户点击后发送：
+前端回传：
 ```json
-{"type": "confirm_response", "confirmed": true}
+{"type": "confirm_response", "request_id": "uuid", "confirmed": true}
 ```
 
-后端收到确认后继续执行原操作。
+### 3.6 读写限制
 
-### 3.4 读写限制
-
-- 读取：默认最大 50KB，超过截断并提示
-- 二进制文件：检测前 8KB 是否有 null 字节，有则跳过
+- 读取：默认最大 50KB，超过截断
+- 二进制文件：检测前 8KB 有 null 字节则跳过
 - 写入：单次最大 1MB
-- 写入时自动创建父目录（`mkdir -p` 语义）
+- 自动创建父目录
+- find_replace：大文件（>500KB）拒绝执行，返回 FILE_TOO_LARGE
+
+### 3.7 操作审计日志
+
+所有写入/删除/修改操作记录到 `data/audit.log`：
+```
+[2026-07-15 22:00:00] action=delete path=/some/file result=success trust_mode=false
+```
 
 ---
 
@@ -96,41 +139,18 @@ parameters = {
 
 ### 4.1 设置页"工具" tab
 
-添加信任模式开关：
-
-```
-🔒 信任模式：[开关]
-开启后，除系统核心文件外，所有文件操作无需确认直接执行。
-```
+信任模式开关。
 
 ### 4.2 确认对话框
 
-收到 `confirm` 消息时，显示模态确认框：
-- 标题：`⚠️ 需要确认`
-- 内容：操作描述 + 文件路径
-- 按钮：确认 / 取消
+收到 `confirm` 消息时显示模态确认框，带回 `request_id`。
 
 ---
 
-## 5. 后端改动
-
-### 5.1 新文件
-
-- `backend/tools/builtin/file_manager.py` — FileManagerTool
-
-### 5.2 修改文件
-
-- `backend/api/chat.py` — WebSocket 处理确认响应
-- `backend/api/config_api.py` — 信任模式 API
-- `frontend/src/views/SettingsView.vue` — 信任模式开关
-- `frontend/src/views/ChatView.vue` — 确认对话框
-
----
-
-## 6. 开发阶段
+## 5. 开发阶段
 
 | 阶段 | 内容 |
 |------|------|
-| T0 | file_manager 工具（9 个 action + 安全检查） |
-| T1 | 信任模式后端（config API + 确认机制） |
+| T0 | file_manager 工具（9 action + 安全检查 + 审计日志） |
+| T1 | 信任模式后端（config API + 确认机制 + request_id） |
 | T2 | 前端（信任模式开关 + 确认对话框） |
