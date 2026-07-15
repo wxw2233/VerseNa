@@ -93,7 +93,7 @@ onMounted(() => {
   scrollToBottom()
   onMessage.value = (msg) => {
     if (msg.type === 'answer') {
-      store.appendAgentChunk(msg.content)
+      store.appendSegment({ type: 'text', content: msg.content })
     } else if (msg.type === 'confirm') {
       // 显示确认对话框
       const data = msg.data || msg
@@ -107,15 +107,9 @@ onMounted(() => {
       confirmDialog.dir_count = data.dir_count
       confirmDialog.visible = true
     } else if (msg.type === 'done') {
-      store.finishStreaming()
-      if (msg.emoji) {
-        const last = store.messages[store.messages.length - 1]
-        if (last) last.emoji = msg.emoji
-      }
+      store.finishStreaming(msg.emoji)
     } else if (msg.type === 'error') {
-      store.appendAgentChunk(`
-[错误] ${msg.content}`)
-      store.finishStreaming()
+      store.handleError(msg.content || msg.message || '未知错误')
     }
     scrollToBottom()
   }
