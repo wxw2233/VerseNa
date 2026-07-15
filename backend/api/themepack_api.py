@@ -78,6 +78,7 @@ async def update_pack(pack_id: str, req: PackUpdate):
 
     # 更新角色配置
     if req.character is not None:
+        import shutil
         char = dict(req.character)
         prompt = char.pop("prompt", None)
         if prompt is not None:
@@ -85,9 +86,22 @@ async def update_pack(pack_id: str, req: PackUpdate):
         (pack_dir / "persona.json").write_text(
             json.dumps(char, ensure_ascii=False, indent=2), encoding="utf-8"
         )
+        # 同步到 personas/{pack_id}/
+        persona_dest = Path(__file__).parent.parent.parent / "personas" / pack_id
+        persona_dest.mkdir(parents=True, exist_ok=True)
+        for f in ["persona.json", "prompt.md"]:
+            src = pack_dir / f
+            if src.exists():
+                shutil.copy2(src, persona_dest / f)
+        # 更新 persona_ref
+        if pack_json.exists():
+            pd = json.loads(pack_json.read_text(encoding="utf-8"))
+            pd["persona_ref"] = pack_id
+            pack_json.write_text(json.dumps(pd, ensure_ascii=False, indent=2), encoding="utf-8")
 
     # 更新主题配置
     if req.theme is not None:
+        import shutil as _shutil
         theme_data = dict(req.theme)
         colors = theme_data.pop("colors", {})
         fonts = theme_data.pop("fonts", {})
