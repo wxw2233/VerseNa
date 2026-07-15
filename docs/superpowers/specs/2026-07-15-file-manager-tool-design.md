@@ -1,4 +1,4 @@
-# 次元人格 — file_manager 工具设计（v3）
+# 次元人格 — file_manager 工具设计（v4）
 
 > 日期：2026-07-15
 
@@ -38,21 +38,21 @@ description = "文件管理器：读取、写入、列出目录、搜索、编�
 成功：`{"success": true, "data": {...}}`
 失败：`{"success": false, "error": "错误码", "message": "人类可读描述"}`
 
-错误码：`FILE_NOT_FOUND`, `PERMISSION_DENIED`, `DISK_FULL`, `ENCODING_ERROR`, `PATH_FORBIDDEN`, `FILE_TOO_LARGE`, `CONFIRM_REQUIRED`, `CONFIRM_TIMEOUT`, `PATH_IS_DIRECTORY`, `PATH_IS_FILE`, `DEST_EXISTS`, `INVALID_PATH`
+错误码：`FILE_NOT_FOUND`, `PERMISSION_DENIED`, `DISK_FULL`, `ENCODING_ERROR`, `PATH_FORBIDDEN`, `FILE_TOO_LARGE`, `CONFIRM_REQUIRED`, `CONFIRM_TIMEOUT`, `PATH_IS_DIRECTORY`, `PATH_IS_FILE`, `DEST_EXISTS`, `INVALID_PATH`, `BINARY_FILE_NOT_SUPPORTED`
 
 ### 2.4 九个 action 语义
 
 | action | 必需 | 可选 | 返回 data |
 |--------|------|------|-----------|
-| read | path | encoding, max_size | {content, truncated, size} — 空文件返回 content="", truncated=false |
-| write | path, content | mode, encoding | {bytes_written, created_dirs} |
-| list | path | limit | {items: [{name,type,size}], total} — 空目录 items=[], total=0 |
-| search | path, pattern | recursive | {matches: [str], count} — 按 glob 匹配文件名 |
-| find_replace | path, old, new | — | {replacements, preview(前500字)} — 全文本全局替换 |
+| read | path | encoding, max_size | {content, truncated, size} — 空文件: content="", truncated=false; 二进制文件: 返回 BINARY_FILE_NOT_SUPPORTED |
+| write | path, content | mode, encoding | {bytes_written, created_dirs} — path 为目录返回 PATH_IS_DIRECTORY; append 模式文件不存在则自动创建; 大小按 encoding 编码后字节数计算 |
+| list | path | limit | {items: [{name,type(file/dir/symlink),size}], total} — 空目录: items=[], total=0 |
+| search | path, pattern | recursive | {matches: [绝对路径], count} — 返回绝对路径 |
+| find_replace | path, old, new | — | {replacements, preview(前500字)} — 全文本全局替换; 二进制文件返回 BINARY_FILE_NOT_SUPPORTED; 替换后大小超 1MB 返回 FILE_TOO_LARGE |
 | copy | src, dst | — | {copied(bytes)} |
 | move | src, dst | — | {moved: true} |
 | delete | path | recursive | {deleted: true} |
-| info | path | — | {size, modified(Unix时间戳), type, permissions(八进制), is_symlink} |
+| info | path | — | {size, modified(Unix秒时间戳), type(file/dir/symlink), permissions(八进制如0o755), is_symlink} |
 
 ### 2.5 copy/move 目标语义
 
@@ -61,52 +61,42 @@ description = "文件管理器：读取、写入、列出目录、搜索、编�
 - dst 为不存在路径：将 src 重命名为 dst
 - dst 为已存在文件：触发覆盖确认（同 write 覆盖规则）
 - 跨分区 move：自动降级为 copy + delete
-
-### 2.6 search 语义
-
-- 按 glob 模式匹配**文件名**（非文件内容）
-- pattern 使用标准 glob 语法：`*.py`, `**/*.json`, `test_*.py`
-- `**` 表示递归匹配任意层级
-- recursive 参数控制是否递归子目录（默认 true）
-
-### 2.7 find_replace 语义
-
-- 全文本全局替换（替换所有匹配项）
-- 不支持正则，纯文本匹配
-- 纳入「修改类操作」，敏感路径下触发确认
-- 大文件（>500KB）拒绝执行，返回 FILE_TOO_LARGE
+- src 和 dst 都需执行完整安全校验
 
 ---
 
 ## 3. 安全机制
 
-### 3.1 路径处理（校验 vs 操作分离）
+### 3.1 路径处理顺序
 
-**安全校验阶段：**
-1. `os.path.abspath(path)` — 绝对化
-2. 展开 `~` 为用户主目录
-3. `os.path.realpath(path)` — 解析符号链接
-4. 用解析后路径匹配禁止/敏感路径
+```
+1. os.path.expanduser(path)   — 展开 ~ 为用户主目录
+2. os.path.abspath(path)      — 解析相对路径为绝对路径
+3. os.path.realpath(path)     — 解析符号链接得到物理路径（仅用于安全校验）
+```
 
-**实际操作阶段：**
-- 使用 abspath 后的**原始路径**（不解析符号链接）
-- 这样删除软链接只删除链接本身，不删除目标文件
+**安全校验：** 使用 realpath 后的路径
+**实际操作：** 使用 expanduser + abspath 后的路径（不解析符号链接）
 
-### 3.2 禁止路径（硬禁止，不可信任模式放行）
+这样删除软链接只删除链接本身，不删除目标文件。
 
-统一前缀匹配，realpath 后的路径以禁止路径开头即拦截：
+### 3.2 禁止路径匹配规则
 
-**Linux:**
-- `/proc`, `/sys`, `/dev`
-- `/etc/shadow`, `/etc/passwd`
+**目录型禁止路径**（如 `/proc`, `C:\Windows`）：
+- 目标路径等于禁止路径，或以「禁止路径 + `/`」开头 → 拦截
+- 例：`/proc/1/status` 匹配 `/proc`，但 `/proc_thing` 不匹配
 
-**Windows:**
-- `c:\windows\system32`, `c:\program files`, `c:\programdata`（转小写匹配）
+**文件型禁止路径**（如 `/etc/shadow`）：
+- 精确匹配完整路径
 
-**跨平台:**
-- `{home}/.ssh`, `{home}/.gnupg`
+**Windows：** 路径统一转小写后匹配，兼容盘符大小写
 
-Windows 路径统一转小写后匹配，兼容盘符大小写。
+**硬禁止（所有操作均拦截，包括只读）：**
+- Linux: `/proc`, `/sys`, `/dev`, `/etc/shadow`, `/etc/passwd`
+- Windows: `c:\windows\system32`, `c:\program files`, `c:\programdata`
+- 跨平台: `{home}/.ssh`, `{home}/.gnupg`
+
+**所有操作均校验**（包括 read/list/search/info），防止通过只读操作窃取敏感文件。
 
 ### 3.3 敏感路径（信任模式关闭时需确认）
 
@@ -123,7 +113,7 @@ Windows 路径统一转小写后匹配，兼容盘符大小写。
 - write 覆盖已有文件 → 需确认（append 不需确认）
 - find_replace 在敏感路径 → 需确认
 - copy/move 目标已存在文件 → 需确认
-- delete 目录 + recursive → 强制确认（无论信任模式），确认消息显示文件/目录总数
+- delete 目录 + recursive → 强制确认（无论信任模式），确认消息显示待删除的文件总数、目录总数
 
 **开启：**
 - 只有硬禁止路径修改需确认
@@ -138,7 +128,9 @@ Windows 路径统一转小写后匹配，兼容盘符大小写。
   "request_id": "uuid",
   "action": "delete",
   "path": "/some/file",
-  "message": "确认删除文件 /some/file？"
+  "message": "确认删除文件 /some/file？",
+  "file_count": 10,
+  "dir_count": 3
 }
 ```
 
@@ -149,18 +141,23 @@ Windows 路径统一转小写后匹配，兼容盘符大小写。
 
 **超时：** 60 秒未收到响应，自动取消，返回 CONFIRM_TIMEOUT。
 
-### 3.6 读写限制
+### 3.6 递归删除安全增强
+
+递归删除前，遍历所有子文件与子目录，逐个执行 realpath 安全校验。任意子项命中硬禁止路径，直接拒绝操作，返回 PATH_FORBIDDEN。
+
+### 3.7 读写限制
 
 - 读取：默认最大 50KB，超过截断
-- 二进制文件：检测前 8KB 有 null 字节则跳过
-- 写入：单次最大 1MB
+- 二进制检测：read 和 find_replace 触发，检测前 8KB 有 null 字节则返回 BINARY_FILE_NOT_SUPPORTED
+- 写入：按 encoding 编码后字节数计算，单次最大 1MB
 - 自动创建父目录
 
-### 3.7 操作审计日志
+### 3.8 操作审计日志
 
-所有写入/删除/修改操作记录到 `data/audit.log`：
+记录到 `data/audit.log`：
 ```
-[2026-07-15 22:00:00] action=delete path=/some/file result=success trust_mode=false
+[2026-07-15 22:00:00] request_id=xxx action=delete path=/some/file result=success trust_mode=false
+[2026-07-15 22:00:01] request_id=yyy action=write path=/some/file result=error error=FILE_TOO_LARGE trust_mode=false
 ```
 
 ---
