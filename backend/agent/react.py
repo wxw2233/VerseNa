@@ -26,15 +26,29 @@ class ReActAgent:
                 chunk_content = ""
                 tool_calls = []
 
-                try:
-                    async for chunk in self.model.chat(messages, tools=tools, stream=True):
-                        if chunk.content:
-                            chunk_content += chunk.content
-                            yield {"type": "segment", "segment": {"type": "text", "content": chunk.content}}
-                        if chunk.tool_calls:
-                            tool_calls.extend(chunk.tool_calls)
-                except Exception as e:
-                    yield {"type": "segment", "segment": {"type": "text", "content": f"\n[连接错误] {e}"}}
+                # LLM 调用（最多重试 3 次）
+                llm_success = False
+                last_error = None
+                for attempt in range(3):
+                    try:
+                        async for chunk in self.model.chat(messages, tools=tools, stream=True):
+                            if chunk.content:
+                                chunk_content += chunk.content
+                                yield {"type": "segment", "segment": {"type": "text", "content": chunk.content}}
+                            if chunk.tool_calls:
+                                tool_calls.extend(chunk.tool_calls)
+                        llm_success = True
+                        break
+                    except Exception as e:
+                        last_error = e
+                        if attempt < 2:
+                            wait = 2 ** attempt  # 1s, 2s
+                            yield {"type": "segment", "segment": {"type": "text", "content": f"\n[重试中 {attempt+1}/3，等待 {wait}s...]"}}
+                            import asyncio
+                            await asyncio.sleep(wait)
+
+                if not llm_success:
+                    yield {"type": "segment", "segment": {"type": "text", "content": f"\n[连接失败，已重试3次: {last_error}]"}}
                     break
 
                 full_response += chunk_content

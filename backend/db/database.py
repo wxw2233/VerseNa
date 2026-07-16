@@ -124,13 +124,15 @@ class Database:
     # --- Memory methods ---
 
     async def get_memories(self, limit=20, category=None):
-        """获取长期记忆，按时间倒序，排除已过期的"""
-        query = "SELECT id, content, category, source, expired_at, created_at FROM memories WHERE (expired_at IS NULL OR expired_at > datetime('now')) "
+        """获取长期记忆，按权重+时间综合排序，排除已过期的"""
+        # 权重：instruction=3 > fact=2 > preference=1 > general=0
+        weight_case = "CASE category WHEN 'instruction' THEN 3 WHEN 'fact' THEN 2 WHEN 'preference' THEN 1 ELSE 0 END"
+        query = f"SELECT id, content, category, source, expired_at, created_at FROM memories WHERE (expired_at IS NULL OR expired_at > datetime('now'))"
         params = []
         if category:
-            query += "AND category = ? "
+            query += " AND category = ?"
             params.append(category)
-        query += "ORDER BY created_at DESC LIMIT ?"
+        query += f" ORDER BY {weight_case} DESC, created_at DESC LIMIT ?"
         params.append(limit)
         cursor = await self._db.execute(query, params)
         return [dict(row) for row in await cursor.fetchall()]
