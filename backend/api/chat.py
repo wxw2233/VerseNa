@@ -18,7 +18,11 @@ def create_agent(api_key: str = None, base_url: str = None, model_name: str = No
     url = base_url or settings.DEFAULT_API_BASE
     model = model_name or settings.DEFAULT_MODEL_NAME
     adapter = OpenAIAdapter(api_key=key, base_url=url, model_name=model)
-    memory = MemoryManager()
+    memory = MemoryManager(model=adapter)
+    # 注入 memory_manager 到 save_memory 工具
+    save_mem_tool = tool_registry.get_tool('save_memory')
+    if save_mem_tool:
+        save_mem_tool._memory = memory
     return ReActAgent(model=adapter, memory=memory, tool_registry=tool_registry)
 
 @router.websocket("/ws/chat")
