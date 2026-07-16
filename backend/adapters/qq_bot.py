@@ -18,6 +18,7 @@ class QQBotAdapter(BaseAdapter):
         self._running = False
         self._seq = None
         self._on_message = None  # 回调：收到消息时调用
+        self._token_expires_at = 0  # token 过期时间戳
 
     async def start(self):
         if not self.app_id or not self.app_secret:
@@ -214,6 +215,7 @@ class QQBotAdapter(BaseAdapter):
 
     async def send(self, channel_id: str, content: str, msg_type: str = "channel"):
         """发送消息"""
+        await self.ensure_token()
         if not self.token:
             print("[QQ] send失败: 无token", flush=True)
             return False
@@ -238,13 +240,21 @@ class QQBotAdapter(BaseAdapter):
                     "Authorization": f"QQBot {self.token}"
                 })
                 print(f"[QQ] send {msg_type} -> {resp.status_code}: {resp.text[:200]}", flush=True)
+                if resp.status_code == 401 or "token" in resp.text.lower():
+                    print("[QQ] Token无效，刷新重试...", flush=True)
+                    await self.start()
+                    resp = await client.post(url, json=payload, headers={
+                        "Authorization": f"QQBot {self.token}"
+                    })
+                    print(f"[QQ] 重试 -> {resp.status_code}: {resp.text[:200]}", flush=True)
                 return resp.status_code in (200, 201)
         except Exception as e:
             print(f"[QQ] send异常: {e}", flush=True)
             return False
 
     async def ensure_token(self):
-        if not self.token:
+        if not self.token or time.time() > self._token_expires_at:
+            print("[QQ] Token 过期或缺失，重新获取...", flush=True)
             await self.start()
 
     def is_configured(self) -> bool:
