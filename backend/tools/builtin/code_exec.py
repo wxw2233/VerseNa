@@ -13,7 +13,21 @@ class CodeExecTool(BaseTool):
         "required": ["code"]
     }
 
-    async def execute(self, code: str = "", **kwargs) -> str:
+    async def execute(self, code: str = "", base64_content: str = "", save_to: str = "", **kwargs) -> str:
+        import base64 as b64
+
+        # base64 写入大文件模式
+        if base64_content and save_to:
+            try:
+                data = b64.b64decode(base64_content)
+                import os
+                os.makedirs(os.path.dirname(save_to) or '.', exist_ok=True)
+                with open(save_to, 'wb') as f:
+                    f.write(data)
+                return f"成功写入 {len(data)} 字节到 {save_to}"
+            except Exception as e:
+                return f"写入失败: {e}"
+
         if not code or not code.strip():
             return "错误：没有提供代码"
 

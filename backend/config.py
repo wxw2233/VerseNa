@@ -14,7 +14,7 @@ class Settings:
     DEFAULT_API_KEY = ""
     DEFAULT_API_BASE = "https://api.deepseek.com/v1"
     DEFAULT_MODEL_NAME = "deepseek-chat"
-    MAX_REACT_LOOPS = 5
+    MAX_REACT_LOOPS = 15
     MAX_CONTEXT_TOKENS = 4096
 
     @classmethod

@@ -279,10 +279,18 @@ class FileManagerTool(BaseTool):
                 "path": op_path, "message": msg
             }, ensure_ascii=False)
 
-        os.makedirs(os.path.dirname(op_path) or '.', exist_ok=True)
+        try:
+            os.makedirs(os.path.dirname(op_path) or '.', exist_ok=True)
+        except PermissionError:
+            return json.dumps({"success": False, "error": "PERMISSION_DENIED", "message": f"无权创建目录，请尝试其他路径"}, ensure_ascii=False)
         write_mode = 'a' if mode == 'append' else 'w'
-        with open(op_path, write_mode, encoding=encoding) as f:
-            f.write(content)
+        try:
+            with open(op_path, write_mode, encoding=encoding) as f:
+                f.write(content)
+        except PermissionError:
+            return json.dumps({"success": False, "error": "PERMISSION_DENIED", "message": f"无权写入文件（Windows权限限制），建议改用code_exec执行Python脚本写入"}, ensure_ascii=False)
+        except OSError as e:
+            return json.dumps({"success": False, "error": "PERMISSION_DENIED", "message": f"写入失败: {e}，建议改用code_exec"}, ensure_ascii=False)
         _audit_log(request_id, 'write', op_path, 'success', trust_mode=self._get_trust_mode())
         return json.dumps({"success": True, "data": {"bytes_written": len(content.encode(encoding)), "created_dirs": True}}, ensure_ascii=False)
 
@@ -398,7 +406,12 @@ class FileManagerTool(BaseTool):
                     "type": "confirm", "request_id": request_id, "action": "delete",
                     "path": op_path, "message": f"确认删除文件 {op_path}？"
                 }, ensure_ascii=False)
-            os.remove(op_path)
+            try:
+                os.remove(op_path)
+            except PermissionError:
+                return json.dumps({"success": False, "error": "PERMISSION_DENIED", "message": f"无权删除文件（可能被占用或需要管理员权限），建议改用code_exec执行shell命令删除"}, ensure_ascii=False)
+            except OSError as e:
+                return json.dumps({"success": False, "error": "PERMISSION_DENIED", "message": f"删除失败: {e}，文件可能被其他程序占用"}, ensure_ascii=False)
 
         _audit_log(request_id, 'delete', op_path, 'success', trust_mode=self._get_trust_mode())
         return json.dumps({"success": True, "data": {"deleted": True}}, ensure_ascii=False)
