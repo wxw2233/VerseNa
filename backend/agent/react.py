@@ -111,6 +111,7 @@ class ReActAgent:
         yield {"type": "done", "emoji": emoji}
 
         await self.memory.add_message(session_id, "assistant", full_response, persona=persona)
+        await self.memory.post_conversation(session_id, user_message, full_response)
 
     def _make_summary(self, tool_name, result_data, result):
         """生成工具结果摘要"""

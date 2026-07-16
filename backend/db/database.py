@@ -46,6 +46,33 @@ class Database:
         """)
         await self._db.commit()
 
+        # memories table
+        await self._db.execute("""
+            CREATE TABLE IF NOT EXISTS memories (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                content TEXT NOT NULL,
+                category TEXT DEFAULT 'general',
+                source TEXT DEFAULT 'auto',
+                expired_at TIMESTAMP DEFAULT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        await self._db.commit()
+
+        # summaries table
+        await self._db.execute("""
+            CREATE TABLE IF NOT EXISTS summaries (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                level INTEGER DEFAULT 1,
+                content TEXT NOT NULL,
+                msg_from INTEGER,
+                msg_to INTEGER,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        await self._db.commit()
+
     async def get_session_meta(self, session_id):
         cursor = await self._db.execute(
             "SELECT session_id, name, theme_pack_id FROM session_metadata WHERE session_id = ?",
@@ -93,5 +120,120 @@ class Database:
             "INSERT OR REPLACE INTO app_config (key, value) VALUES (?, ?)", (key, value)
         )
         await self._db.commit()
+
+    # --- Memory methods ---
+
+    async def get_memories(self, limit=20, category=None):
+        """获取长期记忆，按时间倒序，排除已过期的"""
+        query = "SELECT id, content, category, source, expired_at, created_at FROM memories WHERE (expired_at IS NULL OR expired_at > datetime('now')) "
+        params = []
+        if category:
+            query += "AND category = ? "
+            params.append(category)
+        query += "ORDER BY created_at DESC LIMIT ?"
+        params.append(limit)
+        cursor = await self._db.execute(query, params)
+        return [dict(row) for row in await cursor.fetchall()]
+
+    async def save_memory(self, content, category='general', source='auto', expired_at=None):
+        await self._db.execute(
+            "INSERT INTO memories (content, category, source, expired_at) VALUES (?, ?, ?, ?)",
+            (content, category, source, expired_at)
+        )
+        await self._db.commit()
+
+    async def update_memory(self, memory_id, content=None, category=None):
+        if content:
+            await self._db.execute("UPDATE memories SET content = ? WHERE id = ?", (content, memory_id))
+        if category:
+            await self._db.execute("UPDATE memories SET category = ? WHERE id = ?", (category, memory_id))
+        await self._db.commit()
+
+    async def delete_memory(self, memory_id):
+        await self._db.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
+        await self._db.commit()
+
+    async def delete_expired_memories(self):
+        await self._db.execute("DELETE FROM memories WHERE expired_at IS NOT NULL AND expired_at <= datetime('now')")
+        await self._db.commit()
+
+    async def check_duplicate_memory(self, content):
+        """检查是否有相似记忆（字符串包含匹配）"""
+        cursor = await self._db.execute("SELECT id, content FROM memories")
+        rows = await cursor.fetchall()
+        for row in rows:
+            existing = row['content']
+            if content in existing or existing in content:
+                return row['id']
+        return None
+
+    # --- Summary methods ---
+
+    async def get_summaries(self, session_id, level=None):
+        query = "SELECT id, session_id, level, content, msg_from, msg_to FROM summaries WHERE session_id = ?"
+        params = [session_id]
+        if level is not None:
+            query += " AND level = ?"
+            params.append(level)
+        query += " ORDER BY msg_from ASC"
+        cursor = await self._db.execute(query, params)
+        return [dict(row) for row in await cursor.fetchall()]
+
+    async def save_summary(self, session_id, content, msg_from, msg_to, level=1):
+        await self._db.execute(
+            "INSERT INTO summaries (session_id, level, content, msg_from, msg_to) VALUES (?, ?, ?, ?, ?)",
+            (session_id, level, content, msg_from, msg_to)
+        )
+        await self._db.commit()
+
+    async def delete_summaries(self, ids):
+        if not ids:
+            return
+        placeholders = ','.join('?' * len(ids))
+        await self._db.execute(f"DELETE FROM summaries WHERE id IN ({placeholders})", ids)
+        await self._db.commit()
+
+    async def get_summary_count(self, session_id):
+        cursor = await self._db.execute("SELECT COUNT(*) FROM summaries WHERE session_id = ?", (session_id,))
+        row = await cursor.fetchone()
+        return row[0] if row else 0
+
+    async def get_message_count(self, session_id):
+        cursor = await self._db.execute("SELECT COUNT(*) FROM conversations WHERE session_id = ?", (session_id,))
+        row = await cursor.fetchone()
+        return row[0] if row else 0
+
+    async def get_uncovered_history(self, session_id, limit=10):
+        """获取未被摘要覆盖的历史消息"""
+        covered_to = 0
+        cursor = await self._db.execute(
+            "SELECT MAX(msg_to) FROM summaries WHERE session_id = ?", (session_id,)
+        )
+        row = await cursor.fetchone()
+        if row and row[0]:
+            covered_to = row[0]
+
+        cursor = await self._db.execute(
+            "SELECT id, role, content FROM conversations WHERE session_id = ? AND id > ? ORDER BY id ASC LIMIT ?",
+            (session_id, covered_to, limit)
+        )
+        return [dict(row) for row in await cursor.fetchall()]
+
+    async def get_uncovered_message_count(self, session_id):
+        """获取未被摘要覆盖的消息数量"""
+        covered_to = 0
+        cursor = await self._db.execute(
+            "SELECT MAX(msg_to) FROM summaries WHERE session_id = ?", (session_id,)
+        )
+        row = await cursor.fetchone()
+        if row and row[0]:
+            covered_to = row[0]
+
+        cursor = await self._db.execute(
+            "SELECT COUNT(*) FROM conversations WHERE session_id = ? AND id > ?",
+            (session_id, covered_to)
+        )
+        row = await cursor.fetchone()
+        return row[0] if row else 0
 
 db = Database()

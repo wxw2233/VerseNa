@@ -280,6 +280,57 @@
           </label>
         </div>
       </div>
+
+      <!-- 记忆管理 (Memory) -->
+      <div v-if="activeTab === 'memory'" class="tab-content">
+        <h2>记忆管理</h2>
+        <p class="tab-desc">Agent 会自动记住用户偏好，也可手动添加/编辑/删除。</p>
+
+        <!-- 分类筛选 -->
+        <div class="memory-filters">
+          <button v-for="cat in ['all', 'preference', 'fact', 'instruction', 'general']"
+                  :key="cat"
+                  :class="{ active: memoryFilter === cat }"
+                  @click="memoryFilter = cat; loadMemories()">
+            {{ memoryLabel(cat) }}
+          </button>
+        </div>
+
+        <!-- 搜索 -->
+        <input type="text" v-model="memorySearch" placeholder="搜索记忆..." class="memory-search" />
+
+        <!-- 添加记忆 -->
+        <div class="memory-add">
+          <input type="text" v-model="newMemoryContent" placeholder="添加新记忆..." />
+          <select v-model="newMemoryCategory">
+            <option value="preference">偏好</option>
+            <option value="fact">事实</option>
+            <option value="instruction">指令</option>
+            <option value="general">通用</option>
+          </select>
+          <button @click="addMemory">添加</button>
+        </div>
+
+        <!-- 记忆列表 -->
+        <div class="memory-list">
+          <div v-for="mem in filteredMemories" :key="mem.id" class="memory-card">
+            <div class="memory-content" v-if="editingMemoryId !== mem.id">
+              {{ mem.content }}
+            </div>
+            <input v-else type="text" v-model="editingMemoryContent" @keyup.enter="saveEditMemory(mem.id)" />
+            <div class="memory-meta">
+              <span class="memory-category" :class="mem.category">{{ memoryLabel(mem.category) }}</span>
+              <span class="memory-source">{{ mem.source === 'auto' ? '自动' : '手动' }}</span>
+              <span class="memory-time">{{ formatTime(mem.created_at) }}</span>
+            </div>
+            <div class="memory-actions">
+              <button v-if="editingMemoryId !== mem.id" @click="startEditMemory(mem)">编辑</button>
+              <button v-else @click="saveEditMemory(mem.id)">保存</button>
+              <button @click="deleteMemory(mem.id)" class="btn-danger">删除</button>
+            </div>
+          </div>
+        </div>
+      </div>
     </section>
   </div>
 </template>
@@ -304,6 +355,7 @@ const menuItems = [
   { id: 'plugin', icon: '🔌', label: '插件管理' },
   { id: 'skill', icon: '⚡', label: '技能' },
   { id: 'tool', icon: '🔧', label: '工具' },
+  { id: 'memory', icon: '🧠', label: '记忆' },
 ]
 
 // --- Model Config ---
@@ -337,6 +389,7 @@ onMounted(async () => {
   form_model.model_name = data.model_name || ''
   form_model.api_key = data.api_key || ''
   await loadThemePacks()
+  await loadMemories()
 })
 
 async function saveModel() {
@@ -617,6 +670,75 @@ async function importPack(e) {
   } catch (e) {
     alert('导入失败: ' + e.message)
   }
+}
+
+// --- 记忆管理 (Memory) ---
+const memories = ref([])
+const memoryFilter = ref('all')
+const memorySearch = ref('')
+const newMemoryContent = ref('')
+const newMemoryCategory = ref('preference')
+const editingMemoryId = ref(null)
+const editingMemoryContent = ref('')
+
+const filteredMemories = computed(() => {
+  let list = memories.value
+  if (memorySearch.value) {
+    const q = memorySearch.value.toLowerCase()
+    list = list.filter(m => m.content.toLowerCase().includes(q))
+  }
+  return list
+})
+
+function memoryLabel(cat) {
+  const labels = { all: '全部', preference: '偏好', fact: '事实', instruction: '指令', general: '通用' }
+  return labels[cat] || cat
+}
+
+async function loadMemories() {
+  try {
+    const url = memoryFilter.value === 'all' ? '/api/memories' : `/api/memories?category=${memoryFilter.value}`
+    const resp = await fetch(url)
+    memories.value = await resp.json()
+  } catch {
+    memories.value = []
+  }
+}
+
+async function addMemory() {
+  if (!newMemoryContent.value.trim()) return
+  await fetch('/api/memories', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content: newMemoryContent.value, category: newMemoryCategory.value })
+  })
+  newMemoryContent.value = ''
+  await loadMemories()
+}
+
+function startEditMemory(mem) {
+  editingMemoryId.value = mem.id
+  editingMemoryContent.value = mem.content
+}
+
+async function saveEditMemory(id) {
+  await fetch(`/api/memories/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content: editingMemoryContent.value })
+  })
+  editingMemoryId.value = null
+  await loadMemories()
+}
+
+async function deleteMemory(id) {
+  await fetch(`/api/memories/${id}`, { method: 'DELETE' })
+  await loadMemories()
+}
+
+function formatTime(ts) {
+  if (!ts) return ''
+  return new Date(ts).toLocaleString('zh-CN')
 }
 </script>
 
@@ -1166,4 +1288,27 @@ legend {
 }
 .toggle-switch input:checked + .toggle-slider { background: var(--primary); }
 .toggle-switch input:checked + .toggle-slider::before { transform: translateX(20px); }
+
+/* 记忆管理 */
+.tab-desc { font-size: 13px; color: var(--text-secondary); margin-bottom: 16px; }
+.memory-filters { display: flex; gap: 8px; margin-bottom: 12px; }
+.memory-filters button { padding: 4px 12px; border-radius: 12px; border: 1px solid var(--border); background: transparent; color: var(--text-secondary); cursor: pointer; font-size: 12px; }
+.memory-filters button.active { background: var(--primary); color: white; border-color: var(--primary); }
+.memory-search { width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-primary); color: var(--text-primary); margin-bottom: 12px; }
+.memory-add { display: flex; gap: 8px; margin-bottom: 16px; }
+.memory-add input { flex: 1; padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-primary); color: var(--text-primary); }
+.memory-add select { padding: 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-primary); color: var(--text-primary); }
+.memory-add button { padding: 8px 16px; border: none; border-radius: 6px; background: var(--primary); color: white; cursor: pointer; }
+.memory-list { display: flex; flex-direction: column; gap: 8px; }
+.memory-card { padding: 12px; background: var(--bg-primary); border-radius: 8px; border: 1px solid var(--border); }
+.memory-content { font-size: 14px; color: var(--text-primary); margin-bottom: 8px; }
+.memory-meta { display: flex; gap: 8px; font-size: 11px; color: var(--text-secondary); margin-bottom: 8px; }
+.memory-category { padding: 2px 6px; border-radius: 4px; }
+.memory-category.preference { background: rgba(59,130,246,0.15); color: #3b82f6; }
+.memory-category.fact { background: rgba(34,197,94,0.15); color: #22c55e; }
+.memory-category.instruction { background: rgba(239,68,68,0.15); color: #ef4444; }
+.memory-category.general { background: rgba(136,136,170,0.15); color: #8888aa; }
+.memory-actions { display: flex; gap: 8px; }
+.memory-actions button { padding: 4px 8px; border: none; border-radius: 4px; background: var(--bg-secondary); color: var(--text-secondary); cursor: pointer; font-size: 12px; }
+.memory-actions .btn-danger { color: #ef4444; }
 </style>

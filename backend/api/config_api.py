@@ -1,4 +1,4 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from config import settings
 from db.database import db
@@ -64,3 +64,32 @@ async def load_saved_config():
         settings.TRUST_MODE = trust_val.lower() == "true"
     except Exception:
         pass
+
+# --- Memory API ---
+
+@router.get("/api/memories")
+async def list_memories(category: str = None):
+    memories = await db.get_memories(limit=100, category=category)
+    return memories
+
+@router.post("/api/memories")
+async def create_memory(req: dict):
+    content = req.get('content', '')
+    category = req.get('category', 'general')
+    if not content:
+        raise HTTPException(400, "内容不能为空")
+    dup_id = await db.check_duplicate_memory(content)
+    if dup_id:
+        return {"status": "duplicate", "id": dup_id}
+    await db.save_memory(content, category=category, source='manual', expired_at=None)
+    return {"status": "ok"}
+
+@router.put("/api/memories/{memory_id}")
+async def update_memory(memory_id: int, req: dict):
+    await db.update_memory(memory_id, content=req.get('content'), category=req.get('category'))
+    return {"status": "ok"}
+
+@router.delete("/api/memories/{memory_id}")
+async def delete_memory(memory_id: int):
+    await db.delete_memory(memory_id)
+    return {"status": "ok"}
