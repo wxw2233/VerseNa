@@ -8,6 +8,7 @@ class AdapterMessage:
     content: str
     channel_id: str = ""
     message_id: str = ""
+    msg_type: str = "channel"  # channel / direct
     attachments: list = None
 
 class BaseAdapter(ABC):
