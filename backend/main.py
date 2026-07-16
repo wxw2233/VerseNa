@@ -70,3 +70,4 @@ if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host=settings.HOST, port=settings.PORT, reload=settings.DEBUG)
 from api.themepack_api import router as themepack_router; app.include_router(themepack_router)
+from api.log_api import router as log_router; app.include_router(log_router)

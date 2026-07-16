@@ -7,6 +7,7 @@ from agent.memory import MemoryManager
 from config import settings
 from persona.manager import persona_manager
 from tools.registry import tool_registry
+from api.log_api import log_info, log_error
 
 router = APIRouter()
 
@@ -57,6 +58,7 @@ async def websocket_chat(ws: WebSocket):
                 continue
 
             session_id = msg.get("session_id", "default")
+            log_info("Chat", f"WS消息: session={session_id} content={content[:80]}")
             content = msg.get("content", "")
             persona_name = msg.get("persona", "default")
             system_prompt = persona_manager.get_system_prompt(persona_name)
@@ -75,6 +77,7 @@ async def websocket_chat(ws: WebSocket):
                 except Exception:
                     pass
 
+            log_info("Chat", f"会话结束: session={session_id}")
             # 确保 done 消息总是发送
             try:
                 done_msg = {"type": "done", "emotion": emotion_state.primary, "emoji": emotion_state.emoji}

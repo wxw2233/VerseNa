@@ -331,12 +331,31 @@
           </div>
         </div>
       </div>
+
+      <!-- 监控 (Monitor) -->
+      <div v-if="activeTab === 'monitor'" class="tab-content">
+        <h2>运行监控</h2>
+        <div class="monitor-toolbar">
+          <button @click="fetchLogs" class="monitor-btn">🔄 刷新</button>
+          <button @click="clearLogs" class="monitor-btn btn-danger">🗑 清空日志</button>
+          <label class="monitor-auto">
+            <input type="checkbox" v-model="autoRefresh" /> 自动刷新（3s）
+          </label>
+          <span class="monitor-count">共 {{ logLines.length }} 行</span>
+        </div>
+        <div class="monitor-log">
+          <div v-for="(line, i) in logLines" :key="i" class="log-line" :class="logLevel(line)">
+            {{ line }}
+          </div>
+          <div v-if="!logLines.length" class="log-empty">暂无日志</div>
+        </div>
+      </div>
     </section>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useThemeStore } from '../stores/theme'
 import { usePersonaStore } from '../stores/persona'
 import AssetUploader from '../components/AssetUploader.vue'
@@ -356,7 +375,8 @@ const menuItems = [
   { id: 'skill', icon: '⚡', label: '技能' },
   { id: 'tool', icon: '🔧', label: '工具' },
   { id: 'memory', icon: '🧠', label: '记忆' },
-]
+    { id: 'monitor', icon: '📊', label: '监控' },
+  ]
 
 // --- Model Config ---
 const form_model = reactive({ api_key: '', base_url: '', model_name: '' })
@@ -740,6 +760,44 @@ function formatTime(ts) {
   if (!ts) return ''
   return new Date(ts).toLocaleString('zh-CN')
 }
+
+// --- Monitor ---
+const logLines = ref([])
+const autoRefresh = ref(false)
+let monitorTimer = null
+
+async function fetchLogs() {
+  try {
+    const resp = await fetch('/api/logs?lines=200')
+    const data = await resp.json()
+    logLines.value = data.lines || []
+  } catch { logLines.value = [] }
+}
+
+async function clearLogs() {
+  await fetch('/api/logs', { method: 'DELETE' })
+  logLines.value = []
+}
+
+function logLevel(line) {
+  if (line.includes('[ERROR]')) return 'log-error'
+  if (line.includes('[WARN]')) return 'log-warn'
+  return 'log-info'
+}
+
+watch(autoRefresh, (val) => {
+  if (val) {
+    fetchLogs()
+    monitorTimer = setInterval(fetchLogs, 3000)
+  } else {
+    if (monitorTimer) clearInterval(monitorTimer)
+  }
+})
+
+// 切换到监控 tab 时自动加载
+watch(() => activeTab.value, (tab) => {
+  if (tab === 'monitor') fetchLogs()
+})
 </script>
 
 <style scoped>
@@ -1311,4 +1369,15 @@ legend {
 .memory-actions { display: flex; gap: 8px; }
 .memory-actions button { padding: 4px 8px; border: none; border-radius: 4px; background: var(--bg-secondary); color: var(--text-secondary); cursor: pointer; font-size: 12px; }
 .memory-actions .btn-danger { color: #ef4444; }
+.monitor-toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+.monitor-btn { padding: 6px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-secondary); color: var(--text-primary); cursor: pointer; font-size: 12px; }
+.monitor-btn:hover { background: var(--bg-primary); }
+.monitor-auto { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-secondary); cursor: pointer; }
+.monitor-count { font-size: 12px; color: var(--text-secondary); margin-left: auto; }
+.monitor-log { background: #0d1117; border-radius: 8px; padding: 12px; max-height: calc(100vh - 260px); overflow-y: auto; font-family: 'Cascadia Code', 'Fira Code', monospace; font-size: 12px; line-height: 1.6; }
+.log-line { padding: 1px 0; white-space: pre-wrap; word-break: break-all; }
+.log-info { color: #8b949e; }
+.log-warn { color: #d29922; }
+.log-error { color: #f85149; }
+.log-empty { color: #484f58; text-align: center; padding: 40px; }
 </style>

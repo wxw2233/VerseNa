@@ -7,6 +7,7 @@ from agent.models.openai_adapter import OpenAIAdapter
 from persona.manager import persona_manager
 from tools.registry import tool_registry
 from config import settings
+from api.log_api import log_info, log_error
 
 router = APIRouter()
 qq_adapter = QQBotAdapter()
@@ -15,6 +16,7 @@ qq_adapter = QQBotAdapter()
 async def handle_qq_message(msg):
     """处理 QQ 收到的消息"""
     print(f"[QQ] 收到: type={msg.msg_type} user={msg.user_id} content={msg.content[:50]}", flush=True)
+    log_info("QQ", f"收到 {msg.msg_type}: {msg.content[:80]}")
     if not msg.content:
         return
 
@@ -38,13 +40,16 @@ async def handle_qq_message(msg):
 
         if full_reply:
             print(f"[QQ] 回复({len(full_reply)}字): {full_reply[:100]}", flush=True)
+            log_info("QQ", f"回复({len(full_reply)}字): {full_reply[:80]}")
             success = await qq_adapter.send(msg.channel_id, full_reply[:2000], msg_type=msg.msg_type)
             print(f"[QQ] 发送结果: {success}", flush=True)
+            log_info("QQ", f"发送: {'成功' if success else '失败'}")
         else:
             print("[QQ] 回复为空", flush=True)
     except Exception as e:
         import traceback
         print(f"[QQ] 处理异常: {e}", flush=True)
+        log_error("QQ", f"异常: {e}")
         traceback.print_exc()
 
 
