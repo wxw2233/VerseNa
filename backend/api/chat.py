@@ -58,8 +58,8 @@ async def websocket_chat(ws: WebSocket):
                 continue
 
             session_id = msg.get("session_id", "default")
-            log_info("Chat", f"WS消息: session={session_id} content={content[:80]}")
             content = msg.get("content", "")
+            log_info("Chat", f"WS消息: session={session_id} content={content[:80]}")
             persona_name = msg.get("persona", "default")
             system_prompt = persona_manager.get_system_prompt(persona_name)
             tool_desc = "\n".join(f"- {t['function']['name']}: {t['function']['description']}" for t in tool_registry.get_tools())
