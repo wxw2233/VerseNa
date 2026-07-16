@@ -1,6 +1,6 @@
 # 次元人格（CiYuan Persona）— 项目进度总结
 
-> 最后更新：2026-07-16
+> 最后更新：2026-07-17
 > 技术栈：FastAPI + Vue 3 + SQLite + WebSocket
 > 定位：**单用户**个人 AI Agent 平台（不做多用户/登录系统）
 
@@ -25,11 +25,12 @@
 | 功能 | 状态 | 说明 |
 |------|------|------|
 | ReAct 循环 | ✅ | 支持多轮工具调用 + 流式输出 |
-| 消息 segments 架构 | ✅ | 文本段 + 工具段时间线嵌入气泡 |
+| 消息 segments 架构 | ✅ | 文本段 + 工具段时间线嵌入气泡（状态优先级 + 组内排序） |
 | LLM 调用重试 | ✅ | 失败最多重试 3 次，指数退避（1s/2s/4s） |
 | MAX_REACT_LOOPS | ✅ | 15 轮（原 5 轮太短） |
 | WebSocket 通信 | ✅ | 实时双向通信 |
 | 确认机制 | ✅ | 高风险操作需用户确认（request_id + 60s 超时） |
+| 运行监控 | ✅ | 设置页监控 tab，终端风格日志查看器，支持自动刷新 |
 
 ### 2.2 工具系统 ✅
 
@@ -83,17 +84,19 @@
 | Token 自动刷新 | ✅ | 7200s 过期，提前 5 分钟刷新 |
 | 心跳保活 | ✅ | 定期发送心跳，断线自动重连 |
 | 工具调用 | ✅ | QQ 消息支持使用 agent 工具 |
+| 异步消息处理 | ✅ | asyncio.create_task 不阻塞 WebSocket 事件循环 |
 
 ### 2.6 前端 UI
 
 | 功能 | 状态 | 说明 |
 |------|------|------|
 | 聊天界面 | ✅ | segments 渲染 + 工具时间线 + 结果格式化 |
-| 设置页 | ✅ | 8 个 tab：次元设置/主题包/模型配置/通道管理/插件/技能/工具/记忆 |
+| 设置页 | ✅ | 9 个 tab：次元设置/主题包/模型配置/通道管理/插件/技能/工具/记忆/监控 |
 | 信任模式开关 | ✅ | 设置页工具 tab |
 | 会话列表 | ✅ | 绑定主题包，切换自动切换 |
 | 会话编辑 | ✅ | 重命名 + 更改主题包 |
 | 确认对话框 | ✅ | file_manager 高风险操作确认 |
+| 运行监控面板 | ✅ | 深色终端风格日志查看器，自动刷新（3s），日志按级别着色 |
 
 ---
 
@@ -118,15 +121,16 @@
 |------|------|
 | `backend/main.py` | FastAPI 入口，路由注册 |
 | `backend/config.py` | 配置（端口 8001，MAX_REACT_LOOPS=15） |
-| `backend/agent/react.py` | ReActAgent（segment yield + tool_call_id） |
+| `backend/agent/react.py` | ReActAgent（segment yield + tool_call_id + LLM 重试） |
 | `backend/agent/memory.py` | MemoryManager（长期记忆 + 分层摘要 + 自动提取） |
 | `backend/api/chat.py` | WebSocket /ws/chat |
 | `backend/api/qq_api.py` | QQ Bot WebSocket 通道 |
 | `backend/api/config_api.py` | 配置 API + 记忆 API |
+| `backend/api/log_api.py` | 运行日志 API（GET/DELETE /api/logs） |
 | `backend/api/themepack_api.py` | 主题包 CRUD + 导入导出 |
 | `backend/api/session_api.py` | 会话管理（绑定 theme_pack_id） |
 | `backend/db/database.py` | SQLite 数据库（conversations/memories/summaries/app_config/session_metadata） |
-| `backend/adapters/qq_bot.py` | QQ Bot WebSocket 适配器 |
+| `backend/adapters/qq_bot.py` | QQ Bot WebSocket 适配器（token 自动刷新 + 重连） |
 | `backend/tools/builtin/file_manager.py` | 文件管理工具（9 action + 安全） |
 | `backend/tools/builtin/code_exec.py` | 代码执行工具（base64 支持） |
 | `backend/tools/builtin/save_memory.py` | 记忆保存工具 |
@@ -137,7 +141,7 @@
 | 文件 | 说明 |
 |------|------|
 | `frontend/src/views/ChatView.vue` | 聊天主界面 |
-| `frontend/src/views/SettingsView.vue` | 设置页（8 tab） |
+| `frontend/src/views/SettingsView.vue` | 设置页（9 tab，含监控面板） |
 | `frontend/src/components/ChatBubble.vue` | 消息气泡（segments 渲染 + 时间线） |
 | `frontend/src/components/SessionList.vue` | 会话列表（绑定主题包） |
 | `frontend/src/components/CreationWizard.vue` | 4 步创建向导 |
@@ -166,3 +170,32 @@
 | 语音 TTS | 低 | 文字转语音 |
 
 **不做：** 多用户/登录系统（单用户使用）
+
+---
+
+## 七、开发日志
+
+### 2026-07-17（今日）
+
+| 提交 | 内容 |
+|------|------|
+| `2f36972` | feat: 运行监控面板（设置页 + log_api + 日志查看器） |
+| `9cceeea` | docs: 更新 PROJECT_STATUS（单用户定位 + LLM 重试 + 记忆权重） |
+| `b680719` | feat: 记忆权重排序 + LLM 调用 3 次重试 |
+| `01252a2` | fix: QQ Bot token 过期自动刷新 |
+| `ddeaba7` | docs: 项目进度总结初版 |
+| `f68e383` | fix: QQ Bot async task + C2C URL + 错误处理 |
+| `e2abf1a` | feat: QQ Bot WebSocket 模式（无需公网） |
+| `1b3dcc5` | fix: QQ Bot API 端点修正 |
+| `c3f063f` | feat: 记忆系统（DB + MemoryManager + 自动提取 + 分层摘要） |
+| `aa66541` | feat: 前端记忆管理 tab |
+| `d2d0344` | fix: 确认对话框 + 信任模式 + 工具列表 |
+
+### 2026-07-15 ~ 07-16
+
+| 提交 | 内容 |
+|------|------|
+| `edd59ab` ~ `50305fb` | feat: 消息 segments 架构（react.py + store + ChatBubble） |
+| `81eb9f5` | feat: file_manager 工具（9 action + 安全 + 信任模式） |
+| `6a3107a` ~ `b0bed8d` | feat: 主题包架构（W0-W6，会话绑定主题包） |
+| `be382cd` ~ `4805e33` | feat: UI 增强（V0-V4，创建向导 + 编辑器 + 素材装饰） |
