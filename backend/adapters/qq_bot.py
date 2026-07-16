@@ -14,16 +14,18 @@ class QQBotAdapter(BaseAdapter):
             return False
         try:
             async with httpx.AsyncClient(timeout=10) as client:
-                resp = await client.post(f"{self.base_url}/oauth2/token", data={
-                    "grant_type": "client_credentials",
-                    "client_id": self.app_id,
-                    "client_secret": self.app_secret,
+                resp = await client.post("https://bots.qq.com/app/getAppAccessToken", json={
+                    "appId": self.app_id,
+                    "clientSecret": self.app_secret,
                 })
                 if resp.status_code == 200:
-                    self.token = resp.json().get("access_token", "")
+                    data = resp.json()
+                    self.token = data.get("access_token", "")
                     return bool(self.token)
-        except Exception:
-            pass
+                else:
+                    print(f"QQ Bot token error: {resp.status_code} {resp.text[:200]}")
+        except Exception as e:
+            print(f"QQ Bot connection error: {e}")
         return False
 
     async def stop(self):
@@ -42,7 +44,7 @@ class QQBotAdapter(BaseAdapter):
                 resp = await client.post(
                     f"{self.base_url}/channels/{channel_id}/messages",
                     json={"content": content},
-                    headers={"Authorization": f"Bot {self.app_id}.{self.token}"}
+                    headers={"Authorization": f"QQBot {self.token}"}
                 )
                 return resp.status_code == 200
         except Exception:

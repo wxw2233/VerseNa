@@ -5,6 +5,7 @@ from agent.react import ReActAgent
 from agent.memory import MemoryManager
 from agent.models.openai_adapter import OpenAIAdapter
 from persona.manager import persona_manager
+from tools.registry import tool_registry
 from config import settings
 
 router = APIRouter()
