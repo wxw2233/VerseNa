@@ -95,6 +95,8 @@ class QQBotAdapter(BaseAdapter):
         """处理 WebSocket 消息"""
         op = data.get("op")
         d = data.get("d")
+        t = data.get("t")
+        print(f"QQ WS收到: op={op} t={t} d_keys={list(d.keys()) if isinstance(d, dict) else type(d).__name__}")
 
         if op == 10:  # Hello
             self.heartbeat_interval = d.get("heartbeat_interval", 41250) / 1000
@@ -124,7 +126,7 @@ class QQBotAdapter(BaseAdapter):
             "op": 2,
             "d": {
                 "token": f"QQBot {self.token}",
-                "intents": (1 << 0) | (1 << 1) | (1 << 12) | (1 << 25),  # GUILDS + GUILD_MEMBERS + PUBLIC_MESSAGES + DIRECT_MESSAGE
+                "intents": (1 << 0) | (1 << 12) | (1 << 25),  # GUILDS + PUBLIC_MESSAGES + DIRECT_MESSAGE
                 "properties": {
                     "os": "windows",
                     "browser": "次元人格",
@@ -139,9 +141,9 @@ class QQBotAdapter(BaseAdapter):
         """定期发送心跳"""
         while self._running:
             try:
-                heartbeat = {"op": 1, "d": self._seq}
+                heartbeat = {"op": 1, "d": None}
                 await self.ws.send(json.dumps(heartbeat))
-                await asyncio.sleep(self.heartbeat_interval)
+                await asyncio.sleep(self.heartbeat_interval * 0.9)  # 提前 10% 发送
             except Exception:
                 break
 
@@ -150,8 +152,38 @@ class QQBotAdapter(BaseAdapter):
         if not data:
             return
 
+        print(f"QQ 事件: {event_type}")
+
+        msg = None
+
+        # 好友私信（群/好友机器人）
+        if event_type == "C2C_MESSAGE_CREATE":
+            author = data.get("author", {})
+            user_openid = author.get("user_openid", author.get("id", ""))
+            msg = AdapterMessage(
+                platform="qq",
+                user_id=user_openid,
+                content=data.get("content", "").strip(),
+                channel_id=user_openid,  # C2C 用 user_openid 作为 channel
+                message_id=data.get("id", ""),
+                msg_type="c2c"
+            )
+
+        # 群@消息（群/好友机器人）
+        elif event_type == "GROUP_AT_MESSAGE_CREATE":
+            author = data.get("author", {})
+            group_openid = data.get("group_openid", data.get("id", ""))
+            msg = AdapterMessage(
+                platform="qq",
+                user_id=author.get("member_openid", author.get("id", "")),
+                content=data.get("content", "").strip(),
+                channel_id=group_openid,  # 群用 group_openid
+                message_id=data.get("id", ""),
+                msg_type="group"
+            )
+
         # 频道消息
-        if event_type == "MESSAGE_CREATE":
+        elif event_type == "MESSAGE_CREATE":
             msg = AdapterMessage(
                 platform="qq",
                 user_id=data.get("author", {}).get("id", ""),
@@ -160,10 +192,8 @@ class QQBotAdapter(BaseAdapter):
                 message_id=data.get("id", ""),
                 msg_type="channel"
             )
-            if msg.content and self._on_message:
-                await self._on_message(msg)
 
-        # 私信
+        # 频道私信
         elif event_type == "DIRECT_MESSAGE_CREATE":
             msg = AdapterMessage(
                 platform="qq",
@@ -173,8 +203,10 @@ class QQBotAdapter(BaseAdapter):
                 message_id=data.get("id", ""),
                 msg_type="direct"
             )
-            if msg.content and self._on_message:
-                await self._on_message(msg)
+
+        if msg and msg.content and self._on_message:
+            print(f"QQ 收到消息: type={msg.msg_type}, user={msg.user_id}, content={msg.content[:50]}")
+            asyncio.create_task(self._on_message(msg))
 
     def on_message(self, callback):
         """注册消息回调"""
@@ -183,22 +215,32 @@ class QQBotAdapter(BaseAdapter):
     async def send(self, channel_id: str, content: str, msg_type: str = "channel"):
         """发送消息"""
         if not self.token:
+            print("[QQ] send失败: 无token", flush=True)
             return False
         try:
-            async with httpx.AsyncClient(timeout=10) as client:
-                if msg_type == "direct":
-                    # 私信
+            async with httpx.AsyncClient(timeout=15) as client:
+                if msg_type == "c2c":
+                    # C2C私信: channel_id = user_openid
+                    url = f"https://api.sgroup.qq.com/v2/users/{channel_id}/messages"
+                    payload = {"content": content, "msg_type": 0}
+                elif msg_type == "group":
+                    # 群@回复: channel_id = group_openid
+                    url = f"https://api.sgroup.qq.com/v2/groups/{channel_id}/messages"
+                    payload = {"content": content, "msg_type": 0}
+                elif msg_type == "direct":
                     url = f"https://api.sgroup.qq.com/dms/{channel_id}/messages"
+                    payload = {"content": content}
                 else:
-                    # 频道消息
                     url = f"https://api.sgroup.qq.com/channels/{channel_id}/messages"
+                    payload = {"content": content}
 
-                resp = await client.post(url, json={"content": content}, headers={
+                resp = await client.post(url, json=payload, headers={
                     "Authorization": f"QQBot {self.token}"
                 })
-                return resp.status_code == 200
+                print(f"[QQ] send {msg_type} -> {resp.status_code}: {resp.text[:200]}", flush=True)
+                return resp.status_code in (200, 201)
         except Exception as e:
-            print(f"QQ Bot send error: {e}")
+            print(f"[QQ] send异常: {e}", flush=True)
             return False
 
     async def ensure_token(self):
