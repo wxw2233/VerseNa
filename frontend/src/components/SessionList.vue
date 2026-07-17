@@ -212,8 +212,13 @@ async function handleSwitch(id) {
     if (msg.role === 'user') chatStore.addUserMessage(msg.content)
     else if (msg.role === 'assistant') {
       const m = { role: 'assistant', streaming: false }
-      if (msg.segments) {
-        m.segments = msg.segments
+      if (msg.segments && msg.segments.length > 0) {
+        // 把 content 文本作为第一个 text 段加在前面
+        if (msg.content && msg.segments.every(s => s.type !== 'text')) {
+          m.segments = [{ type: 'text', content: msg.content }, ...msg.segments]
+        } else {
+          m.segments = msg.segments
+        }
         m.version = msg.version || 2
         m.expandedTools = {}
       } else {
