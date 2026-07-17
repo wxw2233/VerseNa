@@ -49,6 +49,7 @@ onMounted(() => loadAssets())
 
 async function loadAssets() {
   const themeId = themeStore.current
+  if (!themeId || themeId === 'null' || themeId === 'undefined') return
   for (const s of slots) {
     const key = s.key
     const filename = assetFileMap[key]

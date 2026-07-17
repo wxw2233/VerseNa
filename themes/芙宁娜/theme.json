@@ -1,0 +1,14 @@
+{
+  "name": "",
+  "version": "1.0.0",
+  "colors": {
+    "--primary": "#0084ff",
+    "--bg-primary": "#1414bd",
+    "--bg-secondary": "#36367d",
+    "--text-primary": "#e8e8f0",
+    "--text-secondary": "#8888aa",
+    "--border": "#2a2a40",
+    "--bubble-user": "rgba(124,92,252,0.15)",
+    "--bubble-agent": "rgba(30,30,50,0.9)"
+  }
+}
