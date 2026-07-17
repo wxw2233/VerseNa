@@ -73,7 +73,7 @@ async def websocket_chat(ws: WebSocket):
                 async for event in agent.run(session_id, content, system_prompt=system_prompt, tools=tool_registry.get_tools(), persona=persona_name, confirm_callback=confirm_callback):
                     await ws.send_text(json.dumps(event, ensure_ascii=False))
                     if event.get("type") == "segment" and event.get("segment", {}).get("type") in ("text", "tool"):
-                        segments.append(event["segment"])
+                        tool_segments.append(event["segment"])
             except Exception as e:
                 try:
                     await ws.send_text(json.dumps({"type": "error", "content": str(e)}, ensure_ascii=False))
