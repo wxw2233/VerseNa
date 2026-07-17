@@ -1,4 +1,5 @@
 from pathlib import Path
+from api.log_api import log_info, log_error
 from fastapi import APIRouter, UploadFile, File, HTTPException
 from fastapi.responses import FileResponse
 
@@ -8,6 +9,7 @@ THEMES_DIR = Path(__file__).parent.parent.parent / "themes"
 @router.post("/api/themes/{theme_id}/upload")
 async def upload_asset(theme_id: str, file: UploadFile = File(...)):
     """上传图片素材到主题的 assets 目录"""
+    log_info("Asset", f"上传请求: theme={theme_id} file={file.filename} size={file.size if hasattr(file, 'size') else '?'}")
     theme_dir = THEMES_DIR / theme_id
     if not theme_dir.exists():
         raise HTTPException(404, f"Theme '{theme_id}' not found")
