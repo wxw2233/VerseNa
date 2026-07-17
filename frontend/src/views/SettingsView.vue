@@ -610,20 +610,8 @@ async function savePack() {
       body: JSON.stringify(editingPack.value)
     })
     if (resp.ok) {
-      // 重新加载主题 CSS（直接 fetch 不依赖 themeStore.current）
-      try {
-        const cssResp = await fetch(`/api/themes/${editingPackId.value}/css`)
-        if (cssResp.ok) {
-          const css = await cssResp.text()
-          let styleEl = document.getElementById('theme-style')
-          if (!styleEl) {
-            styleEl = document.createElement('style')
-            styleEl.id = 'theme-style'
-            document.head.appendChild(styleEl)
-          }
-          styleEl.textContent = css
-        }
-      } catch {}
+      // 重新加载主题
+      await themeStore.applyTheme(editingPackId.value)
       alert('保存成功')
       await loadThemePacks()
     } else {
