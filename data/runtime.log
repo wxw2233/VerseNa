@@ -90,3 +90,25 @@
 [2026-07-17 23:02:47] [INFO] [Chat] 会话结束: session=session_ad8ef8a9
 [2026-07-17 23:03:10] [INFO] [Chat] WS消息: session=session_ad8ef8a9 content=继续
 [2026-07-17 23:05:16] [INFO] [Chat] 会话结束: session=session_ad8ef8a9
+[2026-07-17 23:12:50] [INFO] [Test] 集成测试日志
+[2026-07-17 23:12:50] [ERROR] [Test] 错误日志
+[2026-07-17 23:12:50] [INFO] [Chat] 用户消息
+[2026-07-17 23:12:50] [ERROR] [QQ] 发送失败
+[2026-07-17 23:12:50] [INFO] [Agent] [WARN] 重试中
+[2026-07-17 23:12:50] [INFO] [Chat] WS消息: session=test content=你好世界
+[2026-07-17 23:15:26] [INFO] [Chat] WS消息: session=session_ad8ef8a9 content=可以了，现在把这两个游戏分类整理一下吧，就像那个贪吃蛇一样
+[2026-07-17 23:18:23] [INFO] [Chat] 会话结束: session=session_ad8ef8a9
+[2026-07-17 23:21:15] [INFO] [Chat] WS消息: session=session_ad8ef8a9 content=搜索一下广东中山的天气
+[2026-07-17 23:22:08] [INFO] [Chat] 会话结束: session=session_ad8ef8a9
+[2026-07-17 23:24:27] [INFO] [Test] 集成测试日志
+[2026-07-17 23:24:27] [ERROR] [Test] 错误日志
+[2026-07-17 23:24:27] [INFO] [Chat] 用户消息
+[2026-07-17 23:24:27] [ERROR] [QQ] 发送失败
+[2026-07-17 23:24:27] [INFO] [Agent] [WARN] 重试中
+[2026-07-17 23:24:27] [INFO] [Chat] WS消息: session=test content=你好世界
+[2026-07-17 23:26:08] [INFO] [Test] 集成测试日志
+[2026-07-17 23:26:08] [ERROR] [Test] 错误日志
+[2026-07-17 23:26:08] [INFO] [Chat] 用户消息
+[2026-07-17 23:26:08] [ERROR] [QQ] 发送失败
+[2026-07-17 23:26:08] [INFO] [Agent] [WARN] 重试中
+[2026-07-17 23:26:08] [INFO] [Chat] WS消息: session=test content=你好世界

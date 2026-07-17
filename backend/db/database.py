@@ -1,3 +1,4 @@
+import json
 import aiosqlite
 from config import settings
 
@@ -95,10 +96,14 @@ class Database:
         )
         await self._db.commit()
 
-    async def save_message(self, session_id: str, role: str, content: str, persona: str = "default", metadata: str = "{}"):
+    async def save_message(self, session_id: str, role: str, content: str, persona: str = "default", metadata: str = "{}", segments: list = None):
+        meta = json.loads(metadata) if isinstance(metadata, str) else (metadata or {})
+        if segments:
+            meta["segments"] = segments
+        metadata_str = json.dumps(meta, ensure_ascii=False)
         await self._db.execute(
             "INSERT INTO conversations (session_id, role, content, persona, metadata) VALUES (?, ?, ?, ?, ?)",
-            (session_id, role, content, persona, metadata)
+            (session_id, role, content, persona, metadata_str)
         )
         await self._db.commit()
 
@@ -108,7 +113,17 @@ class Database:
             (session_id, limit)
         )
         rows = await cursor.fetchall()
-        return [dict(row) for row in reversed(rows)]
+        result = []
+        for row in reversed(rows):
+            d = dict(row)
+            try:
+                meta = json.loads(d.get("metadata", "{}"))
+                if "segments" in meta:
+                    d["segments"] = meta["segments"]
+            except (json.JSONDecodeError, TypeError):
+                pass
+            result.append(d)
+        return result
 
     async def get_config(self, key: str, default: str = ""):
         cursor = await self._db.execute("SELECT value FROM app_config WHERE key = ?", (key,))

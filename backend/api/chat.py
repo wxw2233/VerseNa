@@ -68,9 +68,12 @@ async def websocket_chat(ws: WebSocket):
             emotion = persona_manager.get_emotion_engine(persona_name)
             emotion_state = emotion.pick_emotion()
 
+            
             try:
                 async for event in agent.run(session_id, content, system_prompt=system_prompt, tools=tool_registry.get_tools(), persona=persona_name, confirm_callback=confirm_callback):
                     await ws.send_text(json.dumps(event, ensure_ascii=False))
+                    if event.get("type") == "segment" and event.get("segment", {}).get("type") in ("text", "tool"):
+                        segments.append(event["segment"])
             except Exception as e:
                 try:
                     await ws.send_text(json.dumps({"type": "error", "content": str(e)}, ensure_ascii=False))
@@ -78,6 +81,14 @@ async def websocket_chat(ws: WebSocket):
                     pass
 
             log_info("Chat", f"会话结束: session={session_id}")
+            # 保存 tool segments
+            if tool_segments:
+                await db.save_message(
+                    session_id, "assistant",
+                    json.dumps([s for s in tool_segments], ensure_ascii=False),
+                    persona=persona_name,
+                    segments=tool_segments
+                )
             # 确保 done 消息总是发送
             try:
                 done_msg = {"type": "done", "emotion": emotion_state.primary, "emoji": emotion_state.emoji}

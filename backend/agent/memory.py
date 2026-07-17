@@ -60,8 +60,8 @@ class MemoryManager:
 
         return messages
 
-    async def add_message(self, session_id, role, content, persona='default'):
-        await db.save_message(session_id, role, content, persona)
+    async def add_message(self, session_id, role, content, persona='default', segments=None):
+        await db.save_message(session_id, role, content, persona, segments=segments)
 
     async def post_conversation(self, session_id, user_message, assistant_response):
         """对话结束后调用：自动提取记忆 + 生成摘要"""
