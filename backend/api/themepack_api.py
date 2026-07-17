@@ -121,23 +121,7 @@ async def update_pack(pack_id: str, req: PackUpdate):
             json.dumps(existing, ensure_ascii=False, indent=2), encoding="utf-8"
         )
 
-        # 同步到 themes/ 目录
-        import shutil as _st
-        theme_dest = Path(__file__).parent.parent.parent / "themes" / pack_id
-        theme_dest.mkdir(parents=True, exist_ok=True)
-        for f in ["theme.json", "variables.css"]:
-            src = pack_dir / f
-            if src.exists():
-                _st.copy2(src, theme_dest / f)
-        assets_src = pack_dir / "assets"
-        if assets_src.exists():
-            assets_dest = theme_dest / "assets"
-            assets_dest.mkdir(exist_ok=True)
-            for f in assets_src.iterdir():
-                if f.is_file():
-                    _st.copy2(f, assets_dest / f.name)
-
-        # 写 variables.css
+# 写 variables.css
         css_vars = []
         css_map = {
             "primary": "--primary",
