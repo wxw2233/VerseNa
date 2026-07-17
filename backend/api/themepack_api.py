@@ -148,18 +148,9 @@ async def update_pack(pack_id: str, req: PackUpdate):
                     css_vars.append(f"  {val[0]}: {fonts[key]}{val[1]};")
                 else:
                     css_vars.append(f"  {val}: {fonts[key]};")
-        spacing_map = {
-            "bubbleRadius": ("--bubble-radius", "px"),
-            "bubblePadding": ("--bubble-padding", ""),
-            "sidebarWidth": ("--sidebar-width", "px"),
-            "inputRadius": ("--input-radius", "px"),
-        }
-        for key, val in spacing_map.items():
-            if key in spacing:
-                if isinstance(val, tuple):
-                    css_vars.append(f"  {val[0]}: {spacing[key]}{val[1]};")
-                else:
-                    css_vars.append(f"  {val}: {spacing[key]};")
+        # spacing 已在 T2 中移除，不再生成 CSS 变量
+        spacing = spacing
+
         if css_vars:
             (pack_dir / "variables.css").write_text(
                 ":root {\n" + "\n".join(css_vars) + "\n}\n", encoding="utf-8"

@@ -406,6 +406,13 @@ onMounted(async () => {
   form_model.model_name = data.model_name || ''
   form_model.api_key = data.api_key || ''
   await loadThemePacks()
+      // 重新应用主题 CSS
+      if (themeStore.current === editingPackId.value) {
+        await themeStore.applyTheme(editingPackId.value)
+      } else {
+        await themeStore.applyTheme(editingPackId.value)
+        await themeStore.applyTheme(themeStore.current)
+      }
   await loadMemories()
 })
 
@@ -582,6 +589,13 @@ async function createNewPack() {
     if (resp.ok) {
       const data = await resp.json()
       await loadThemePacks()
+      // 重新应用主题 CSS
+      if (themeStore.current === editingPackId.value) {
+        await themeStore.applyTheme(editingPackId.value)
+      } else {
+        await themeStore.applyTheme(editingPackId.value)
+        await themeStore.applyTheme(themeStore.current)
+      }
       if (data.id) openEditor(data.id)
     } else {
       const err = await resp.json()
@@ -603,6 +617,13 @@ async function savePack() {
     if (resp.ok) {
       alert('保存成功')
       await loadThemePacks()
+      // 重新应用主题 CSS
+      if (themeStore.current === editingPackId.value) {
+        await themeStore.applyTheme(editingPackId.value)
+      } else {
+        await themeStore.applyTheme(editingPackId.value)
+        await themeStore.applyTheme(themeStore.current)
+      }
     } else {
       const err = await resp.json()
       alert(err.detail || '保存失败')
@@ -643,6 +664,13 @@ async function deletePack(packId) {
     const resp = await fetch(`/api/themepacks/${packId}`, { method: 'DELETE' })
     if (resp.ok) {
       await loadThemePacks()
+      // 重新应用主题 CSS
+      if (themeStore.current === editingPackId.value) {
+        await themeStore.applyTheme(editingPackId.value)
+      } else {
+        await themeStore.applyTheme(editingPackId.value)
+        await themeStore.applyTheme(themeStore.current)
+      }
       if (editingPackId.value === packId) cancelEdit()
     } else {
       const err = await resp.json()
@@ -678,6 +706,13 @@ async function importPack(e) {
     if (resp.ok) {
       const data = await resp.json()
       await loadThemePacks()
+      // 重新应用主题 CSS
+      if (themeStore.current === editingPackId.value) {
+        await themeStore.applyTheme(editingPackId.value)
+      } else {
+        await themeStore.applyTheme(editingPackId.value)
+        await themeStore.applyTheme(themeStore.current)
+      }
       alert(`导入成功！主题包: ${data.name || data.id || '已导入'}`)
     } else {
       const err = await resp.json()

@@ -188,3 +188,12 @@
 [2026-07-18 00:10:40] [INFO] [Chat] WS消息: session=session_ad8ef8a9 content=再试一次
 [2026-07-18 00:10:54] [INFO] [Chat] 会话结束: session=session_ad8ef8a9
 [2026-07-18 00:10:54] [INFO] [Chat] 保存 2 个 tool segments
+[2026-07-18 00:17:38] [INFO] [Chat] WS消息: session=session_ad8ef8a9 content=最后测试一次
+[2026-07-18 00:17:50] [INFO] [Chat] 会话结束: session=session_ad8ef8a9
+[2026-07-18 00:17:50] [INFO] [Chat] 保存 1 个 tool segments
+[2026-07-18 00:21:15] [INFO] [Test] 集成测试日志
+[2026-07-18 00:21:15] [ERROR] [Test] 错误日志
+[2026-07-18 00:21:15] [INFO] [Chat] 用户消息
+[2026-07-18 00:21:15] [ERROR] [QQ] 发送失败
+[2026-07-18 00:21:15] [INFO] [Agent] [WARN] 重试中
+[2026-07-18 00:21:15] [INFO] [Chat] WS消息: session=test content=你好世界
