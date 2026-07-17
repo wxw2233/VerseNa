@@ -13,6 +13,26 @@ class Database:
         self._db.row_factory = aiosqlite.Row
         await self._init_tables()
 
+    async def update_last_message_metadata(self, session_id: str, role: str, metadata: dict):
+        """更新最近一条消息的 metadata（用于追加 segments）"""
+        cursor = await self._db.execute(
+            "SELECT id, metadata FROM conversations WHERE session_id = ? AND role = ? ORDER BY id DESC LIMIT 1",
+            (session_id, role)
+        )
+        row = await cursor.fetchone()
+        if row:
+            msg_id = row[0]
+            try:
+                old_meta = json.loads(row[1] or "{}")
+            except (json.JSONDecodeError, TypeError):
+                old_meta = {}
+            old_meta.update(metadata)
+            await self._db.execute(
+                "UPDATE conversations SET metadata = ? WHERE id = ?",
+                (json.dumps(old_meta, ensure_ascii=False), msg_id)
+            )
+            await self._db.commit()
+
     async def close(self):
         if self._db:
             await self._db.close()

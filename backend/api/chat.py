@@ -83,12 +83,14 @@ async def websocket_chat(ws: WebSocket):
             log_info("Chat", f"会话结束: session={session_id}")
             # 保存 tool segments
             if tool_segments:
-                await db.save_message(
-                    session_id, "assistant",
-                    json.dumps([s for s in tool_segments], ensure_ascii=False),
-                    persona=persona_name,
-                    segments=tool_segments
-                )
+                try:
+                    log_info("Chat", f"保存 {len(tool_segments)} 个 tool segments")
+                    await db.update_last_message_metadata(
+                        session_id, "assistant",
+                        {"segments": tool_segments}
+                    )
+                except Exception as seg_e:
+                    log_error("Chat", f"保存 segments 失败: {seg_e}")
             # 确保 done 消息总是发送
             try:
                 done_msg = {"type": "done", "emotion": emotion_state.primary, "emoji": emotion_state.emoji}
