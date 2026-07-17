@@ -56,6 +56,18 @@
 
 <script setup>
 import { computed } from 'vue'
+import { marked } from 'marked'
+
+// 配置 marked：安全渲染，不执行脚本
+marked.setOptions({
+  breaks: true,    // 换行符转 <br>
+  gfm: true,       // GitHub Flavored Markdown（表格、任务列表等）
+})
+
+function renderText(content) {
+  if (!content) return ''
+  return marked.parse(content)
+}
 
 const props = defineProps({ msg: Object })
 const emit = defineEmits(['retry'])
@@ -99,30 +111,6 @@ function summarizeArgs(args) {
   if (args.action) return args.action
   return JSON.stringify(args).slice(0, 60)
 }
-
-function renderText(content) {
-  // 简单 Markdown：代码块、粗体、链接
-  let html = content
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code>$2</code></pre>')
-    .replace(/`([^`]+)`/g, '<code>$1</code>')
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\n/g, '<br>')
-  return html
-}
-
-function formatSearchResults(detail) {
-  if (!detail) return ''
-  // 尝试解析为链接列表
-  const lines = detail.split('\n').filter(l => l.trim())
-  return lines.map(line => {
-    const urlMatch = line.match(/(https?:\/\/[^\s]+)/)
-    if (urlMatch) {
-      return `<div class="search-result"><a href="${urlMatch[1]}" target="_blank">${line}</a></div>`
-    }
-    return `<div class="search-result">${line}</div>`
-  }).join('')
-}
 </script>
 
 <style scoped>
@@ -139,6 +127,23 @@ function formatSearchResults(detail) {
 .text-seg :deep(pre) { background: rgba(0,0,0,0.2); padding: 8px; border-radius: 4px; overflow-x: auto; margin: 8px 0; font-size: 12px; }
 .text-seg :deep(code) { background: rgba(0,0,0,0.15); padding: 1px 4px; border-radius: 3px; font-size: 0.9em; }
 .text-seg :deep(a) { color: var(--primary); text-decoration: none; }
+.text-seg :deep(a:hover) { text-decoration: underline; }
+.text-seg :deep(h1), .text-seg :deep(h2), .text-seg :deep(h3) { margin: 12px 0 6px; font-weight: 700; color: var(--text-primary); }
+.text-seg :deep(h1) { font-size: 1.3em; }
+.text-seg :deep(h2) { font-size: 1.15em; }
+.text-seg :deep(h3) { font-size: 1.05em; }
+.text-seg :deep(ul), .text-seg :deep(ol) { padding-left: 20px; margin: 6px 0; }
+.text-seg :deep(li) { margin: 2px 0; }
+.text-seg :deep(blockquote) { border-left: 3px solid var(--primary); padding-left: 10px; margin: 8px 0; color: var(--text-secondary); }
+.text-seg :deep(hr) { border: none; border-top: 1px solid var(--border); margin: 12px 0; }
+.text-seg :deep(img) { max-width: 100%; border-radius: 6px; }
+.text-seg :deep(table) { border-collapse: collapse; margin: 8px 0; width: 100%; font-size: 13px; }
+.text-seg :deep(th), .text-seg :deep(td) { border: 1px solid var(--border); padding: 6px 10px; text-align: left; }
+.text-seg :deep(th) { background: rgba(124, 92, 252, 0.12); font-weight: 600; }
+.text-seg :deep(tr:nth-child(even)) { background: rgba(255,255,255,0.02); }
+.text-seg :deep(strong) { color: var(--text-primary); font-weight: 700; }
+.text-seg :deep(em) { font-style: italic; }
+.text-seg :deep(del) { text-decoration: line-through; color: var(--text-secondary); }
 
 .tool-actions-bar { display: flex; justify-content: flex-end; margin-bottom: 4px; }
 .tool-toggle-all { background: none; border: none; color: var(--text-secondary); cursor: pointer; font-size: 11px; }
