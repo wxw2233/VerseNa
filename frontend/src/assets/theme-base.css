@@ -1,0 +1,69 @@
+/* ============================================================
+   次元人格 — 固定形状 CSS 变量（米哈游风格）
+   https://docs.superpowers/specs/2026-07-17-slot-based-ui-shape-design.md
+   ============================================================ */
+
+:root {
+  /* ========== 槽位素材（默认透明，由用户上传替换） ========== */
+  --ui-topbar-bg:       none;
+  --ui-sidebar-bg:      none;
+  --ui-sidebar-divider: none;
+  --ui-chat-bg:         none;
+  --ui-bubble-user:     none;
+  --ui-bubble-agent:    none;
+  --ui-input-bg:        none;
+  --ui-send-btn:        none;
+  --ui-card-bg:         none;
+  --ui-avatar-frame:    none;
+  --ui-corner-decor:    none;
+
+  /* ========== 顶栏（渐变底栏 + 底部分隔发光） ========== */
+  --topbar-height: 44px;
+  --topbar-bg: linear-gradient(180deg, rgba(15, 15, 30, 0.95), rgba(15, 15, 30, 0.7));
+  --topbar-border: 1px solid transparent;
+  --topbar-border-image: linear-gradient(90deg, transparent, rgba(160, 130, 255, 0.35), transparent) 1;
+
+  /* ========== 侧栏（右侧渐变光边） ========== */
+  --sidebar-width: 220px;
+  --sidebar-bg: rgba(15, 15, 30, 0.85);
+  --sidebar-border: 2px solid transparent;
+  --sidebar-border-image: linear-gradient(180deg, rgba(160, 130, 255, 0.4), transparent 70%) 1;
+
+  /* ========== 分隔线（发光渐变线） ========== */
+  --divider-height: 1px;
+  --divider-bg: linear-gradient(90deg, transparent, rgba(160, 130, 255, 0.5), transparent);
+
+  /* ========== 聊天气泡（菱形切角 + 微发光） ========== */
+  --bubble-radius-user:  4px 14px 14px 14px;
+  --bubble-radius-agent: 14px 14px 14px 4px;
+  --bubble-shadow: 0 0 12px rgba(160, 130, 255, 0.12);
+  --bubble-padding: 10px 14px;
+
+  /* ========== 输入框（底部拉长圆角 + 内发光） ========== */
+  --input-height: 44px;
+  --input-radius: 6px 6px 6px 18px;
+  --input-border: 1px solid rgba(160, 130, 255, 0.25);
+  --input-glow: inset 0 0 8px rgba(160, 130, 255, 0.08);
+  --input-bg: rgba(30, 30, 50, 0.6);
+
+  /* ========== 发送按钮（倾斜菱形按钮） ========== */
+  --send-btn-clip: polygon(10% 0, 100% 0, 90% 100%, 0 100%);
+  --send-btn-color: #fff;
+  --send-btn-bg: linear-gradient(135deg, #7c5cfc, #a48cff);
+  --send-btn-glow: 0 0 16px rgba(160, 130, 255, 0.3);
+
+  /* ========== 卡片（圆角 + 细边框 + 微内发光） ========== */
+  --card-radius: 6px;
+  --card-border: 1px solid rgba(160, 130, 255, 0.15);
+  --card-glow: inset 0 0 30px rgba(160, 130, 255, 0.04);
+  --card-bg: rgba(20, 20, 40, 0.7);
+
+  /* ========== 头像框（发光外环） ========== */
+  --avatar-size: 42px;
+  --avatar-border: 2px solid rgba(180, 160, 255, 0.4);
+  --avatar-glow: 0 0 10px rgba(180, 160, 255, 0.3);
+
+  /* ========== 右下角装饰 ========== */
+  --corner-decor-size: 48px;
+  --corner-decor-opacity: 0.6;
+}

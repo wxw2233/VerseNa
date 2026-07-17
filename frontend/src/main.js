@@ -5,6 +5,7 @@ import App from './App.vue'
 import ChatView from './views/ChatView.vue'
 import SettingsView from './views/SettingsView.vue'
 import './styles/default.css'
+import './assets/theme-base.css'
 
 const router = createRouter({
   history: createWebHistory(),
