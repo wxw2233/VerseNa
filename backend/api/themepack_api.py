@@ -156,6 +156,25 @@ async def update_pack(pack_id: str, req: PackUpdate):
                 ":root {\n" + "\n".join(css_vars) + "\n}\n", encoding="utf-8"
             )
 
+    # 同步到 themes/ 目录
+    import shutil as _st2
+    from pathlib import Path as _Path
+    theme_dest = _Path(__file__).parent.parent.parent / "themes" / pack_id
+    theme_dest.mkdir(parents=True, exist_ok=True)
+    src = pack_dir / "variables.css"
+    if src.exists():
+        _st2.copy2(src, theme_dest / "variables.css")
+    src = pack_dir / "theme.json"
+    if src.exists():
+        _st2.copy2(src, theme_dest / "theme.json")
+    assets_src = pack_dir / "assets"
+    if assets_src.exists():
+        assets_dest = theme_dest / "assets"
+        assets_dest.mkdir(exist_ok=True)
+        for f in assets_src.iterdir():
+            if f.is_file():
+                _st2.copy2(f, assets_dest / f.name)
+
     return {"status": "ok"}
 
 @router.delete("/api/themepacks/{pack_id}")
