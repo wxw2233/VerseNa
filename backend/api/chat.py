@@ -8,6 +8,7 @@ from config import settings
 from persona.manager import persona_manager
 from tools.registry import tool_registry
 from api.log_api import log_info, log_error
+from db.database import db
 
 router = APIRouter()
 

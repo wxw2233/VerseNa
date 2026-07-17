@@ -138,3 +138,38 @@
 [2026-07-17 23:43:02] [ERROR] [QQ] 发送失败
 [2026-07-17 23:43:02] [INFO] [Agent] [WARN] 重试中
 [2026-07-17 23:43:02] [INFO] [Chat] WS消息: session=test content=你好世界
+[2026-07-17 23:45:20] [INFO] [Chat] WS消息: session=session_ad8ef8a9 content=再测试一下，至只要测试一个工具就像
+[2026-07-17 23:45:26] [INFO] [Chat] 会话结束: session=session_ad8ef8a9
+[2026-07-17 23:45:26] [INFO] [Chat] 保存 2 个 tool segments
+[2026-07-17 23:45:26] [ERROR] [Chat] 保存 segments 失败: name 'db' is not defined
+[2026-07-17 23:51:46] [INFO] [Chat] WS消息: session=session_ad8ef8a9 content=再测试一次
+[2026-07-17 23:51:54] [INFO] [Chat] 会话结束: session=session_ad8ef8a9
+[2026-07-17 23:51:54] [INFO] [Chat] 保存 2 个 tool segments
+[2026-07-17 23:51:54] [ERROR] [Chat] 保存 segments 失败: name 'db' is not defined
+[2026-07-17 23:52:50] [INFO] [Chat] WS消息: session=session_ad8ef8a9 content=测试一下搜索工具
+[2026-07-17 23:53:01] [INFO] [Chat] 会话结束: session=session_ad8ef8a9
+[2026-07-17 23:53:01] [INFO] [Chat] 保存 2 个 tool segments
+[2026-07-17 23:53:01] [ERROR] [Chat] 保存 segments 失败: name 'db' is not defined
+[2026-07-17 23:55:33] [INFO] [QQ] 收到 c2c: 测试一下搜索工具
+[2026-07-17 23:55:43] [INFO] [QQ] 回复(175字): 搜索工具测试完成！🔍
+
+我刚刚搜索了“人工智能最新发展”，工具成功返回了结果，包括：
+1. 中国政府网关于人工智能发展的政策部署
+2. 《人工智能产业发展研究报
+[2026-07-17 23:55:49] [INFO] [QQ] 发送: 成功
+[2026-07-17 23:56:06] [INFO] [Chat] WS消息: session=session_ad8ef8a9 content=测试一下编程工具
+[2026-07-17 23:56:19] [INFO] [Chat] 会话结束: session=session_ad8ef8a9
+[2026-07-17 23:56:19] [INFO] [Chat] 保存 2 个 tool segments
+[2026-07-17 23:56:19] [ERROR] [Chat] 保存 segments 失败: name 'db' is not defined
+[2026-07-18 00:00:02] [INFO] [Test] 集成测试日志
+[2026-07-18 00:00:02] [ERROR] [Test] 错误日志
+[2026-07-18 00:00:02] [INFO] [Chat] 用户消息
+[2026-07-18 00:00:02] [ERROR] [QQ] 发送失败
+[2026-07-18 00:00:02] [INFO] [Agent] [WARN] 重试中
+[2026-07-18 00:00:02] [INFO] [Chat] WS消息: session=test content=你好世界
+[2026-07-18 00:01:07] [INFO] [Test] 集成测试日志
+[2026-07-18 00:01:07] [ERROR] [Test] 错误日志
+[2026-07-18 00:01:07] [INFO] [Chat] 用户消息
+[2026-07-18 00:01:07] [ERROR] [QQ] 发送失败
+[2026-07-18 00:01:07] [INFO] [Agent] [WARN] 重试中
+[2026-07-18 00:01:07] [INFO] [Chat] WS消息: session=test content=你好世界
