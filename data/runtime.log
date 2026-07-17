@@ -203,3 +203,4 @@
 [2026-07-18 00:31:37] [ERROR] [QQ] 发送失败
 [2026-07-18 00:31:37] [INFO] [Agent] [WARN] 重试中
 [2026-07-18 00:31:37] [INFO] [Chat] WS消息: session=test content=你好世界
+[2026-07-18 00:53:59] [INFO] [Asset] 上传请求: theme=芙宁娜 file=test.png size=108

@@ -73,7 +73,9 @@ function triggerUpload(key) {
 
 async function handleUpload(event, key) {
   const file = event.target.files?.[0]
-  if (!file) return
+  if (!file) { alert('未选择文件'); return }
+  if (file.size === 0) { alert('文件为空'); return }
+  alert('上传中: ' + file.name + ' (' + file.size + ' bytes)')
   const targetName = assetFileMap[key]
   const renamedFile = new File([file], targetName, { type: file.type })
   const formData = new FormData()
