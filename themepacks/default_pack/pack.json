@@ -1,1 +1,6 @@
-{"id":"default_pack","name":"默认主题包","persona_ref":"default","theme_ref":"default"}
+{
+  "id": "default_pack",
+  "name": "默认主题包",
+  "persona_ref": "default_pack",
+  "theme_ref": "default"
+}

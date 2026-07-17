@@ -10,7 +10,15 @@
     "text-secondary": "#8888aa",
     "border": "#2a2a40",
     "bubble-user": "#7c5cfc26",
-    "bubble-agent": "rgba(30, 30, 50, 0.9)"
+    "bubble-agent": "rgba(30, 30, 50, 0.9)",
+    "--primary": "#3fa5e4",
+    "--bg-primary": "#0f0f1a",
+    "--bg-secondary": "#1a1a2e",
+    "--text-primary": "#e8e8f0",
+    "--text-secondary": "#8888aa",
+    "--border": "#2a2a40",
+    "--bubble-user": "rgba(124,92,252,0.15)",
+    "--bubble-agent": "rgba(30,30,50,0.9)"
   },
   "font": "Noto Sans SC",
   "effects": {}

@@ -589,13 +589,8 @@ async function createNewPack() {
     if (resp.ok) {
       const data = await resp.json()
       await loadThemePacks()
-      // 重新应用主题 CSS
-      if (themeStore.current === editingPackId.value) {
-        await themeStore.applyTheme(editingPackId.value)
-      } else {
-        await themeStore.applyTheme(editingPackId.value)
-        await themeStore.applyTheme(themeStore.current)
-      }
+      // 重新加载编辑的主题 CSS
+      await themeStore.applyTheme(editingPackId.value)
       if (data.id) openEditor(data.id)
     } else {
       const err = await resp.json()
@@ -615,15 +610,22 @@ async function savePack() {
       body: JSON.stringify(editingPack.value)
     })
     if (resp.ok) {
+      // 重新加载主题 CSS（直接 fetch 不依赖 themeStore.current）
+      try {
+        const cssResp = await fetch(`/api/themes/${editingPackId.value}/css`)
+        if (cssResp.ok) {
+          const css = await cssResp.text()
+          let styleEl = document.getElementById('theme-style')
+          if (!styleEl) {
+            styleEl = document.createElement('style')
+            styleEl.id = 'theme-style'
+            document.head.appendChild(styleEl)
+          }
+          styleEl.textContent = css
+        }
+      } catch {}
       alert('保存成功')
       await loadThemePacks()
-      // 重新应用主题 CSS
-      if (themeStore.current === editingPackId.value) {
-        await themeStore.applyTheme(editingPackId.value)
-      } else {
-        await themeStore.applyTheme(editingPackId.value)
-        await themeStore.applyTheme(themeStore.current)
-      }
     } else {
       const err = await resp.json()
       alert(err.detail || '保存失败')
@@ -664,13 +666,8 @@ async function deletePack(packId) {
     const resp = await fetch(`/api/themepacks/${packId}`, { method: 'DELETE' })
     if (resp.ok) {
       await loadThemePacks()
-      // 重新应用主题 CSS
-      if (themeStore.current === editingPackId.value) {
-        await themeStore.applyTheme(editingPackId.value)
-      } else {
-        await themeStore.applyTheme(editingPackId.value)
-        await themeStore.applyTheme(themeStore.current)
-      }
+      // 重新加载编辑的主题 CSS
+      await themeStore.applyTheme(editingPackId.value)
       if (editingPackId.value === packId) cancelEdit()
     } else {
       const err = await resp.json()
@@ -706,13 +703,8 @@ async function importPack(e) {
     if (resp.ok) {
       const data = await resp.json()
       await loadThemePacks()
-      // 重新应用主题 CSS
-      if (themeStore.current === editingPackId.value) {
-        await themeStore.applyTheme(editingPackId.value)
-      } else {
-        await themeStore.applyTheme(editingPackId.value)
-        await themeStore.applyTheme(themeStore.current)
-      }
+      // 重新加载编辑的主题 CSS
+      await themeStore.applyTheme(editingPackId.value)
       alert(`导入成功！主题包: ${data.name || data.id || '已导入'}`)
     } else {
       const err = await resp.json()
