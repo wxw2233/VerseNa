@@ -6,6 +6,7 @@
       <div class="chat-header">
         <span class="chat-persona-name">{{ personaStore.current || 'default' }}</span>
       </div>
+      <div class="chat-header"><span class="chat-persona-name">{{ personaStore.current || "default" }}</span></div>
       <div class="messages" ref="messagesRef">
         <ChatBubble v-for="(msg, i) in store.messages" :key="i" :msg="msg" />
         <div v-if="store.messages.length === 0" class="empty">
@@ -114,6 +115,8 @@ onMounted(() => {
       confirmDialog.visible = true
     } else if (msg.type === 'done') {
       store.finishStreaming(msg.emoji)
+      // 首条消息自动命名
+      autoTitleIfNeeded()
     } else if (msg.type === 'error') {
       store.handleError(msg.content || msg.message || '未知错误')
     }
@@ -148,6 +151,28 @@ function handleSend(content) {
     system_prompt: ''
   })
 }
+
+let autoTitleDone = false
+async function autoTitleIfNeeded() {
+  if (autoTitleDone) return
+  autoTitleDone = true
+  const msgs = store.messages
+  if (msgs.length < 2) return
+  const userMsg = msgs.find(m => m.role === 'user')
+  const assistantMsg = msgs.find(m => m.role === 'assistant')
+  if (!userMsg || !assistantMsg) return
+  try {
+    const sid = sessionStore.currentSessionId
+    const resp = await fetch(`/api/sessions/${sid}/auto-title`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ user_message: userMsg.content, assistant_message: assistantMsg.segments?.map(s => s.content || '').join('') || assistantMsg.content || '' })
+    })
+    const data = await resp.json()
+    if (data.name) await sessionStore.fetchSessions()
+  } catch {}
+}
+
 </script>
 
 <style scoped>
@@ -276,4 +301,6 @@ function handleSend(content) {
 .btn-confirm-ok:hover {
   opacity: 0.85;
 }
+.chat-header { padding: 8px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; }
+.chat-persona-name { font-size: 14px; font-weight: 600; color: var(--primary); }
 </style>

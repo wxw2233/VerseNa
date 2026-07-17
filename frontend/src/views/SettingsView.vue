@@ -1392,4 +1392,10 @@ legend {
 .log-warn { color: #d29922; }
 .log-error { color: #f85149; }
 .log-empty { color: #484f58; text-align: center; padding: 40px; }
+.pack-color-preview { width: 32px; height: 32px; border-radius: 6px; flex-shrink: 0; }
+.empty-state { text-align: center; padding: 60px 20px; }
+.empty-icon { font-size: 48px; margin-bottom: 16px; }
+.empty-title { font-size: 18px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px; }
+.empty-desc { color: var(--text-secondary); font-size: 14px; }
+.empty-desc code { background: rgba(124,92,252,0.15); padding: 2px 6px; border-radius: 4px; font-size: 13px; }
 </style>
