@@ -202,8 +202,7 @@ async function autoTitleIfNeeded() {
   position: relative;
   z-index: 1;
 }
-.chat-header { padding: 6px 16px; display: flex; justify-content: center; align-items: center; position: relative; z-index: 1; background: linear-gradient(to bottom, rgba(0,0,0,0.3), transparent); }
-.chat-header { padding: 6px 16px; display: flex; justify-content: center; align-items: center; position: relative; z-index: 1; background: linear-gradient(to bottom, rgba(0,0,0,0.3), transparent); }
+.chat-header { padding: 6px 16px; display: flex; justify-content: center; align-items: center; position: relative; z-index: 1; background: var(--topbar-bg, linear-gradient(to bottom, rgba(0,0,0,0.3), transparent)); border-bottom: var(--topbar-border, 1px solid transparent); border-image: var(--topbar-border-image, none); }
 .chat-persona-name { font-size: 12px; font-weight: 500; color: var(--text-secondary); letter-spacing: 2px; opacity: 0.6; }
 .empty {
   margin: auto;

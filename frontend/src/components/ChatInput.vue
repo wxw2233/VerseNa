@@ -60,8 +60,9 @@ async function handleFile(e) {
   display: flex;
   gap: 8px;
   padding: 12px 16px;
-  background: var(--bg-secondary);
-  border-top: 1px solid var(--border);
+  background: var(--input-bg, var(--bg-secondary));
+  border-top: var(--input-border, 1px solid var(--border));
+  box-shadow: var(--input-glow, none);
 }
 textarea {
   flex: 1;
@@ -80,12 +81,13 @@ textarea:focus {
 }
 button {
   padding: 8px 20px;
-  background: var(--primary);
-  color: white;
+  background: var(--send-btn-bg, var(--primary));
+  color: var(--send-btn-color, white);
   border: none;
   border-radius: 8px;
   cursor: pointer;
   font-size: 14px;
+  box-shadow: var(--send-btn-glow, none);
 }
 button:disabled {
   opacity: 0.5;

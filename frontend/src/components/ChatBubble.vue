@@ -118,11 +118,11 @@ function summarizeArgs(args) {
 .bubble-row.user { justify-content: flex-end; }
 .bubble-row.assistant { justify-content: flex-start; }
 .bubble {
-  max-width: 80%; padding: var(--bubble-padding); border-radius: var(--bubble-radius);
-  box-shadow: var(--bubble-shadow); border: var(--bubble-border); position: relative;
+  max-width: 80%; padding: var(--bubble-padding);
+  box-shadow: var(--bubble-shadow); position: relative;
 }
-.bubble.user { background: var(--bubble-user); }
-.bubble.assistant { background: var(--bubble-agent); }
+.bubble.user { background: var(--bubble-user); border-radius: var(--bubble-radius-user); }
+.bubble.assistant { background: var(--bubble-agent); border-radius: var(--bubble-radius-agent); }
 .text-seg { line-height: var(--line-height); font-size: var(--font-size-base); word-break: break-word; }
 .text-seg :deep(pre) { background: rgba(0,0,0,0.2); padding: 8px; border-radius: 4px; overflow-x: auto; margin: 8px 0; font-size: 12px; }
 .text-seg :deep(code) { background: rgba(0,0,0,0.15); padding: 1px 4px; border-radius: 3px; font-size: 0.9em; }

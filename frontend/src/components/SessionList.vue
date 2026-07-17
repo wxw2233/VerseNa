@@ -264,8 +264,8 @@ async function saveEdit() {
 
 <style scoped>
 .session-panel {
-  width: 220px;
-  background: var(--bg-secondary);
+  width: var(--sidebar-width, 220px);
+  background: var(--sidebar-bg, var(--bg-secondary));
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
@@ -329,8 +329,9 @@ async function saveEdit() {
 }
 .session-item:hover { background: rgba(255,255,255,0.03); }
 .session-item.active {
-  background: rgba(124, 92, 252, 0.1);
+  background: linear-gradient(90deg, rgba(124, 92, 252, 0.18), rgba(124, 92, 252, 0.03));
   border-left: 3px solid var(--primary);
+  box-shadow: 0 0 8px rgba(160, 130, 255, 0.06);
 }
 .session-name {
   font-size: 13px; color: var(--text-primary);

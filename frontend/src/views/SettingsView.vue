@@ -144,13 +144,7 @@
               <div class="param-row"><label>行高 <span class="val-badge">{{ editingPack.theme.fonts.lineHeight.toFixed(1) }}</span></label><input type="range" min="1.2" max="2.0" step="0.1" v-model.number="editingPack.theme.fonts.lineHeight" /></div>
             </div>
 
-            <!-- 间距子标签 -->
-            <div v-if="themeSubTab === 'spacing'" class="sub-panel">
-              <div class="param-row"><label>气泡圆角 <span class="val-badge">{{ editingPack.theme.spacing.bubbleRadius }}px</span></label><input type="range" min="0" max="24" step="1" v-model.number="editingPack.theme.spacing.bubbleRadius" /></div>
-              <div class="param-row"><label>气泡内距</label><input type="text" v-model="editingPack.theme.spacing.bubblePadding" placeholder="10px 14px" /></div>
-              <div class="param-row"><label>侧栏宽度 <span class="val-badge">{{ editingPack.theme.spacing.sidebarWidth }}px</span></label><input type="range" min="160" max="320" step="10" v-model.number="editingPack.theme.spacing.sidebarWidth" /></div>
-              <div class="param-row"><label>输入框圆角 <span class="val-badge">{{ editingPack.theme.spacing.inputRadius }}px</span></label><input type="range" min="0" max="16" step="1" v-model.number="editingPack.theme.spacing.inputRadius" /></div>
-            </div>
+
           </div>
 
           <!-- 素材标签 -->
@@ -452,7 +446,6 @@ const editorTabs = [
 const themeSubTabs = [
   { id: 'colors', icon: '🎨', label: '颜色' },
   { id: 'fonts', icon: '🔤', label: '字体' },
-  { id: 'spacing', icon: '📐', label: '间距' },
 ]
 
 const emotionKeys = ['cheerful', 'shy', 'curious', 'angry', 'sad']
@@ -812,9 +805,9 @@ watch(() => activeTab.value, (tab) => {
 
 /* Sidebar */
 .sidebar {
-  width: 180px;
-  min-width: 180px;
-  background: var(--bg-secondary, #1e1e2e);
+  width: var(--sidebar-width, 180px);
+  min-width: var(--sidebar-width, 180px);
+  background: var(--sidebar-bg, var(--bg-secondary, #1e1e2e));
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
@@ -840,12 +833,12 @@ watch(() => activeTab.value, (tab) => {
 }
 
 .menu-item.active {
-  background: rgba(124, 92, 252, 0.2);
+  background: linear-gradient(90deg, rgba(124, 92, 252, 0.25), rgba(124, 92, 252, 0.05));
   color: var(--primary);
   border-left-color: var(--primary);
   border-left-width: 4px;
   font-weight: 700;
-  box-shadow: inset 3px 0 0 var(--primary);
+  box-shadow: inset 3px 0 0 var(--primary), 0 0 12px rgba(160, 130, 255, 0.08);
 }
 
 .menu-icon {
