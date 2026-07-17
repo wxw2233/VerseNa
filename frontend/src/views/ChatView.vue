@@ -202,9 +202,9 @@ async function autoTitleIfNeeded() {
   position: relative;
   z-index: 1;
 }
-.chat-header { padding: 8px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; position: relative; z-index: 1; }
-.chat-header { padding: 6px 16px; border-bottom: 1px solid var(--border); display: flex; justify-content: center; align-items: center; position: relative; z-index: 1; }
-.chat-persona-name { font-size: 13px; font-weight: 600; color: var(--primary); letter-spacing: 1px; opacity: 0.8; }
+.chat-header { padding: 6px 16px; display: flex; justify-content: center; align-items: center; position: relative; z-index: 1; background: linear-gradient(to bottom, rgba(0,0,0,0.3), transparent); }
+.chat-header { padding: 6px 16px; display: flex; justify-content: center; align-items: center; position: relative; z-index: 1; background: linear-gradient(to bottom, rgba(0,0,0,0.3), transparent); }
+.chat-persona-name { font-size: 12px; font-weight: 500; color: var(--text-secondary); letter-spacing: 2px; opacity: 0.6; }
 .empty {
   margin: auto;
   text-align: center;
