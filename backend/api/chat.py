@@ -85,10 +85,15 @@ async def websocket_chat(ws: WebSocket):
             # 保存 tool segments
             if tool_segments:
                 try:
-                    log_info("Chat", f"保存 {len(tool_segments)} 个 tool segments")
+                    # 去重：同 tool_call_id 只保留最后出现的状态
+                    deduped = {}
+                    for s in tool_segments:
+                        deduped[s.get("tool_call_id", "")] = s
+                    segments = list(deduped.values())
+                    log_info("Chat", f"保存 {len(segments)} 个 tool segments")
                     await db.update_last_message_metadata(
                         session_id, "assistant",
-                        {"segments": tool_segments}
+                        {"segments": segments}
                     )
                 except Exception as seg_e:
                     log_error("Chat", f"保存 segments 失败: {seg_e}")
