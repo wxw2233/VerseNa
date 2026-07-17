@@ -215,7 +215,7 @@ async function handleSwitch(id) {
       if (msg.segments && msg.segments.length > 0) {
         // 把 content 文本作为第一个 text 段加在前面
         if (msg.content && msg.segments.every(s => s.type !== 'text')) {
-          m.segments = [{ type: 'text', content: msg.content }, ...msg.segments]
+          m.segments = [...msg.segments, { type: 'text', content: msg.content }]
         } else {
           m.segments = msg.segments
         }

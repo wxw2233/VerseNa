@@ -179,3 +179,9 @@
 [2026-07-18 00:03:38] [INFO] [Chat] WS消息: session=session_ad8ef8a9 content=测试一下搜索工具
 [2026-07-18 00:03:54] [INFO] [Chat] 会话结束: session=session_ad8ef8a9
 [2026-07-18 00:03:54] [INFO] [Chat] 保存 2 个 tool segments
+[2026-07-18 00:07:24] [INFO] [Chat] WS消息: session=session_ad8ef8a9 content=再简单测试一下工具
+[2026-07-18 00:07:48] [INFO] [Chat] 会话结束: session=session_ad8ef8a9
+[2026-07-18 00:07:48] [INFO] [Chat] 保存 6 个 tool segments
+[2026-07-18 00:09:17] [INFO] [Chat] WS消息: session=session_ad8ef8a9 content=简单测试一下工具，只要有调用就行
+[2026-07-18 00:09:29] [INFO] [Chat] 会话结束: session=session_ad8ef8a9
+[2026-07-18 00:09:29] [INFO] [Chat] 保存 2 个 tool segments
