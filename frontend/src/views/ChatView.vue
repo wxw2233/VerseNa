@@ -210,15 +210,8 @@ function loadToolExpanded() {
   } catch {}
 }
 
-// 在加载会话历史后恢复展开状态
-const origFetchHistory = store.fetchHistory
-if (origFetchHistory) {
-  const wrapped = async (...args) => {
-    await origFetchHistory.call(store, ...args)
-    loadToolExpanded()
-  }
-  store.fetchHistory = wrapped
-}
+// 加载后恢复展开状态
+setTimeout(loadToolExpanded, 100)
 
 </script>
 

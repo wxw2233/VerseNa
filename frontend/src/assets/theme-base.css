@@ -34,28 +34,28 @@
   --divider-bg: linear-gradient(90deg, transparent, rgba(160, 130, 255, 0.5), transparent);
 
   /* ========== 聊天气泡（菱形切角 + 微发光） ========== */
-  --bubble-radius-user:  4px 14px 14px 14px;
-  --bubble-radius-agent: 14px 14px 14px 4px;
-  --bubble-shadow: 0 0 12px rgba(160, 130, 255, 0.12);
+  --bubble-radius-user:  2px 16px 16px 16px;
+  --bubble-radius-agent: 16px 16px 16px 2px;
+  --bubble-shadow: 0 0 20px rgba(160, 130, 255, 0.2);
   --bubble-padding: 10px 14px;
 
   /* ========== 输入框（底部拉长圆角 + 内发光） ========== */
   --input-height: 44px;
   --input-radius: 6px 6px 6px 18px;
   --input-border: 1px solid rgba(160, 130, 255, 0.25);
-  --input-glow: inset 0 0 8px rgba(160, 130, 255, 0.08);
+  --input-glow: inset 0 0 12px rgba(124, 92, 252, 0.12);
   --input-bg: rgba(30, 30, 50, 0.6);
 
   /* ========== 发送按钮（倾斜菱形按钮） ========== */
   --send-btn-clip: polygon(10% 0, 100% 0, 90% 100%, 0 100%);
   --send-btn-color: #fff;
   --send-btn-bg: linear-gradient(135deg, #7c5cfc, #a48cff);
-  --send-btn-glow: 0 0 16px rgba(160, 130, 255, 0.3);
+  --send-btn-glow: 0 0 20px rgba(160, 130, 255, 0.5), inset 0 0 8px rgba(255,255,255,0.1);
 
   /* ========== 卡片（圆角 + 细边框 + 微内发光） ========== */
   --card-radius: 6px;
   --card-border: 1px solid rgba(160, 130, 255, 0.15);
-  --card-glow: inset 0 0 30px rgba(160, 130, 255, 0.04);
+  --card-glow: inset 0 0 30px rgba(124, 92, 252, 0.08);
   --card-bg: rgba(20, 20, 40, 0.7);
 
   /* ========== 头像框（发光外环） ========== */

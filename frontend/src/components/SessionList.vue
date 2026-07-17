@@ -210,7 +210,18 @@ async function handleSwitch(id) {
   chatStore.clearMessages()
   for (const msg of history) {
     if (msg.role === 'user') chatStore.addUserMessage(msg.content)
-    else if (msg.role === 'assistant') chatStore.messages.push({ role: 'assistant', content: msg.content, streaming: false })
+    else if (msg.role === 'assistant') {
+      const m = { role: 'assistant', streaming: false }
+      if (msg.segments) {
+        m.segments = msg.segments
+        m.version = msg.version || 2
+        m.expandedTools = {}
+      } else {
+        m.content = msg.content || ''
+      }
+      if (msg.emoji) m.emoji = msg.emoji
+      chatStore.messages.push(m)
+    }
   }
 }
 
