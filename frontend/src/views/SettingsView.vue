@@ -224,16 +224,20 @@
       <!-- 插件管理 (Plugin) -->
       <div v-if="activeTab === 'plugin'" class="tab-content">
         <h2>插件管理</h2>
-        <PluginManager />
+        <div class="empty-state">
+          <div class="empty-icon">🔌</div>
+          <div class="empty-title">暂无插件</div>
+          <div class="empty-desc">将插件文件夹放入 <code>plugins/</code> 目录即可自动加载</div>
+        </div>
       </div>
 
       <!-- 技能 (Skill) -->
       <div v-if="activeTab === 'skill'" class="tab-content">
         <h2>技能</h2>
-        <div class="placeholder">
-          <span class="placeholder-icon">⚡</span>
-          <p>技能管理功能即将推出</p>
-          <p class="placeholder-sub">敬请期待自定义技能编排与热加载</p>
+        <div class="empty-state">
+          <div class="empty-icon">⚡</div>
+          <div class="empty-title">技能管理</div>
+          <div class="empty-desc">自定义技能编排与热加载功能即将推出</div>
         </div>
       </div>
 
@@ -359,7 +363,6 @@ import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useThemeStore } from '../stores/theme'
 import { usePersonaStore } from '../stores/persona'
 import AssetUploader from '../components/AssetUploader.vue'
-import PluginManager from '../components/PluginManager.vue'
 import QQBotConfig from '../components/QQBotConfig.vue'
 
 const activeTab = ref('persona')
@@ -837,10 +840,12 @@ watch(() => activeTab.value, (tab) => {
 }
 
 .menu-item.active {
-  background: rgba(124, 92, 252, 0.15);
+  background: rgba(124, 92, 252, 0.2);
   color: var(--primary);
   border-left-color: var(--primary);
-  font-weight: 600;
+  border-left-width: 4px;
+  font-weight: 700;
+  box-shadow: inset 3px 0 0 var(--primary);
 }
 
 .menu-icon {
@@ -1297,6 +1302,13 @@ legend {
   font-size: 13px;
   opacity: 0.7;
 }
+
+/* Empty state */
+.empty-state { text-align: center; padding: 60px 20px; }
+.empty-icon { font-size: 48px; margin-bottom: 16px; }
+.empty-title { font-size: 18px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px; }
+.empty-desc { color: var(--text-secondary); font-size: 14px; }
+.empty-desc code { background: rgba(124,92,252,0.15); padding: 2px 6px; border-radius: 4px; font-size: 13px; }
 
 .empty-hint {
   text-align: center;

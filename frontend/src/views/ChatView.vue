@@ -3,6 +3,9 @@
     <SessionList />
     <div class="chat-main">
       <div class="bg-layer" :style="bgStyle"></div>
+      <div class="chat-header">
+        <span class="chat-persona-name">{{ personaStore.current || 'default' }}</span>
+      </div>
       <div class="messages" ref="messagesRef">
         <ChatBubble v-for="(msg, i) in store.messages" :key="i" :msg="msg" />
         <div v-if="store.messages.length === 0" class="empty">
@@ -175,6 +178,8 @@ function handleSend(content) {
   position: relative;
   z-index: 1;
 }
+.chat-header { padding: 8px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; position: relative; z-index: 1; }
+.chat-persona-name { font-size: 14px; font-weight: 600; color: var(--primary); }
 .empty {
   margin: auto;
   text-align: center;

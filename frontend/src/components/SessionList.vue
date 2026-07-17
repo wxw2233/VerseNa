@@ -31,7 +31,7 @@
               />
             </template>
             <template v-else>
-              <div class="session-name">{{ s.id }}</div>
+              <div class="session-name">{{ s.name && s.name !== s.id ? s.name : s.id.replace('session_', '').slice(0, 12) }}</div>
               <div class="session-meta">{{ s.msg_count }}条</div>
               <div class="session-actions">
                 <button class="action-btn" @click.stop="startEdit(s)" title="编辑">✏️</button>

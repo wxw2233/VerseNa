@@ -16,8 +16,8 @@
       </label>
     </div>
     <div class="form-row">
-      <label>Webhook 地址</label>
-      <div class="webhook-url">POST http://你的域名:8000/api/qq/webhook</div>
+      <label>连接模式</label>
+      <div class="webhook-url">WebSocket 长连接（无需公网地址）</div>
     </div>
     <button @click="save">保存配置</button>
     <div v-if="msg" class="msg" :class="{ error: isError }">{{ msg }}</div>

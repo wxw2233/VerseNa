@@ -20,3 +20,14 @@
 [2026-07-17 19:47:42] [ERROR] [QQ] 发送失败
 [2026-07-17 19:47:42] [INFO] [Agent] [WARN] 重试中
 [2026-07-17 19:47:42] [INFO] [Chat] WS消息: session=test content=你好世界
+[2026-07-17 21:10:17] [INFO] [Chat] WS消息: session=session_ad8ef8a9 content=我引入了 marked 库替代手写的正则渲染
+支持：表格（带边框+交替行色）、有序/无序列表、标题（h1-h3）、引用块、代码块、链接、粗体/斜体/删除线、图片
+[2026-07-17 21:10:30] [INFO] [Chat] 会话结束: session=session_ad8ef8a9
+[2026-07-17 21:11:21] [INFO] [Chat] WS消息: session=session_ad8ef8a9 content=效果还可以
+[2026-07-17 21:11:29] [INFO] [Chat] 会话结束: session=session_ad8ef8a9
+[2026-07-17 21:25:11] [INFO] [Test] 集成测试日志
+[2026-07-17 21:25:11] [ERROR] [Test] 错误日志
+[2026-07-17 21:25:11] [INFO] [Chat] 用户消息
+[2026-07-17 21:25:11] [ERROR] [QQ] 发送失败
+[2026-07-17 21:25:11] [INFO] [Agent] [WARN] 重试中
+[2026-07-17 21:25:11] [INFO] [Chat] WS消息: session=test content=你好世界

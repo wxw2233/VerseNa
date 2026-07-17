@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from db.database import db
+from api.log_api import log_info, log_error
 import uuid
 
 router = APIRouter()
@@ -77,3 +78,42 @@ async def create_session(req: SessionCreate):
     """创建新会话，返回 session_id"""
     new_id = req.name if req.name else f"session_{uuid.uuid4().hex[:8]}"
     return {"session_id": new_id}
+
+
+@router.post("/api/sessions/{session_id}/auto-title")
+async def auto_title(session_id: str, req: dict):
+    """根据首句对话自动生成标题"""
+    user_msg = req.get("user_message", "")[:100]
+    assistant_msg = req.get("assistant_message", "")[:100]
+    if not user_msg:
+        return {"status": "skip"}
+
+    # 检查当前名称是否还是 session_id（未手动改过）
+    meta = await db.get_session_meta(session_id)
+    if meta.get("name") and meta["name"] != session_id:
+        return {"status": "already_named", "name": meta["name"]}
+
+    try:
+        from agent.models.openai_adapter import OpenAIAdapter
+        from config import settings
+        adapter = OpenAIAdapter(
+            api_key=settings.DEFAULT_API_KEY,
+            base_url=settings.DEFAULT_API_BASE,
+            model_name=settings.DEFAULT_MODEL_NAME
+        )
+        prompt = f"给以下对话起一个简短的中文标题（10字以内），只返回标题，不要其他内容：\n用户：{user_msg}\n助手：{assistant_msg}"
+        import asyncio
+
+        async def get_title():
+            async for chunk in adapter.chat([{"role": "user", "content": prompt}], stream=False):
+                return chunk.content.strip().strip('"').strip("'").replace("\n", "")[:20]
+
+        title = await asyncio.wait_for(get_title(), timeout=10)
+        if title:
+            await db.set_session_meta(session_id, name=title)
+            log_info("Session", f"自动命名: {session_id} -> {title}")
+            return {"status": "ok", "name": title}
+    except Exception as e:
+        log_error("Session", f"自动命名失败: {e}")
+
+    return {"status": "skip"}
