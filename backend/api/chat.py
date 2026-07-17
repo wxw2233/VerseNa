@@ -68,11 +68,11 @@ async def websocket_chat(ws: WebSocket):
             emotion = persona_manager.get_emotion_engine(persona_name)
             emotion_state = emotion.pick_emotion()
 
-            
+            tool_segments = []
             try:
                 async for event in agent.run(session_id, content, system_prompt=system_prompt, tools=tool_registry.get_tools(), persona=persona_name, confirm_callback=confirm_callback):
                     await ws.send_text(json.dumps(event, ensure_ascii=False))
-                    if event.get("type") == "segment" and event.get("segment", {}).get("type") in ("text", "tool"):
+                    if event.get("type") == "segment" and event.get("segment", {}).get("type") == "tool":
                         tool_segments.append(event["segment"])
             except Exception as e:
                 try:

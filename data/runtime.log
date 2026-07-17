@@ -122,3 +122,11 @@
 [2026-07-17 23:31:37] [ERROR] [QQ] 发送失败
 [2026-07-17 23:31:37] [INFO] [Agent] [WARN] 重试中
 [2026-07-17 23:31:37] [INFO] [Chat] WS消息: session=test content=你好世界
+[2026-07-17 23:33:08] [INFO] [Chat] WS消息: session=session_ad8ef8a9 content=测试一下你的几个工具调用
+[2026-07-17 23:33:14] [INFO] [Chat] 会话结束: session=session_ad8ef8a9
+[2026-07-17 23:35:38] [INFO] [Test] 集成测试日志
+[2026-07-17 23:35:38] [ERROR] [Test] 错误日志
+[2026-07-17 23:35:38] [INFO] [Chat] 用户消息
+[2026-07-17 23:35:38] [ERROR] [QQ] 发送失败
+[2026-07-17 23:35:38] [INFO] [Agent] [WARN] 重试中
+[2026-07-17 23:35:38] [INFO] [Chat] WS消息: session=test content=你好世界
