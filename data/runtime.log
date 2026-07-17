@@ -2,3 +2,15 @@
 [2026-07-17 00:01:48] [INFO] [Chat] 会话结束: session=session_ad8ef8a9
 [2026-07-17 00:02:53] [INFO] [Chat] WS消息: session=session_ad8ef8a9 content=那个塔防游戏有bug，一旦拿起防御塔就只能放下了，没有取消的选择
 [2026-07-17 00:03:25] [INFO] [Chat] 会话结束: session=session_ad8ef8a9
+[2026-07-17 19:43:57] [INFO] [Test] 集成测试日志
+[2026-07-17 19:43:57] [ERROR] [Test] 错误日志
+[2026-07-17 19:43:57] [INFO] [Chat] 用户消息
+[2026-07-17 19:43:57] [ERROR] [QQ] 发送失败
+[2026-07-17 19:43:57] [INFO] [Agent] [WARN] 重试中
+[2026-07-17 19:43:57] [INFO] [Chat] WS消息: session=test content=你好世界
+[2026-07-17 19:44:18] [INFO] [Test] 集成测试日志
+[2026-07-17 19:44:18] [ERROR] [Test] 错误日志
+[2026-07-17 19:44:18] [INFO] [Chat] 用户消息
+[2026-07-17 19:44:18] [ERROR] [QQ] 发送失败
+[2026-07-17 19:44:18] [INFO] [Agent] [WARN] 重试中
+[2026-07-17 19:44:18] [INFO] [Chat] WS消息: session=test content=你好世界
