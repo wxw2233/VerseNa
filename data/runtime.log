@@ -70,3 +70,16 @@
 [2026-07-17 22:28:09] [ERROR] [QQ] 发送失败
 [2026-07-17 22:28:09] [INFO] [Agent] [WARN] 重试中
 [2026-07-17 22:28:09] [INFO] [Chat] WS消息: session=test content=你好世界
+[2026-07-17 22:32:48] [INFO] [Test] 集成测试日志
+[2026-07-17 22:32:48] [ERROR] [Test] 错误日志
+[2026-07-17 22:32:48] [INFO] [Chat] 用户消息
+[2026-07-17 22:32:48] [ERROR] [QQ] 发送失败
+[2026-07-17 22:32:48] [INFO] [Agent] [WARN] 重试中
+[2026-07-17 22:32:48] [INFO] [Chat] WS消息: session=test content=你好世界
+[2026-07-17 22:38:08] [INFO] [Chat] WS消息: session=session_ad8ef8a9 content=做一个扫雷游戏吧，还是放在老地方
+[2026-07-17 22:38:43] [INFO] [Chat] WS消息: session=session_ad8ef8a9 content=？
+[2026-07-17 22:39:17] [INFO] [Chat] 会话结束: session=session_ad8ef8a9
+[2026-07-17 22:43:47] [INFO] [Chat] 会话结束: session=session_ad8ef8a9
+[2026-07-17 22:43:56] [ERROR] [Session] 自动命名失败: 
+[2026-07-17 22:44:53] [INFO] [Chat] WS消息: session=session_ad8ef8a9 content=工具调用次数达到上限，继续干
+[2026-07-17 22:46:47] [INFO] [Chat] 会话结束: session=session_ad8ef8a9

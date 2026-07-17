@@ -116,6 +116,8 @@ onMounted(() => {
       store.finishStreaming(msg.emoji)
       // 首条消息自动命名
       autoTitleIfNeeded()
+      // 保存展开状态
+      saveToolExpanded()
     } else if (msg.type === 'error') {
       store.handleError(msg.content || msg.message || '未知错误')
     }
@@ -170,6 +172,52 @@ async function autoTitleIfNeeded() {
     const data = await resp.json()
     if (data.name) await sessionStore.fetchSessions()
   } catch {}
+}
+
+
+// 工具展开状态持久化（localStorage）
+function saveToolExpanded() {
+  const key = 'tool_expanded_' + sessionStore.currentSessionId
+  const expanded = {}
+  for (const msg of store.messages) {
+    if (msg.expandedTools) {
+      Object.assign(expanded, msg.expandedTools)
+    }
+  }
+  if (Object.keys(expanded).length > 0) {
+    localStorage.setItem(key, JSON.stringify(expanded))
+  }
+}
+
+function loadToolExpanded() {
+  const key = 'tool_expanded_' + sessionStore.currentSessionId
+  try {
+    const saved = localStorage.getItem(key)
+    if (saved) {
+      const expanded = JSON.parse(saved)
+      // 重新映射到当前消息的 segments
+      for (const msg of store.messages) {
+        if (msg.segments) {
+          msg.expandedTools = msg.expandedTools || {}
+          for (const seg of msg.segments) {
+            if (seg.type === 'tool' && expanded[seg.tool_call_id]) {
+              msg.expandedTools[seg.tool_call_id] = true
+            }
+          }
+        }
+      }
+    }
+  } catch {}
+}
+
+// 在加载会话历史后恢复展开状态
+const origFetchHistory = store.fetchHistory
+if (origFetchHistory) {
+  const wrapped = async (...args) => {
+    await origFetchHistory.call(store, ...args)
+    loadToolExpanded()
+  }
+  store.fetchHistory = wrapped
 }
 
 </script>

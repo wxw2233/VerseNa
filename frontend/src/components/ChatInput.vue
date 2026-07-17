@@ -85,6 +85,7 @@ button {
   color: var(--send-btn-color, white);
   border: none;
   border-radius: 8px;
+  clip-path: var(--send-btn-clip);
   cursor: pointer;
   font-size: 14px;
   box-shadow: var(--send-btn-glow, none);
@@ -98,6 +99,7 @@ button:disabled {
   background: transparent;
   border: 1px solid var(--border);
   border-radius: 8px;
+  clip-path: var(--send-btn-clip);
   cursor: pointer;
   font-size: 16px;
 }

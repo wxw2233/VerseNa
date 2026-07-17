@@ -149,11 +149,13 @@ function summarizeArgs(args) {
 .tool-toggle-all { background: none; border: none; color: var(--text-secondary); cursor: pointer; font-size: 11px; }
 
 .tool-seg {
-  margin: 8px 0; padding: 8px 12px;
-  background: rgba(124, 92, 252, 0.08);
+  margin: 6px 0; padding: 8px 12px;
+  background: rgba(124, 92, 252, 0.06);
+  border: 1px solid rgba(124, 92, 252, 0.12);
   border-left: 3px solid var(--primary);
   border-radius: 0 8px 8px 0;
   font-size: 13px; position: relative;
+  backdrop-filter: blur(4px);
 }
 /* 连续 tool 段连接线 */
 .tool-seg + .tool-seg::before {
@@ -161,21 +163,22 @@ function summarizeArgs(args) {
   left: -3px; top: -8px; width: 3px; height: 8px;
   background: var(--primary);
 }
+.tool-seg + .tool-seg { margin-top: 2px; }
 /* 状态配色 */
-.tool-seg[data-status="running"] { border-left-color: #3b82f6; }
+.tool-seg[data-status="running"] { border-left-color: #3b82f6; background: rgba(59, 130, 246, 0.06); }
 .tool-seg[data-status="running"] + .tool-seg::before { background: #3b82f6; }
-.tool-seg[data-status="done"] { border-left-color: #22c55e; }
+.tool-seg[data-status="done"] { border-left-color: #22c55e; background: rgba(34, 197, 94, 0.06); }
 .tool-seg[data-status="done"] + .tool-seg::before { background: #22c55e; }
-.tool-seg[data-status="error"] { border-left-color: #ef4444; }
+.tool-seg[data-status="error"] { border-left-color: #ef4444; background: rgba(239, 68, 68, 0.06); }
 .tool-seg[data-status="error"] + .tool-seg::before { background: #ef4444; }
 
 .tool-header { display: flex; align-items: center; gap: 6px; }
 .tool-icon { font-size: 14px; }
-.tool-name { font-weight: 600; color: var(--primary); }
-.tool-args { color: var(--text-secondary); font-size: 12px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tool-status { flex-shrink: 0; }
-.tool-summary { margin-top: 4px; color: var(--text-secondary); font-size: 12px; }
-.tool-detail { margin-top: 8px; padding: 8px; background: var(--bg-primary); border-radius: 4px; font-size: 12px; max-height: 200px; overflow-y: auto; }
+.tool-name { font-weight: 600; color: var(--primary); font-size: 12px; }
+.tool-args { color: var(--text-secondary); font-size: 11px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 4px; background: rgba(0,0,0,0.1); border-radius: 4px; }
+.tool-status { flex-shrink: 0; font-size: 12px; }
+.tool-summary { margin-top: 4px; color: var(--text-secondary); font-size: 12px; padding: 2px 6px; background: rgba(0,0,0,0.05); border-radius: 4px; }
+.tool-detail { margin-top: 8px; padding: 8px; background: rgba(0,0,0,0.2); border: 1px solid rgba(124,92,252,0.08); border-radius: 6px; font-size: 12px; max-height: 200px; overflow-y: auto; }
 .tool-detail pre { margin: 0; white-space: pre-wrap; word-break: break-all; }
 .tool-actions { margin-top: 4px; display: flex; gap: 8px; }
 .tool-expand, .tool-retry { background: none; border: none; color: var(--primary); cursor: pointer; font-size: 12px; }
