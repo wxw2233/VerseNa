@@ -37,51 +37,72 @@ async function handleFile(e) {
 </script>
 
 <style scoped>
+/* L2 base for input bar, perceptual border on top only */
 .input-bar {
   display: flex;
   gap: 8px;
   padding: 12px 16px;
-  background: var(--input-bg, var(--bg-secondary));
-  border-top: var(--input-border, 1px solid var(--border));
-  box-shadow: var(--input-glow, none);
+  background: var(--glass-l2-bg);
+  backdrop-filter: var(--glass-l2-blur);
+  -webkit-backdrop-filter: var(--glass-l2-blur);
+  box-shadow: 0 -1px 0 rgba(255, 255, 255, 0.04);
 }
+/* L4 textarea: 12px radius, inner glow */
 textarea {
   flex: 1;
   resize: none;
-  border: 1px solid var(--border);
-  border-radius: var(--input-radius);
+  border: none;
+  border-radius: var(--glass-radius);
   padding: 8px 12px;
-  background: var(--input-bg);
+  background: var(--glass-l4-bg);
   color: var(--text-primary);
   font-size: 14px;
   outline: none;
   max-height: 120px;
+  font-family: inherit;
+  box-shadow: var(--glass-border), var(--glass-glow);
+  transition: box-shadow 0.2s;
 }
 textarea:focus {
-  border-color: var(--primary);
+  box-shadow: 0 0 0 1px var(--primary), var(--glass-glow);
 }
+/* L4 buttons: 10px radius, hover brightness + translateY */
 button {
   padding: 8px 20px;
-  background: var(--send-btn-bg, var(--primary));
-  color: var(--send-btn-color, white);
+  background: var(--primary);
+  color: #fff;
   border: none;
-  border-radius: 8px;
-  clip-path: var(--send-btn-clip);
+  border-radius: var(--glass-radius-sm);
   cursor: pointer;
   font-size: 14px;
-  box-shadow: var(--send-btn-glow, none);
+  box-shadow: var(--glass-border);
+  transition: filter 0.2s, transform 0.2s;
+}
+button:hover:not(:disabled) {
+  filter: brightness(1.08);
+  transform: translateY(-1px);
 }
 button:disabled {
-  opacity: 0.5;
+  opacity: 0.4;
   cursor: not-allowed;
+  filter: none;
+  transform: none;
 }
+/* Attach button: subtle glass style */
 .attach-btn {
   padding: 8px 12px;
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  clip-path: var(--send-btn-clip);
+  background: var(--glass-l4-bg);
+  border: none;
+  border-radius: var(--glass-radius-sm);
+  box-shadow: var(--glass-border);
   cursor: pointer;
   font-size: 16px;
+  color: var(--text-secondary);
+  transition: filter 0.2s, transform 0.2s, box-shadow 0.2s;
+}
+.attach-btn:hover {
+  filter: brightness(1.08);
+  transform: translateY(-1px);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08);
 }
 </style>

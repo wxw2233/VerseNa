@@ -279,20 +279,24 @@ async function saveEdit() {
 </script>
 
 <style scoped>
+/* L1: Sidebar — 12px blur, 0.75 opacity, inner glow, no hard right border */
 .session-panel {
   width: var(--sidebar-width, 220px);
-  background: var(--sidebar-bg, var(--bg-secondary));
-  border-right: 1px solid var(--border);
+  background: var(--glass-l1-bg);
+  backdrop-filter: var(--glass-l1-blur);
+  -webkit-backdrop-filter: var(--glass-l1-blur);
+  box-shadow: var(--glass-glow);
   display: flex;
   flex-direction: column;
   height: calc(100vh - 52px);
+  position: relative;
+  z-index: 2;
 }
 .session-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 12px;
-  border-bottom: 1px solid var(--border);
+  padding: 14px 12px;
   font-size: 14px;
   font-weight: 600;
   color: var(--text-primary);
@@ -300,9 +304,14 @@ async function saveEdit() {
 .new-btn {
   width: 28px; height: 28px;
   background: var(--primary); color: white;
-  border: none; border-radius: 6px;
+  border: none; border-radius: 8px;
   cursor: pointer; font-size: 16px;
   display: flex; align-items: center; justify-content: center;
+  transition: filter 0.2s, transform 0.2s;
+}
+.new-btn:hover {
+  filter: brightness(1.08);
+  transform: translateY(-1px);
 }
 .session-items { flex: 1; overflow-y: auto; }
 
@@ -335,19 +344,21 @@ async function saveEdit() {
   border-radius: 8px;
 }
 
-/* 会话项 */
+/* 会话项 — subtle hover, no hard border */
 .session-item {
-  padding: 8px 12px 8px 28px;
+  padding: 8px 12px 8px 24px;
   cursor: pointer;
   position: relative;
   transition: background 0.15s;
-  border-bottom: 1px solid var(--border);
 }
-.session-item:hover { background: rgba(255,255,255,0.03); }
+.session-item:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+/* Selected session: left border indicator */
 .session-item.active {
-  background: linear-gradient(90deg, rgba(124, 92, 252, 0.18), rgba(124, 92, 252, 0.03));
+  background: rgba(124, 92, 252, 0.12);
   border-left: 3px solid var(--primary);
-  box-shadow: 0 0 8px rgba(160, 130, 255, 0.06);
+  border-radius: 0 8px 8px 0;
 }
 .session-name {
   font-size: 13px; color: var(--text-primary);
@@ -368,49 +379,67 @@ async function saveEdit() {
 .action-btn.delete:hover { color: #ff4757; }
 .rename-input {
   width: 100%; font-size: 13px; color: var(--text-primary);
-  background: var(--bg-primary); border: 1px solid var(--primary);
+  background: var(--glass-l4-bg);
+  box-shadow: 0 0 0 1px var(--primary);
+  border: none;
   border-radius: 4px; padding: 4px 6px; outline: none;
 }
 .empty { padding: 20px; text-align: center; color: var(--text-secondary); font-size: 13px; }
 
-/* 弹窗 */
+/* 弹窗 — L3 glass style */
 .modal-overlay {
   position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(0,0,0,0.5); display: flex;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  display: flex;
   align-items: center; justify-content: center; z-index: 100;
 }
 .modal {
-  background: var(--bg-secondary); border-radius: 12px;
+  background: var(--glass-l3-bg);
+  backdrop-filter: var(--glass-l3-blur);
+  -webkit-backdrop-filter: var(--glass-l3-blur);
+  box-shadow: var(--glass-border), var(--glass-glow);
+  border-radius: var(--glass-radius);
   padding: 20px; width: 340px; max-height: 70vh; overflow-y: auto;
-  border: 1px solid var(--border);
 }
 .modal-title {
   font-size: 16px; font-weight: 600; color: var(--text-primary);
   margin-bottom: 16px; text-align: center;
 }
 .pack-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+/* Pack cards in modal: L3 style */
 .pack-card {
-  background: var(--bg-primary); border: 1px solid var(--border);
-  border-radius: 8px; padding: 12px; cursor: pointer; transition: all 0.15s;
+  background: var(--glass-l3-bg);
+  box-shadow: var(--glass-border);
+  border-radius: var(--glass-radius);
+  padding: 12px; cursor: pointer;
+  transition: filter 0.2s, transform 0.2s, box-shadow 0.2s;
 }
 .pack-card:hover {
-  border-color: var(--primary); background: rgba(124, 92, 252, 0.08);
+  box-shadow: 0 0 0 1px var(--primary);
+  filter: brightness(1.05);
+  transform: translateY(-1px);
 }
 .pack-name { font-size: 14px; font-weight: 600; color: var(--text-primary); }
 .pack-info { font-size: 11px; color: var(--text-secondary); margin-top: 4px; }
 .btn-cancel, .btn-save {
-  padding: 6px 16px; border-radius: 6px; cursor: pointer;
+  padding: 6px 16px; border-radius: var(--glass-radius-sm); cursor: pointer;
   font-size: 13px; border: none;
+  transition: filter 0.2s, transform 0.2s;
 }
 .btn-cancel {
-  background: var(--bg-primary); color: var(--text-secondary);
-  border: 1px solid var(--border);
+  background: var(--glass-l4-bg);
+  color: var(--text-secondary);
+  box-shadow: var(--glass-border);
 }
 .btn-save {
   background: var(--primary); color: white;
 }
-.btn-cancel:hover { background: rgba(255,255,255,0.05); }
-.btn-save:hover { opacity: 0.9; }
+.btn-cancel:hover, .btn-save:hover {
+  filter: brightness(1.08);
+  transform: translateY(-1px);
+}
 .edit-field { margin-bottom: 12px; }
 .edit-field label {
   display: block; font-size: 12px; color: var(--text-secondary);
@@ -418,9 +447,13 @@ async function saveEdit() {
 }
 .pack-select {
   width: 100%; font-size: 13px; color: var(--text-primary);
-  background: var(--bg-primary); border: 1px solid var(--border);
+  background: var(--glass-l4-bg);
+  box-shadow: var(--glass-border);
+  border: none;
   border-radius: 4px; padding: 6px 8px; outline: none;
 }
-.pack-select:focus { border-color: var(--primary); }
+.pack-select:focus {
+  box-shadow: 0 0 0 1px var(--primary);
+}
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 </style>

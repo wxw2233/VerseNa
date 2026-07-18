@@ -206,9 +206,13 @@ setTimeout(loadToolExpanded, 100)
 </script>
 
 <style scoped>
+/* L2: Chat view — 8px blur, 0.62 opacity */
 .chat-view {
   display: flex;
   height: calc(100vh - 52px);
+  background: var(--glass-l2-bg);
+  backdrop-filter: var(--glass-l2-blur);
+  -webkit-backdrop-filter: var(--glass-l2-blur);
 }
 .chat-main {
   flex: 1;
@@ -217,6 +221,9 @@ setTimeout(loadToolExpanded, 100)
   min-width: 0;
   position: relative;
   overflow: hidden;
+  background: var(--glass-l2-bg);
+  backdrop-filter: var(--glass-l2-blur);
+  -webkit-backdrop-filter: var(--glass-l2-blur);
 }
 .messages {
   flex: 1;
@@ -226,9 +233,24 @@ setTimeout(loadToolExpanded, 100)
   flex-direction: column;
   position: relative;
   z-index: 1;
+  /* transparent — inherits from chat-main L2 */
 }
-.chat-header { padding: 6px 16px; display: flex; justify-content: center; align-items: center; position: relative; z-index: 1; background: var(--topbar-bg, linear-gradient(to bottom, rgba(0,0,0,0.3), transparent)); border-bottom: var(--topbar-border, 1px solid transparent); border-image: var(--topbar-border-image, none); }
-.chat-persona-name { font-size: 12px; font-weight: 500; color: var(--text-secondary); letter-spacing: 2px; opacity: 0.6; }
+/* Minimal subtle header */
+.chat-header {
+  padding: 10px 16px 8px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  position: relative;
+  z-index: 1;
+}
+.chat-persona-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  letter-spacing: 2px;
+  opacity: 0.5;
+}
 .empty {
   margin: auto;
   text-align: center;
@@ -237,37 +259,40 @@ setTimeout(loadToolExpanded, 100)
 .empty p { font-size: 24px; }
 .empty .sub { font-size: 14px; margin-top: 8px; }
 
-/* Confirm Dialog */
+/* Confirm Dialog — glass L3 style */
 .confirm-overlay {
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
   background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 1000;
 }
 .confirm-dialog {
-  background: var(--bg-secondary, #1e1e2e);
-  border: 1px solid var(--border, #2a2a40);
-  border-radius: 14px;
+  background: var(--glass-l3-bg);
+  backdrop-filter: var(--glass-l3-blur);
+  -webkit-backdrop-filter: var(--glass-l3-blur);
+  box-shadow: var(--glass-border), var(--glass-glow), 0 8px 32px rgba(0, 0, 0, 0.4);
+  border-radius: var(--glass-radius);
   padding: 24px;
   min-width: 380px;
   max-width: 520px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
 }
 .confirm-header {
   font-size: 18px;
   font-weight: 600;
   margin-bottom: 16px;
-  color: var(--text-primary, #e8e8f0);
+  color: var(--text-primary);
 }
 .confirm-body {
   margin-bottom: 20px;
 }
 .confirm-message {
   font-size: 14px;
-  color: var(--text-primary, #e8e8f0);
+  color: var(--text-primary);
   line-height: 1.6;
   margin-bottom: 12px;
 }
@@ -276,53 +301,59 @@ setTimeout(loadToolExpanded, 100)
   flex-direction: column;
   gap: 6px;
   padding: 10px 14px;
-  background: var(--bg-primary, #0f0f1a);
+  background: var(--glass-l4-bg);
   border-radius: 8px;
+  box-shadow: var(--glass-border);
   font-size: 13px;
 }
 .confirm-action {
-  color: var(--primary, #7c5cfc);
+  color: var(--primary);
   font-weight: 600;
   text-transform: uppercase;
   font-family: monospace;
 }
 .confirm-path {
-  color: var(--text-secondary, #8888aa);
+  color: var(--text-secondary);
   font-family: monospace;
   word-break: break-all;
 }
 .confirm-count {
-  color: var(--text-secondary, #8888aa);
+  color: var(--text-secondary);
 }
 .confirm-actions {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
 }
+/* L4 buttons for confirm dialog */
 .btn-confirm-cancel {
   padding: 8px 20px;
-  border: 1px solid var(--border, #2a2a40);
-  border-radius: 8px;
-  background: transparent;
-  color: var(--text-secondary, #8888aa);
+  box-shadow: var(--glass-border);
+  border-radius: var(--glass-radius-sm);
+  background: var(--glass-l4-bg);
+  color: var(--text-secondary);
   cursor: pointer;
   font-size: 14px;
-  transition: border-color 0.15s;
+  border: none;
+  transition: filter 0.2s, transform 0.2s, box-shadow 0.2s;
 }
 .btn-confirm-cancel:hover {
-  border-color: var(--primary, #7c5cfc);
+  box-shadow: 0 0 0 1px var(--primary);
+  filter: brightness(1.08);
+  transform: translateY(-1px);
 }
 .btn-confirm-ok {
   padding: 8px 20px;
   border: none;
-  border-radius: 8px;
-  background: var(--primary, #7c5cfc);
+  border-radius: var(--glass-radius-sm);
+  background: var(--primary);
   color: #fff;
   cursor: pointer;
   font-size: 14px;
-  transition: opacity 0.15s;
+  transition: filter 0.2s, transform 0.2s;
 }
 .btn-confirm-ok:hover {
-  opacity: 0.85;
+  filter: brightness(1.08);
+  transform: translateY(-1px);
 }
 </style>

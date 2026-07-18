@@ -52,12 +52,16 @@ function toggleSettings() {
   z-index: 1;
 }
 
+/* L1: Top bar — 12px blur, 0.75 opacity, inner glow, no bottom border */
 .top-bar {
   display: flex;
   align-items: center;
   padding: 12px 20px;
-  background: var(--bg-secondary);
-  border-bottom: 1px solid var(--border);
+  background: var(--glass-l1-bg);
+  backdrop-filter: var(--glass-l1-blur);
+  -webkit-backdrop-filter: var(--glass-l1-blur);
+  box-shadow: var(--glass-glow);
+  /* no bottom border — perceptual border via box-shadow instead */
 }
 .nav-title {
   font-size: 18px;
@@ -65,14 +69,22 @@ function toggleSettings() {
   color: var(--primary);
   text-decoration: none;
   margin-right: auto;
+  letter-spacing: 1px;
 }
 .nav-link {
   color: var(--text-secondary);
   text-decoration: none;
   font-size: 14px;
   cursor: pointer;
+  padding: 4px 12px;
+  border-radius: 8px;
+  transition: background 0.2s, color 0.2s;
 }
-.nav-link:hover, .nav-link.active {
+.nav-link:hover {
+  color: var(--primary);
+  background: rgba(124, 92, 252, 0.08);
+}
+.nav-link.active {
   color: var(--primary);
 }
 .main-content {

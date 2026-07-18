@@ -1,39 +1,71 @@
 :root {
-  /* 颜色 */
+  /* === Glassmorphism Layer System === */
+  /* L1: Top bar, Sidebar — 12px blur, 0.75 opacity */
+  --glass-l1-bg: rgba(15, 15, 30, 0.75);
+  --glass-l1-blur: blur(12px);
+  /* L2: Chat area, Settings content area — 8px blur, 0.62 opacity */
+  --glass-l2-bg: rgba(20, 20, 40, 0.62);
+  --glass-l2-blur: blur(8px);
+  /* L3: Cards, Chat bubbles — 6px blur, 0.55 opacity */
+  --glass-l3-bg: rgba(25, 25, 45, 0.55);
+  --glass-l3-blur: blur(6px);
+  /* L4: Input, Buttons — no blur, 0.60 opacity */
+  --glass-l4-bg: rgba(30, 30, 50, 0.6);
+
+  /* Perceptual border — replaces all hard border: 1px solid var(--border) */
+  --glass-border: 0 0 0 1px rgba(255, 255, 255, 0.04);
+
+  /* Inner glow for L1/L3 panels — subtle depth */
+  --glass-glow: inset 0 0 30px rgba(255, 255, 255, 0.03);
+
+  /* Unified radius */
+  --glass-radius: 12px;
+  --glass-radius-sm: 10px;
+
+  /* === Color palette (kept for theming) === */
   --primary: #7c5cfc;
+
+  /* Legacy bg variables — kept for backwards compat in theme store but overridden by glass layers */
   --bg-primary: #0f0f1a;
   --bg-secondary: #1a1a2e;
   --text-primary: #e8e8f0;
   --text-secondary: #8888aa;
   --border: #2a2a40;
+
+  /* Bubble colors (these can still be themed) */
   --bubble-user: rgba(124, 92, 252, 0.15);
   --bubble-agent: rgba(30, 30, 50, 0.9);
 
-  /* 气泡 */
+  /* Bubble */
   --bubble-radius: 12px;
   --bubble-shadow: none;
   --bubble-border: none;
   --bubble-padding: 10px 14px;
 
-  /* 字体 */
+  /* Font */
   --font-family: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif;
   --font-size-base: 14px;
   --font-size-small: 12px;
   --line-height: 1.6;
 
-  /* 间距 */
+  /* Spacing */
   --spacing-xs: 4px;
   --spacing-sm: 8px;
   --spacing-md: 16px;
   --spacing-lg: 24px;
 
-  /* 侧栏 */
+  /* Sidebar */
   --sidebar-width: 220px;
   --sidebar-bg: var(--bg-secondary);
 
-  /* 输入框 */
+  /* Input */
   --input-radius: 8px;
   --input-bg: var(--bg-primary);
+
+  /* === Scrollbar === */
+  --scrollbar-width: 4px;
+  --scrollbar-thumb: rgba(255, 255, 255, 0.08);
+  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.18);
 }
 
 * {
@@ -44,7 +76,7 @@
 
 body {
   font-family: var(--font-family);
-  background: var(--bg-primary);
+  background: transparent;
   color: var(--text-primary);
   height: 100vh;
   font-size: var(--font-size-base);
@@ -58,3 +90,19 @@ body {
 }
 
 a { color: var(--primary); }
+
+/* Thin custom scrollbar */
+::-webkit-scrollbar {
+  width: var(--scrollbar-width);
+  height: var(--scrollbar-width);
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 2px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+}

@@ -117,12 +117,31 @@ function summarizeArgs(args) {
 .bubble-row { display: flex; margin: 8px 16px; }
 .bubble-row.user { justify-content: flex-end; }
 .bubble-row.assistant { justify-content: flex-start; }
+
+/* L3: Chat bubbles — 6px blur, 0.55 opacity, perceptual border, inner glow */
 .bubble {
-  max-width: 80%; padding: var(--bubble-padding);
-  box-shadow: var(--bubble-shadow); position: relative;
+  max-width: 80%;
+  padding: var(--bubble-padding);
+  position: relative;
+  border-radius: var(--glass-radius);
+  background: var(--glass-l3-bg);
+  backdrop-filter: var(--glass-l3-blur);
+  -webkit-backdrop-filter: var(--glass-l3-blur);
+  box-shadow: var(--glass-border), var(--glass-glow);
 }
-.bubble.user { background: var(--bubble-user); border-radius: var(--bubble-radius-user); }
-.bubble.assistant { background: var(--bubble-agent); border-radius: var(--bubble-radius-agent); }
+
+/* Asymmetric bottom radius: user bubble bottom-right 8px */
+.bubble.user {
+  background: var(--bubble-user);
+  border-bottom-right-radius: 8px;
+}
+
+/* Asymmetric bottom radius: assistant bubble bottom-left 8px */
+.bubble.assistant {
+  background: var(--bubble-agent);
+  border-bottom-left-radius: 8px;
+}
+
 .text-seg { line-height: var(--line-height); font-size: var(--font-size-base); word-break: break-word; }
 .text-seg :deep(pre) { background: rgba(0,0,0,0.2); padding: 8px; border-radius: 4px; overflow-x: auto; margin: 8px 0; font-size: 12px; }
 .text-seg :deep(code) { background: rgba(0,0,0,0.15); padding: 1px 4px; border-radius: 3px; font-size: 0.9em; }
@@ -135,10 +154,10 @@ function summarizeArgs(args) {
 .text-seg :deep(ul), .text-seg :deep(ol) { padding-left: 20px; margin: 6px 0; }
 .text-seg :deep(li) { margin: 2px 0; }
 .text-seg :deep(blockquote) { border-left: 3px solid var(--primary); padding-left: 10px; margin: 8px 0; color: var(--text-secondary); }
-.text-seg :deep(hr) { border: none; border-top: 1px solid var(--border); margin: 12px 0; }
+.text-seg :deep(hr) { border: none; border-top: 1px solid rgba(255,255,255,0.06); margin: 12px 0; }
 .text-seg :deep(img) { max-width: 100%; border-radius: 6px; }
 .text-seg :deep(table) { border-collapse: collapse; margin: 8px 0; width: 100%; font-size: 13px; }
-.text-seg :deep(th), .text-seg :deep(td) { border: 1px solid var(--border); padding: 6px 10px; text-align: left; }
+.text-seg :deep(th), .text-seg :deep(td) { box-shadow: 0 0 0 1px rgba(255,255,255,0.06); padding: 6px 10px; text-align: left; }
 .text-seg :deep(th) { background: rgba(124, 92, 252, 0.12); font-weight: 600; }
 .text-seg :deep(tr:nth-child(even)) { background: rgba(255,255,255,0.02); }
 .text-seg :deep(strong) { color: var(--text-primary); font-weight: 700; }
@@ -151,11 +170,12 @@ function summarizeArgs(args) {
 .tool-seg {
   margin: 6px 0; padding: 8px 12px;
   background: rgba(124, 92, 252, 0.06);
-  border: 1px solid rgba(124, 92, 252, 0.12);
+  box-shadow: 0 0 0 1px rgba(124, 92, 252, 0.12);
   border-left: 3px solid var(--primary);
   border-radius: 0 8px 8px 0;
   font-size: 13px; position: relative;
   backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
 }
 /* 连续 tool 段连接线 */
 .tool-seg + .tool-seg::before {
@@ -178,7 +198,7 @@ function summarizeArgs(args) {
 .tool-args { color: var(--text-secondary); font-size: 11px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 4px; background: rgba(0,0,0,0.1); border-radius: 4px; }
 .tool-status { flex-shrink: 0; font-size: 12px; }
 .tool-summary { margin-top: 4px; color: var(--text-secondary); font-size: 12px; padding: 2px 6px; background: rgba(0,0,0,0.05); border-radius: 4px; }
-.tool-detail { margin-top: 8px; padding: 8px; background: rgba(0,0,0,0.2); border: 1px solid rgba(124,92,252,0.08); border-radius: 6px; font-size: 12px; max-height: 200px; overflow-y: auto; }
+.tool-detail { margin-top: 8px; padding: 8px; background: rgba(0,0,0,0.2); box-shadow: 0 0 0 1px rgba(124,92,252,0.08); border-radius: 6px; font-size: 12px; max-height: 200px; overflow-y: auto; }
 .tool-detail pre { margin: 0; white-space: pre-wrap; word-break: break-all; }
 .tool-actions { margin-top: 4px; display: flex; gap: 8px; }
 .tool-expand, .tool-retry { background: none; border: none; color: var(--primary); cursor: pointer; font-size: 12px; }
