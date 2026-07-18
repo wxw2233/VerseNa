@@ -80,9 +80,15 @@ function toggleSettings() {
   border-radius: 8px;
   transition: background 0.2s, color 0.2s;
 }
+.nav-link {
+  color: var(--text-secondary); text-decoration: none; font-size: 14px;
+  cursor: pointer; padding: 4px 12px; border-radius: 8px;
+  transition: background 0.15s, color 0.15s;
+  text-shadow: 0 0 4px rgba(0,0,0,0.3);
+}
 .nav-link:hover {
   color: var(--primary);
-  background: rgba(124, 92, 252, 0.08);
+  background: rgba(124, 92, 252, 0.10);
 }
 .nav-link.active {
   color: var(--primary);
