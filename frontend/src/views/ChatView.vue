@@ -2,7 +2,7 @@
   <div class="chat-view">
     <SessionList />
     <div class="chat-main">
-      <div class="bg-layer" :style="bgStyle"></div>
+
       <div class="chat-header">
         <span class="chat-persona-name">🎭 {{ personaStore.current || "default" }}</span>
       </div>
@@ -70,6 +70,7 @@ const confirmDialog = reactive({
   dir_count: undefined
 })
 
+// bg-layer moved to App.vue
 const bgStyle = computed(() => {
   const themeId = themeStore.current
   return {
