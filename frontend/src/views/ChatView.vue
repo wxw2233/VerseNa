@@ -210,9 +210,7 @@ setTimeout(loadToolExpanded, 100)
 .chat-view {
   display: flex;
   height: calc(100vh - 52px);
-  background: var(--panel-l2);
-   
-
+  /* transparent - bg shows through */
 }
 .chat-main {
   flex: 1;
@@ -221,9 +219,7 @@ setTimeout(loadToolExpanded, 100)
   min-width: 0;
   position: relative;
   overflow: hidden;
-  background: var(--panel-l2);
-   
-
+  /* transparent */
 }
 .messages {
   flex: 1;
