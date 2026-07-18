@@ -1,108 +1,70 @@
 :root {
-  /* === Glassmorphism Layer System === */
-  /* L1: Top bar, Sidebar — 12px blur, 0.75 opacity */
-  --glass-l1-bg: rgba(15, 15, 30, 0.25);
-  --glass-l1-blur: blur(6px);
-  /* L2: Chat area, Settings content area — 8px blur, 0.62 opacity */
-  --glass-l2-bg: rgba(20, 20, 40, 0.20);
-  --glass-l2-blur: blur(4px);
-  /* L3: Cards, Chat bubbles — 6px blur, 0.55 opacity */
-  --glass-l3-bg: rgba(25, 25, 45, 0.18);
-  --glass-l3-blur: blur(3px);
-  /* L4: Input, Buttons — no blur, 0.60 opacity */
-  --glass-l4-bg: rgba(30, 30, 50, 0.22);
-
-  /* Perceptual border — replaces all hard border: 1px solid var(--border) */
-  --glass-border: 0 0 0 1px rgba(255, 255, 255, 0.04);
-
-  /* Inner glow for L1/L3 panels — subtle depth */
-  --glass-glow: inset 0 0 30px rgba(255, 255, 255, 0.03);
-
-  /* Unified radius */
-  --glass-radius: 12px;
-  --glass-radius-sm: 10px;
-
-  /* === Color palette (kept for theming) === */
+  /* 颜色（可调） */
   --primary: #7c5cfc;
-
-  /* Legacy bg variables — kept for backwards compat in theme store but overridden by glass layers */
-  --bg-primary: #0f0f1a;
-  --bg-secondary: #1a1a2e;
   --text-primary: #e8e8f0;
   --text-secondary: #8888aa;
+
+  /* 面板层级 — 深色底 */
+  --panel-l1: rgba(12, 12, 28, 0.92);
+  --panel-l2: rgba(15, 15, 32, 0.88);
+  --panel-l3: rgba(20, 20, 40, 0.85);
+  --panel-l4: rgba(25, 25, 48, 0.82);
+
+  /* 感知边框 — 4% 白透明 */
+  --border-subtle: 0 0 0 1px rgba(255, 255, 255, 0.04);
+  /* 内柔光 */
+  --glow-inner: inset 0 0 30px rgba(255, 255, 255, 0.02);
+
+  /* 兼容旧变量 */
+  --bg-primary: #0f0f1a;
+  --bg-secondary: #1a1a2e;
   --border: #2a2a40;
 
-  /* Bubble colors (these can still be themed) */
-  --bubble-user: rgba(124, 92, 252, 0.15);
-  --bubble-agent: rgba(30, 30, 50, 0.9);
+  /* 形状统一 */
+  --radius: 12px;
+  --radius-sm: 8px;
+  --radius-btn: 10px;
 
-  /* Bubble */
-  --bubble-radius: 12px;
-  --bubble-shadow: none;
-  --bubble-border: none;
+  /* 气泡 */
+  --bubble-bg: var(--panel-l3);
   --bubble-padding: 10px 14px;
 
-  /* Font */
+  /* 字体 */
   --font-family: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif;
   --font-size-base: 14px;
   --font-size-small: 12px;
   --line-height: 1.6;
 
-  /* Spacing */
-  --spacing-xs: 4px;
-  --spacing-sm: 8px;
-  --spacing-md: 16px;
-  --spacing-lg: 24px;
-
-  /* Sidebar */
+  /* 侧栏 */
   --sidebar-width: 220px;
-  --sidebar-bg: var(--bg-secondary);
+  --sidebar-bg: var(--panel-l1);
 
-  /* Input */
-  --input-radius: 8px;
-  --input-bg: var(--bg-primary);
-
-  /* === Scrollbar === */
-  --scrollbar-width: 4px;
-  --scrollbar-thumb: rgba(255, 255, 255, 0.08);
-  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.18);
+  /* 输入框 */
+  --input-radius: var(--radius);
+  --input-bg: var(--panel-l4);
+  --input-glow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
 }
 
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
+* { margin: 0; padding: 0; box-sizing: border-box; }
 
-body {
-  font-family: var(--font-family);
-  background: transparent;
-  color: var(--text-primary);
+html, body {
   height: 100vh;
+  font-family: var(--font-family);
   font-size: var(--font-size-base);
+  color: var(--text-primary);
   line-height: var(--line-height);
+  background: #0a0a18;
 }
 
-#app {
+#app, #app-root {
   height: 100vh;
   display: flex;
   flex-direction: column;
 }
 
-a { color: var(--primary); }
+a { color: var(--primary); text-decoration: none; }
 
-/* Thin custom scrollbar */
-::-webkit-scrollbar {
-  width: var(--scrollbar-width);
-  height: var(--scrollbar-width);
-}
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-::-webkit-scrollbar-thumb {
-  background: var(--scrollbar-thumb);
-  border-radius: 2px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: var(--scrollbar-thumb-hover);
-}
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.08); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.18); }

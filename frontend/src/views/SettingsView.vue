@@ -817,10 +817,10 @@ watch(() => activeTab.value, (tab) => {
 .sidebar {
   width: var(--sidebar-width, 180px);
   min-width: var(--sidebar-width, 180px);
-  background: var(--glass-l1-bg);
-  backdrop-filter: var(--glass-l1-blur);
-  -webkit-backdrop-filter: var(--glass-l1-blur);
-  box-shadow: var(--glass-glow);
+  background: var(--panel-l1);
+   
+
+  box-shadow: var(--glow-inner);
   display: flex;
   flex-direction: column;
   padding-top: 8px;
@@ -865,9 +865,9 @@ watch(() => activeTab.value, (tab) => {
   flex: 1;
   overflow-y: auto;
   padding: 28px 36px;
-  background: var(--glass-l2-bg);
-  backdrop-filter: var(--glass-l2-blur);
-  -webkit-backdrop-filter: var(--glass-l2-blur);
+  background: var(--panel-l2);
+   
+
 }
 
 .tab-content h2 {
@@ -888,21 +888,21 @@ watch(() => activeTab.value, (tab) => {
   align-items: center;
   gap: 12px;
   padding: 14px 16px;
-  background: var(--glass-l3-bg);
-  backdrop-filter: var(--glass-l3-blur);
-  -webkit-backdrop-filter: var(--glass-l3-blur);
-  box-shadow: var(--glass-border), var(--glass-glow);
-  border-radius: var(--glass-radius);
+  background: var(--panel-l3);
+   
+
+  box-shadow: var(--border-subtle), var(--glow-inner);
+  border-radius: var(--radius);
   cursor: pointer;
   transition: filter 0.2s, transform 0.2s, box-shadow 0.2s;
 }
 .pack-card:hover {
-  box-shadow: 0 0 0 1px var(--primary), var(--glass-glow);
+  box-shadow: 0 0 0 1px var(--primary), var(--glow-inner);
   filter: brightness(1.05);
   transform: translateY(-1px);
 }
 .pack-card.selected {
-  box-shadow: 0 0 0 2px var(--primary), var(--glass-glow);
+  box-shadow: 0 0 0 2px var(--primary), var(--glow-inner);
 }
 
 .pack-preview {
@@ -932,11 +932,11 @@ watch(() => activeTab.value, (tab) => {
 
 /* Inline pack editor — L3 */
 .pack-editor {
-  background: var(--glass-l3-bg);
-  backdrop-filter: var(--glass-l3-blur);
-  -webkit-backdrop-filter: var(--glass-l3-blur);
-  box-shadow: var(--glass-border), var(--glass-glow);
-  border-radius: var(--glass-radius);
+  background: var(--panel-l3);
+   
+
+  box-shadow: var(--border-subtle), var(--glow-inner);
+  border-radius: var(--radius);
   padding: 24px;
   margin: 20px 0;
 }
@@ -955,9 +955,9 @@ watch(() => activeTab.value, (tab) => {
 
 .tab-btn {
   padding: 6px 18px;
-  box-shadow: var(--glass-border);
-  border-radius: var(--glass-radius-sm);
-  background: var(--glass-l4-bg);
+  box-shadow: var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--panel-l4);
   color: var(--text-secondary);
   cursor: pointer;
   font-size: 13px;
@@ -987,9 +987,9 @@ watch(() => activeTab.value, (tab) => {
 }
 .sub-tab-btn {
   padding: 5px 14px;
-  box-shadow: var(--glass-border);
-  border-radius: var(--glass-radius-sm);
-  background: var(--glass-l4-bg);
+  box-shadow: var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--panel-l4);
   color: var(--text-secondary);
   cursor: pointer;
   font-size: 12px;
@@ -1063,9 +1063,9 @@ watch(() => activeTab.value, (tab) => {
 .param-row input[type="text"] {
   width: 100%;
   padding: 6px 8px;
-  box-shadow: var(--glass-border);
+  box-shadow: var(--border-subtle);
   border-radius: 6px;
-  background: var(--glass-l4-bg);
+  background: var(--panel-l4);
   color: var(--text-primary);
   font-size: 13px;
   border: none;
@@ -1084,9 +1084,9 @@ label {
 input, textarea, select {
   width: 100%;
   padding: 8px 12px;
-  box-shadow: var(--glass-border);
-  border-radius: var(--glass-radius-sm);
-  background: var(--glass-l4-bg);
+  box-shadow: var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--panel-l4);
   color: var(--text-primary);
   font-size: 14px;
   outline: none;
@@ -1104,9 +1104,9 @@ select {
   max-width: 300px;
 }
 fieldset {
-  box-shadow: var(--glass-border);
+  box-shadow: var(--border-subtle);
   border: none;
-  border-radius: var(--glass-radius);
+  border-radius: var(--radius);
   padding: 12px 16px;
 }
 legend {
@@ -1145,7 +1145,7 @@ legend {
   background: var(--primary);
   color: #fff;
   border: none;
-  border-radius: var(--glass-radius-sm);
+  border-radius: var(--radius-sm);
   cursor: pointer;
   transition: filter 0.2s, transform 0.2s;
 }
@@ -1159,7 +1159,7 @@ legend {
   background: var(--primary);
   color: #fff;
   border: none;
-  border-radius: var(--glass-radius-sm);
+  border-radius: var(--radius-sm);
   cursor: pointer;
   font-size: 14px;
   transition: filter 0.2s, transform 0.2s;
@@ -1170,11 +1170,11 @@ legend {
 }
 .btn-cancel {
   padding: 10px 28px;
-  background: var(--glass-l4-bg);
+  background: var(--panel-l4);
   color: var(--text-secondary);
-  box-shadow: var(--glass-border);
+  box-shadow: var(--border-subtle);
   border: none;
-  border-radius: var(--glass-radius-sm);
+  border-radius: var(--radius-sm);
   cursor: pointer;
   font-size: 14px;
   transition: filter 0.2s, transform 0.2s, box-shadow 0.2s;
@@ -1202,15 +1202,15 @@ legend {
   align-items: center;
   gap: 12px;
   padding: 14px 16px;
-  background: var(--glass-l3-bg);
-  backdrop-filter: var(--glass-l3-blur);
-  -webkit-backdrop-filter: var(--glass-l3-blur);
-  box-shadow: var(--glass-border), var(--glass-glow);
-  border-radius: var(--glass-radius);
+  background: var(--panel-l3);
+   
+
+  box-shadow: var(--border-subtle), var(--glow-inner);
+  border-radius: var(--radius);
   transition: filter 0.2s, transform 0.2s, box-shadow 0.2s;
 }
 .tp-card:hover {
-  box-shadow: 0 0 0 1px var(--primary), var(--glass-glow);
+  box-shadow: 0 0 0 1px var(--primary), var(--glow-inner);
   filter: brightness(1.05);
   transform: translateY(-1px);
 }
@@ -1239,9 +1239,9 @@ legend {
   width: 36px;
   height: 36px;
   background: transparent;
-  box-shadow: var(--glass-border);
+  box-shadow: var(--border-subtle);
   border: none;
-  border-radius: var(--glass-radius-sm);
+  border-radius: var(--radius-sm);
   cursor: pointer;
   font-size: 14px;
   display: flex;
@@ -1266,10 +1266,10 @@ legend {
 .btn-action {
   flex: 1;
   padding: 10px 16px;
-  background: var(--glass-l4-bg);
-  box-shadow: var(--glass-border);
+  background: var(--panel-l4);
+  box-shadow: var(--border-subtle);
   border: none;
-  border-radius: var(--glass-radius-sm);
+  border-radius: var(--radius-sm);
   color: var(--text-secondary);
   cursor: pointer;
   font-size: 13px;
@@ -1302,11 +1302,11 @@ legend {
   align-items: center;
   gap: 14px;
   padding: 16px 20px;
-  background: var(--glass-l3-bg);
-  backdrop-filter: var(--glass-l3-blur);
-  -webkit-backdrop-filter: var(--glass-l3-blur);
-  box-shadow: var(--glass-border), var(--glass-glow);
-  border-radius: var(--glass-radius);
+  background: var(--panel-l3);
+   
+
+  box-shadow: var(--border-subtle), var(--glow-inner);
+  border-radius: var(--radius);
 }
 .tool-icon {
   font-size: 24px;
@@ -1315,9 +1315,9 @@ legend {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--glass-l4-bg);
+  background: var(--panel-l4);
   border-radius: 8px;
-  box-shadow: var(--glass-border);
+  box-shadow: var(--border-subtle);
 }
 .tool-info {
   flex: 1;
@@ -1386,11 +1386,11 @@ legend {
   align-items: center;
   justify-content: space-between;
   padding: 16px;
-  background: var(--glass-l3-bg);
-  backdrop-filter: var(--glass-l3-blur);
-  -webkit-backdrop-filter: var(--glass-l3-blur);
-  border-radius: var(--glass-radius);
-  box-shadow: var(--glass-border), var(--glass-glow);
+  background: var(--panel-l3);
+   
+
+  border-radius: var(--radius);
+  box-shadow: var(--border-subtle), var(--glow-inner);
 }
 .trust-label { font-size: 14px; font-weight: 600; color: var(--text-primary); }
 .trust-desc { font-size: 12px; color: var(--text-secondary); margin-top: 4px; }
@@ -1427,8 +1427,8 @@ legend {
 .memory-filters button {
   padding: 4px 12px;
   border-radius: 12px;
-  box-shadow: var(--glass-border);
-  background: var(--glass-l4-bg);
+  box-shadow: var(--border-subtle);
+  background: var(--panel-l4);
   color: var(--text-secondary);
   cursor: pointer;
   font-size: 12px;
@@ -1447,9 +1447,9 @@ legend {
 .memory-search {
   width: 100%;
   padding: 8px 12px;
-  box-shadow: var(--glass-border);
+  box-shadow: var(--border-subtle);
   border-radius: 6px;
-  background: var(--glass-l4-bg);
+  background: var(--panel-l4);
   color: var(--text-primary);
   margin-bottom: 12px;
   border: none;
@@ -1458,24 +1458,24 @@ legend {
 .memory-add input {
   flex: 1;
   padding: 8px 12px;
-  box-shadow: var(--glass-border);
+  box-shadow: var(--border-subtle);
   border-radius: 6px;
-  background: var(--glass-l4-bg);
+  background: var(--panel-l4);
   color: var(--text-primary);
   border: none;
 }
 .memory-add select {
   padding: 8px;
-  box-shadow: var(--glass-border);
+  box-shadow: var(--border-subtle);
   border-radius: 6px;
-  background: var(--glass-l4-bg);
+  background: var(--panel-l4);
   color: var(--text-primary);
   border: none;
 }
 .memory-add button {
   padding: 8px 16px;
   border: none;
-  border-radius: var(--glass-radius-sm);
+  border-radius: var(--radius-sm);
   background: var(--primary);
   color: white;
   cursor: pointer;
@@ -1488,11 +1488,11 @@ legend {
 .memory-list { display: flex; flex-direction: column; gap: 8px; }
 .memory-card {
   padding: 12px;
-  background: var(--glass-l3-bg);
-  backdrop-filter: var(--glass-l3-blur);
-  -webkit-backdrop-filter: var(--glass-l3-blur);
-  border-radius: var(--glass-radius);
-  box-shadow: var(--glass-border), var(--glass-glow);
+  background: var(--panel-l3);
+   
+
+  border-radius: var(--radius);
+  box-shadow: var(--border-subtle), var(--glow-inner);
 }
 .memory-content { font-size: 14px; color: var(--text-primary); margin-bottom: 8px; }
 .memory-meta { display: flex; gap: 8px; font-size: 11px; color: var(--text-secondary); margin-bottom: 8px; }
@@ -1506,11 +1506,11 @@ legend {
   padding: 4px 8px;
   border: none;
   border-radius: 4px;
-  background: var(--glass-l4-bg);
+  background: var(--panel-l4);
   color: var(--text-secondary);
   cursor: pointer;
   font-size: 12px;
-  box-shadow: var(--glass-border);
+  box-shadow: var(--border-subtle);
   transition: filter 0.2s;
 }
 .memory-actions button:hover {
@@ -1522,9 +1522,9 @@ legend {
 .monitor-toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
 .monitor-btn {
   padding: 6px 12px;
-  box-shadow: var(--glass-border);
+  box-shadow: var(--border-subtle);
   border-radius: 6px;
-  background: var(--glass-l4-bg);
+  background: var(--panel-l4);
   color: var(--text-primary);
   cursor: pointer;
   font-size: 12px;
@@ -1539,7 +1539,7 @@ legend {
 .monitor-count { font-size: 12px; color: var(--text-secondary); margin-left: auto; }
 .monitor-log {
   background: #0d1117;
-  border-radius: var(--glass-radius);
+  border-radius: var(--radius);
   padding: 12px;
   max-height: calc(100vh - 260px);
   overflow-y: auto;

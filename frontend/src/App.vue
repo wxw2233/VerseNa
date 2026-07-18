@@ -57,10 +57,10 @@ function toggleSettings() {
   display: flex;
   align-items: center;
   padding: 12px 20px;
-  background: var(--glass-l1-bg);
-  backdrop-filter: var(--glass-l1-blur);
-  -webkit-backdrop-filter: var(--glass-l1-blur);
-  box-shadow: var(--glass-glow);
+  background: var(--panel-l1);
+   
+
+  box-shadow: var(--glow-inner);
   /* no bottom border — perceptual border via box-shadow instead */
 }
 .nav-title {

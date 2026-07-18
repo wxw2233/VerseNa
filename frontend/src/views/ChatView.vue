@@ -210,9 +210,9 @@ setTimeout(loadToolExpanded, 100)
 .chat-view {
   display: flex;
   height: calc(100vh - 52px);
-  background: var(--glass-l2-bg);
-  backdrop-filter: var(--glass-l2-blur);
-  -webkit-backdrop-filter: var(--glass-l2-blur);
+  background: var(--panel-l2);
+   
+
 }
 .chat-main {
   flex: 1;
@@ -221,9 +221,9 @@ setTimeout(loadToolExpanded, 100)
   min-width: 0;
   position: relative;
   overflow: hidden;
-  background: var(--glass-l2-bg);
-  backdrop-filter: var(--glass-l2-blur);
-  -webkit-backdrop-filter: var(--glass-l2-blur);
+  background: var(--panel-l2);
+   
+
 }
 .messages {
   flex: 1;
@@ -264,19 +264,19 @@ setTimeout(loadToolExpanded, 100)
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
   background: rgba(0, 0, 0, 0.5);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
+   
+
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 1000;
 }
 .confirm-dialog {
-  background: var(--glass-l3-bg);
-  backdrop-filter: var(--glass-l3-blur);
-  -webkit-backdrop-filter: var(--glass-l3-blur);
-  box-shadow: var(--glass-border), var(--glass-glow), 0 8px 32px rgba(0, 0, 0, 0.4);
-  border-radius: var(--glass-radius);
+  background: var(--panel-l3);
+   
+
+  box-shadow: var(--border-subtle), var(--glow-inner), 0 8px 32px rgba(0, 0, 0, 0.4);
+  border-radius: var(--radius);
   padding: 24px;
   min-width: 380px;
   max-width: 520px;
@@ -301,9 +301,9 @@ setTimeout(loadToolExpanded, 100)
   flex-direction: column;
   gap: 6px;
   padding: 10px 14px;
-  background: var(--glass-l4-bg);
+  background: var(--panel-l4);
   border-radius: 8px;
-  box-shadow: var(--glass-border);
+  box-shadow: var(--border-subtle);
   font-size: 13px;
 }
 .confirm-action {
@@ -328,9 +328,9 @@ setTimeout(loadToolExpanded, 100)
 /* L4 buttons for confirm dialog */
 .btn-confirm-cancel {
   padding: 8px 20px;
-  box-shadow: var(--glass-border);
-  border-radius: var(--glass-radius-sm);
-  background: var(--glass-l4-bg);
+  box-shadow: var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--panel-l4);
   color: var(--text-secondary);
   cursor: pointer;
   font-size: 14px;
@@ -345,7 +345,7 @@ setTimeout(loadToolExpanded, 100)
 .btn-confirm-ok {
   padding: 8px 20px;
   border: none;
-  border-radius: var(--glass-radius-sm);
+  border-radius: var(--radius-sm);
   background: var(--primary);
   color: #fff;
   cursor: pointer;

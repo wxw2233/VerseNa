@@ -123,11 +123,11 @@ function summarizeArgs(args) {
   max-width: 80%;
   padding: var(--bubble-padding);
   position: relative;
-  border-radius: var(--glass-radius);
-  background: var(--glass-l3-bg);
-  backdrop-filter: var(--glass-l3-blur);
-  -webkit-backdrop-filter: var(--glass-l3-blur);
-  box-shadow: var(--glass-border), var(--glass-glow);
+  border-radius: var(--radius);
+  background: var(--panel-l3);
+   
+
+  box-shadow: var(--border-subtle), var(--glow-inner);
 }
 
 /* Asymmetric bottom radius: user bubble bottom-right 8px */
@@ -174,8 +174,8 @@ function summarizeArgs(args) {
   border-left: 3px solid var(--primary);
   border-radius: 0 8px 8px 0;
   font-size: 13px; position: relative;
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
+   
+
 }
 /* 连续 tool 段连接线 */
 .tool-seg + .tool-seg::before {

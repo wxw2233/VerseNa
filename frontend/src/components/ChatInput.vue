@@ -42,9 +42,9 @@ async function handleFile(e) {
   display: flex;
   gap: 8px;
   padding: 12px 16px;
-  background: var(--glass-l2-bg);
-  backdrop-filter: var(--glass-l2-blur);
-  -webkit-backdrop-filter: var(--glass-l2-blur);
+  background: var(--panel-l2);
+   
+
   box-shadow: 0 -1px 0 rgba(255, 255, 255, 0.04);
 }
 /* L4 textarea: 12px radius, inner glow */
@@ -52,19 +52,19 @@ textarea {
   flex: 1;
   resize: none;
   border: none;
-  border-radius: var(--glass-radius);
+  border-radius: var(--radius);
   padding: 8px 12px;
-  background: var(--glass-l4-bg);
+  background: var(--panel-l4);
   color: var(--text-primary);
   font-size: 14px;
   outline: none;
   max-height: 120px;
   font-family: inherit;
-  box-shadow: var(--glass-border), var(--glass-glow);
+  box-shadow: var(--border-subtle), var(--glow-inner);
   transition: box-shadow 0.2s;
 }
 textarea:focus {
-  box-shadow: 0 0 0 1px var(--primary), var(--glass-glow);
+  box-shadow: 0 0 0 1px var(--primary), var(--glow-inner);
 }
 /* L4 buttons: 10px radius, hover brightness + translateY */
 button {
@@ -72,10 +72,10 @@ button {
   background: var(--primary);
   color: #fff;
   border: none;
-  border-radius: var(--glass-radius-sm);
+  border-radius: var(--radius-sm);
   cursor: pointer;
   font-size: 14px;
-  box-shadow: var(--glass-border);
+  box-shadow: var(--border-subtle);
   transition: filter 0.2s, transform 0.2s;
 }
 button:hover:not(:disabled) {
@@ -91,10 +91,10 @@ button:disabled {
 /* Attach button: subtle glass style */
 .attach-btn {
   padding: 8px 12px;
-  background: var(--glass-l4-bg);
+  background: var(--panel-l4);
   border: none;
-  border-radius: var(--glass-radius-sm);
-  box-shadow: var(--glass-border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--border-subtle);
   cursor: pointer;
   font-size: 16px;
   color: var(--text-secondary);

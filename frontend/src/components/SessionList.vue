@@ -282,10 +282,10 @@ async function saveEdit() {
 /* L1: Sidebar — 12px blur, 0.75 opacity, inner glow, no hard right border */
 .session-panel {
   width: var(--sidebar-width, 220px);
-  background: var(--glass-l1-bg);
-  backdrop-filter: var(--glass-l1-blur);
-  -webkit-backdrop-filter: var(--glass-l1-blur);
-  box-shadow: var(--glass-glow);
+  background: var(--panel-l1);
+   
+
+  box-shadow: var(--glow-inner);
   display: flex;
   flex-direction: column;
   height: calc(100vh - 52px);
@@ -379,7 +379,7 @@ async function saveEdit() {
 .action-btn.delete:hover { color: #ff4757; }
 .rename-input {
   width: 100%; font-size: 13px; color: var(--text-primary);
-  background: var(--glass-l4-bg);
+  background: var(--panel-l4);
   box-shadow: 0 0 0 1px var(--primary);
   border: none;
   border-radius: 4px; padding: 4px 6px; outline: none;
@@ -390,17 +390,17 @@ async function saveEdit() {
 .modal-overlay {
   position: fixed; top: 0; left: 0; right: 0; bottom: 0;
   background: rgba(0, 0, 0, 0.5);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
+   
+
   display: flex;
   align-items: center; justify-content: center; z-index: 100;
 }
 .modal {
-  background: var(--glass-l3-bg);
-  backdrop-filter: var(--glass-l3-blur);
-  -webkit-backdrop-filter: var(--glass-l3-blur);
-  box-shadow: var(--glass-border), var(--glass-glow);
-  border-radius: var(--glass-radius);
+  background: var(--panel-l3);
+   
+
+  box-shadow: var(--border-subtle), var(--glow-inner);
+  border-radius: var(--radius);
   padding: 20px; width: 340px; max-height: 70vh; overflow-y: auto;
 }
 .modal-title {
@@ -410,9 +410,9 @@ async function saveEdit() {
 .pack-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
 /* Pack cards in modal: L3 style */
 .pack-card {
-  background: var(--glass-l3-bg);
-  box-shadow: var(--glass-border);
-  border-radius: var(--glass-radius);
+  background: var(--panel-l3);
+  box-shadow: var(--border-subtle);
+  border-radius: var(--radius);
   padding: 12px; cursor: pointer;
   transition: filter 0.2s, transform 0.2s, box-shadow 0.2s;
 }
@@ -424,14 +424,14 @@ async function saveEdit() {
 .pack-name { font-size: 14px; font-weight: 600; color: var(--text-primary); }
 .pack-info { font-size: 11px; color: var(--text-secondary); margin-top: 4px; }
 .btn-cancel, .btn-save {
-  padding: 6px 16px; border-radius: var(--glass-radius-sm); cursor: pointer;
+  padding: 6px 16px; border-radius: var(--radius-sm); cursor: pointer;
   font-size: 13px; border: none;
   transition: filter 0.2s, transform 0.2s;
 }
 .btn-cancel {
-  background: var(--glass-l4-bg);
+  background: var(--panel-l4);
   color: var(--text-secondary);
-  box-shadow: var(--glass-border);
+  box-shadow: var(--border-subtle);
 }
 .btn-save {
   background: var(--primary); color: white;
@@ -447,8 +447,8 @@ async function saveEdit() {
 }
 .pack-select {
   width: 100%; font-size: 13px; color: var(--text-primary);
-  background: var(--glass-l4-bg);
-  box-shadow: var(--glass-border);
+  background: var(--panel-l4);
+  box-shadow: var(--border-subtle);
   border: none;
   border-radius: 4px; padding: 6px 8px; outline: none;
 }
