@@ -81,7 +81,7 @@ button {
 button:hover:not(:disabled) {
   filter: brightness(1.08);
   transform: translateY(-1px);
-  box-shadow: 0 0 16px rgba(124,92,252,0.25);
+  box-shadow: 0 0 20px rgba(124,92,252,0.35);
 }
 button:disabled {
   opacity: 0.4;
@@ -104,7 +104,7 @@ button:disabled {
 .attach-btn:hover {
   filter: brightness(1.08);
   transform: translateY(-1px);
-  box-shadow: 0 0 16px rgba(124,92,252,0.25);
+  box-shadow: 0 0 20px rgba(124,92,252,0.35);
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08);
 }
 </style>

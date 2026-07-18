@@ -955,7 +955,7 @@ watch(() => activeTab.value, (tab) => {
 
 .tab-btn {
   padding: 6px 18px;
-  box-shadow: 0 0 0 1px rgba(255,255,255,0.06);
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.10);
   border-radius: var(--radius-sm);
   background: var(--panel-l4);
   color: var(--text-secondary);
@@ -987,7 +987,7 @@ watch(() => activeTab.value, (tab) => {
 }
 .sub-tab-btn {
   padding: 5px 14px;
-  box-shadow: 0 0 0 1px rgba(255,255,255,0.06);
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.10);
   border-radius: var(--radius-sm);
   background: var(--panel-l4);
   color: var(--text-secondary);
@@ -1063,7 +1063,7 @@ watch(() => activeTab.value, (tab) => {
 .param-row input[type="text"] {
   width: 100%;
   padding: 6px 8px;
-  box-shadow: 0 0 0 1px rgba(255,255,255,0.06);
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.10);
   border-radius: 6px;
   background: var(--panel-l4);
   color: var(--text-primary);
@@ -1084,7 +1084,7 @@ label {
 input, textarea, select {
   width: 100%;
   padding: 8px 12px;
-  box-shadow: 0 0 0 1px rgba(255,255,255,0.06);
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.10);
   border-radius: var(--radius-sm);
   background: var(--panel-l4);
   color: var(--text-primary);
@@ -1104,7 +1104,7 @@ select {
   max-width: 300px;
 }
 fieldset {
-  box-shadow: 0 0 0 1px rgba(255,255,255,0.06);
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.10);
   border: none;
   border-radius: var(--radius);
   padding: 12px 16px;
@@ -1172,7 +1172,7 @@ legend {
   padding: 10px 28px;
   background: var(--panel-l4);
   color: var(--text-secondary);
-  box-shadow: 0 0 0 1px rgba(255,255,255,0.06);
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.10);
   border: none;
   border-radius: var(--radius-sm);
   cursor: pointer;
@@ -1239,7 +1239,7 @@ legend {
   width: 36px;
   height: 36px;
   background: transparent;
-  box-shadow: 0 0 0 1px rgba(255,255,255,0.06);
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.10);
   border: none;
   border-radius: var(--radius-sm);
   cursor: pointer;
@@ -1267,7 +1267,7 @@ legend {
   flex: 1;
   padding: 10px 16px;
   background: var(--panel-l4);
-  box-shadow: 0 0 0 1px rgba(255,255,255,0.06);
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.10);
   border: none;
   border-radius: var(--radius-sm);
   color: var(--text-secondary);
@@ -1317,7 +1317,7 @@ legend {
   justify-content: center;
   background: var(--panel-l4);
   border-radius: 8px;
-  box-shadow: 0 0 0 1px rgba(255,255,255,0.06);
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.10);
 }
 .tool-info {
   flex: 1;
@@ -1427,7 +1427,7 @@ legend {
 .memory-filters button {
   padding: 4px 12px;
   border-radius: 12px;
-  box-shadow: 0 0 0 1px rgba(255,255,255,0.06);
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.10);
   background: var(--panel-l4);
   color: var(--text-secondary);
   cursor: pointer;
@@ -1447,7 +1447,7 @@ legend {
 .memory-search {
   width: 100%;
   padding: 8px 12px;
-  box-shadow: 0 0 0 1px rgba(255,255,255,0.06);
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.10);
   border-radius: 6px;
   background: var(--panel-l4);
   color: var(--text-primary);
@@ -1458,7 +1458,7 @@ legend {
 .memory-add input {
   flex: 1;
   padding: 8px 12px;
-  box-shadow: 0 0 0 1px rgba(255,255,255,0.06);
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.10);
   border-radius: 6px;
   background: var(--panel-l4);
   color: var(--text-primary);
@@ -1466,7 +1466,7 @@ legend {
 }
 .memory-add select {
   padding: 8px;
-  box-shadow: 0 0 0 1px rgba(255,255,255,0.06);
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.10);
   border-radius: 6px;
   background: var(--panel-l4);
   color: var(--text-primary);
@@ -1510,7 +1510,7 @@ legend {
   color: var(--text-secondary);
   cursor: pointer;
   font-size: 12px;
-  box-shadow: 0 0 0 1px rgba(255,255,255,0.06);
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.10);
   transition: filter 0.2s;
 }
 .memory-actions button:hover {
@@ -1522,7 +1522,7 @@ legend {
 .monitor-toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
 .monitor-btn {
   padding: 6px 12px;
-  box-shadow: 0 0 0 1px rgba(255,255,255,0.06);
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.10);
   border-radius: 6px;
   background: var(--panel-l4);
   color: var(--text-primary);

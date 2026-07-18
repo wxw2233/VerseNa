@@ -88,7 +88,7 @@ function toggleSettings() {
 }
 .nav-link:hover {
   color: var(--primary);
-  background: rgba(124, 92, 252, 0.10);
+  background: rgba(124, 92, 252, 0.15);
 }
 .nav-link.active {
   color: var(--primary);

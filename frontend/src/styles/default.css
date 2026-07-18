@@ -43,7 +43,7 @@
 
   /* 输入框 */
   --input-radius: var(--radius);
-  --input-bg: rgba(25, 25, 48, 0.30);
+  --input-bg: rgba(25, 25, 48, 0.40);
   --input-glow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
 }
 
