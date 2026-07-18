@@ -2,9 +2,9 @@
   "name": "",
   "version": "1.0.0",
   "colors": {
-    "primary": "#283058",
-    "bgPrimary": "#313181",
-    "bgSecondary": "#264050",
+    "primary": "#000000",
+    "bgPrimary": "#000000",
+    "bgSecondary": "#000000",
     "textPrimary": "#e8e8f0",
     "textSecondary": "#ffffff",
     "border": "#0000ff",
