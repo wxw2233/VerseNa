@@ -142,7 +142,7 @@ function summarizeArgs(args) {
   border-bottom-left-radius: 8px;
 }
 
-.text-seg { line-height: var(--line-height); font-size: var(--font-size-base); word-break: break-word; }
+.text-seg { text-shadow: 0 1px 2px rgba(0,0,0,0.15); line-height: var(--line-height); font-size: var(--font-size-base); word-break: break-word; }
 .text-seg :deep(pre) { background: rgba(0,0,0,0.2); padding: 8px; border-radius: 4px; overflow-x: auto; margin: 8px 0; font-size: 12px; }
 .text-seg :deep(code) { background: rgba(0,0,0,0.15); padding: 1px 4px; border-radius: 3px; font-size: 0.9em; }
 .text-seg :deep(a) { color: var(--primary); text-decoration: none; }

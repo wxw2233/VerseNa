@@ -349,7 +349,7 @@ async function saveEdit() {
   padding: 8px 12px 8px 24px;
   cursor: pointer;
   position: relative;
-  transition: background 0.15s;
+  transition: background 0.15s, transform 0.15s;
 }
 .session-item:hover {
   background: rgba(255, 255, 255, 0.03);
