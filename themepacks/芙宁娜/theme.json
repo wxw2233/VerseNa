@@ -9,6 +9,14 @@
     "textSecondary": "#8888aa",
     "border": "#2a2a40",
     "bubbleUser": "rgba(124,92,252,0.15)",
-    "bubbleAgent": "rgba(30,30,50,0.9)"
+    "bubbleAgent": "rgba(30,30,50,0.9)",
+    "--primary": "#f50000",
+    "--bg-primary": "#f425e2",
+    "--bg-secondary": "#00e1ff",
+    "--text-primary": "#e8e8f0",
+    "--text-secondary": "#ffffff",
+    "--border": "#04f500",
+    "--bubble-user": "rgba(255,0,0,0.15)",
+    "--bubble-agent": "rgba(0,0,20,0.9)"
   }
 }

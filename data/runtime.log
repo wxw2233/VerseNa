@@ -204,3 +204,9 @@
 [2026-07-18 00:31:37] [INFO] [Agent] [WARN] 重试中
 [2026-07-18 00:31:37] [INFO] [Chat] WS消息: session=test content=你好世界
 [2026-07-18 00:53:59] [INFO] [Asset] 上传请求: theme=芙宁娜 file=test.png size=108
+[2026-07-18 00:55:56] [INFO] [Asset] 上传请求: theme=null file=chat-bg.png size=86761
+[2026-07-18 00:56:36] [INFO] [Asset] 上传请求: theme=null file=chat-bg.png size=86761
+[2026-07-18 00:56:48] [INFO] [Asset] 上传请求: theme=芙宁娜 file=chat-bg.png size=86761
+[2026-07-18 00:57:26] [INFO] [Chat] WS消息: session=session_92684f10 content=你好
+[2026-07-18 00:57:34] [INFO] [Chat] 会话结束: session=session_92684f10
+[2026-07-18 00:57:38] [INFO] [Session] 自动命名: session_92684f10 -> 热情迎客

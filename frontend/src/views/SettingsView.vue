@@ -466,14 +466,14 @@ const emotionLabels = {
 
 // Color definitions (same as ThemeCreator)
 const colorDefs = [
-  { var: '--primary', label: '主色调' },
-  { var: '--bg-primary', label: '主背景' },
-  { var: '--bg-secondary', label: '次背景' },
-  { var: '--text-primary', label: '主文字' },
-  { var: '--text-secondary', label: '次文字' },
-  { var: '--border', label: '边框色' },
-  { var: '--bubble-user', label: '用户气泡' },
-  { var: '--bubble-agent', label: 'Agent气泡' },
+  { var: 'primary', label: '主色调', cssVar: '--primary' },
+  { var: 'bgPrimary', label: '主背景', cssVar: '--bg-primary' },
+  { var: 'bgSecondary', label: '次背景', cssVar: '--bg-secondary' },
+  { var: 'textPrimary', label: '主文字', cssVar: '--text-primary' },
+  { var: 'textSecondary', label: '次文字', cssVar: '--text-secondary' },
+  { var: 'border', label: '边框色', cssVar: '--border' },
+  { var: 'bubbleUser', label: '用户气泡', cssVar: '--bubble-user' },
+  { var: 'bubbleAgent', label: 'Agent气泡', cssVar: '--bubble-agent' },
 ]
 
 const fontFamilies = [
@@ -496,7 +496,7 @@ function toHex(val) {
 }
 
 function onColorChange(varName, hexVal) {
-  if (varName === '--bubble-user') {
+  if (varName === 'bubbleUser') {
     const r = parseInt(hexVal.slice(1, 3), 16)
     const g = parseInt(hexVal.slice(3, 5), 16)
     const b = parseInt(hexVal.slice(5, 7), 16)
