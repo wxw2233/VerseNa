@@ -2,30 +2,17 @@
 <html lang="zh-CN">
 <head>
   <style id="theme-preload">
-    :root { --panel-l1: transparent; --panel-l2: transparent; --panel-l3: transparent; --panel-l4: transparent; --sidebar-bg: transparent; --bg-opacity: 0.3; }
+    :root { --panel-l1: transparent !important; --panel-l2: transparent !important; --panel-l3: transparent !important; --panel-l4: transparent !important; --sidebar-bg: transparent !important; --bubble-agent: rgba(20,20,40,0.25) !important; --bubble-user: rgba(20,20,40,0.25) !important; --bg-opacity: 0.3 !important; --input-bg: rgba(25,25,48,0.55) !important; }
     body { background: #0a0a18; } #app-root { visibility: hidden; }
   </style>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>次元人格</title>
-  <script type="module" crossorigin src="/assets/index-ClioGgT2.js"></script>
-  <link rel="stylesheet" crossorigin href="/assets/index-CzFd1wTq.css">
+  <script type="module" crossorigin src="/assets/index-DE0bOFtX.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-x18UZOvw.css">
 </head>
 <body>
-  <script>
-    // 同步恢复主题 CSS，避免闪烁
-    (function(){
-      var cached = localStorage.getItem('theme-css-cache');
-      if (cached) {
-        var style = document.createElement('style');
-        style.id = 'theme-style';
-        style.textContent = cached;
-        document.head.appendChild(style);
-      }
-      var op = localStorage.getItem('bg-opacity');
-      if (op) document.documentElement.style.setProperty('--bg-opacity', op);
-    })();
-  </script>
+  
   <div id="app"></div>
 </body>
 </html>

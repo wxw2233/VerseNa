@@ -5,10 +5,10 @@
   --text-secondary: #a0a0bb;
 
   /* 面板层级 — 深色底 */
-  --panel-l1: transparent;
-  --panel-l2: transparent;
-  --panel-l3: transparent;
-  --panel-l4: transparent;
+  --panel-l1: transparent !important;
+  --panel-l2: transparent !important;
+  --panel-l3: transparent !important;
+  --panel-l4: transparent !important;
 
   /* 感知边框 — 4% 白透明 */
   --border-subtle: 0 0 0 1px rgba(255, 255, 255, 0.04);
@@ -39,7 +39,7 @@
 
   /* 侧栏 */
   --sidebar-width: 220px;
-  --sidebar-bg: transparent;
+  --sidebar-bg: transparent !important;
 
   /* 输入框 */
   --input-radius: var(--radius);

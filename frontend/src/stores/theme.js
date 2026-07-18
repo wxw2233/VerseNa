@@ -21,7 +21,7 @@ export const useThemeStore = defineStore('theme', () => {
       styleEl.id = 'theme-style'
       document.head.appendChild(styleEl)
     }
-    styleEl.textContent = css; localStorage.setItem('theme-css-cache', css)
+    styleEl.textContent = css; 
     current.value = name
     localStorage.setItem('current-theme', name)
   }
