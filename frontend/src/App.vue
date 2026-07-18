@@ -25,8 +25,10 @@ onMounted(() => { themeStore.restoreTheme() })
 const bgStyle = computed(() => {
   const themeId = themeStore.current
   if (!themeId || themeId === 'null') return {}
+  const opacity = localStorage.getItem('bg-opacity') || '0.3'
   return {
     backgroundImage: "url(/api/themes/" + themeId + "/assets/bg.png)",
+    opacity: opacity,
   }
 })
 const isSettings = computed(() => route.path === '/settings')
