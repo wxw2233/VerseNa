@@ -26,8 +26,8 @@
   --radius-btn: 10px;
 
   /* 气泡 */
-  --bubble-user: rgba(124, 92, 252, 0.12);
-  --bubble-agent: rgba(20, 20, 40, 0.35);
+  --bubble-user: rgba(124, 92, 252, 0.05);
+  --bubble-agent: rgba(20, 20, 40, 0.10);
   --bubble-bg: var(--panel-l3);
   --bubble-padding: 10px 14px;
 
