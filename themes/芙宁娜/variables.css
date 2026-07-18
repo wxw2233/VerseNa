@@ -1,9 +1,12 @@
-/* 仅包含颜色变量 — 形状/面板由 default.css 统一控制 */
 :root {
-  --primary: #7c5cfc;
-  --text-primary: #e8e8f0;
-  --text-secondary: #a0a0bb;
-  --border: rgba(255, 255, 255, 0.10);
+  --primary: #ff9e9e;
+  --bg-primary: #000000;
+  --bg-secondary: #000000;
+  --text-primary: #ff9e9e;
+  --text-secondary: #ff9e9e;
+  --border: #000000;
+  --bubble-user: rgba(0,0,0,0.15);
+  --bubble-agent: #000000;
   --font-family: 'Noto Sans SC', sans-serif;
   --font-size-base: 14px;
   --font-size-small: 12px;
