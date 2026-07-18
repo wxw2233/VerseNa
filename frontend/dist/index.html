@@ -8,10 +8,24 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>次元人格</title>
-  <script type="module" crossorigin src="/assets/index-Dulx2Ts8.js"></script>
+  <script type="module" crossorigin src="/assets/index-ClioGgT2.js"></script>
   <link rel="stylesheet" crossorigin href="/assets/index-CzFd1wTq.css">
 </head>
 <body>
+  <script>
+    // 同步恢复主题 CSS，避免闪烁
+    (function(){
+      var cached = localStorage.getItem('theme-css-cache');
+      if (cached) {
+        var style = document.createElement('style');
+        style.id = 'theme-style';
+        style.textContent = cached;
+        document.head.appendChild(style);
+      }
+      var op = localStorage.getItem('bg-opacity');
+      if (op) document.documentElement.style.setProperty('--bg-opacity', op);
+    })();
+  </script>
   <div id="app"></div>
 </body>
 </html>

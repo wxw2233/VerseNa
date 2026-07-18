@@ -10,6 +10,20 @@
   <title>次元人格</title>
 </head>
 <body>
+  <script>
+    // 同步恢复主题 CSS，避免闪烁
+    (function(){
+      var cached = localStorage.getItem('theme-css-cache');
+      if (cached) {
+        var style = document.createElement('style');
+        style.id = 'theme-style';
+        style.textContent = cached;
+        document.head.appendChild(style);
+      }
+      var op = localStorage.getItem('bg-opacity');
+      if (op) document.documentElement.style.setProperty('--bg-opacity', op);
+    })();
+  </script>
   <div id="app"></div>
   <script type="module" src="/src/main.js"></script>
 </body>
