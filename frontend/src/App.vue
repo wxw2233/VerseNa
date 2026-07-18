@@ -1,5 +1,5 @@
 <template>
-  <div id="app-root" v-if="ready">
+  <div id="app-root">
     <nav class="top-bar">
       <router-link to="/" class="nav-title">次元人格</router-link>
       <a class="nav-link" :class="{ active: isSettings }" @click="toggleSettings">{{ isSettings ? '返回' : '设置' }}</a>
@@ -12,14 +12,13 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useThemeStore } from './stores/theme'
 
 const route = useRoute()
 const router = useRouter()
 const themeStore = useThemeStore()
-const ready = ref(false)
 
 const bgTs = localStorage.getItem('bg-ts') || '0'
 
@@ -40,7 +39,7 @@ function toggleSettings() {
   else { router.push('/settings') }
 }
 
-onMounted(async () => { await themeStore.restoreTheme(); ready.value = true })
+onMounted(async () => { await themeStore.restoreTheme(); document.getElementById('app-root').style.visibility = 'visible' })
 </script>
 
 <style scoped>
