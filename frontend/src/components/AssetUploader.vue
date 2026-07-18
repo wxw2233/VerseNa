@@ -88,13 +88,8 @@ async function handleUpload(event, key) {
   if (resp.ok) {
     const url = `/api/themes/${themeStore.current}/assets/${targetName}?t=${Date.now()}`
     slotImages[key] = url
-    document.documentElement.style.setProperty(`--ui-${key}`, `url(${url})`)
-
-    // 聊天背景特殊处理：更新不透明度
-    if (key === 'chat-bg') {
-      const bg = document.querySelector('.bg-layer')
-      if (bg) bg.style.backgroundImage = `url(${url})`
-    }
+    document.documentElement.style.setProperty('--ui-' + key, 'url(' + url + ')'); applyAsset(key, url)
+    applyAsset(key, url)
   }
 }
 
@@ -103,6 +98,30 @@ async function clearSlot(key) {
   slotImages[key] = ''
   document.documentElement.style.setProperty(`--ui-${key}`, 'none')
 }
+
+function applyAsset(key, url) {
+  const sel = {
+    'topbar-bg': '.top-bar',
+    'sidebar-bg': '.sidebar',
+    'chat-bg': '.bg-layer',
+    'bubble-user': '.bubble-row.user .bubble',
+    'bubble-agent': '.bubble-row.assistant .bubble',
+    'input-bg': '.input-bar',
+    'send-btn': '.input-bar button',
+    'card-bg': '.settings-card',
+    'avatar-frame': '.avatar-icon',
+    'corner-decor': '.corner-decor'
+  }
+  const selector = sel[key]
+  if (selector) {
+    const el = document.querySelector(selector)
+    if (el) {
+      el.style.backgroundImage = 'url(' + url + ')'
+      el.style.backgroundSize = key === 'chat-bg' ? 'cover' : 'auto'
+    }
+  }
+}
+
 </script>
 
 <style scoped>
