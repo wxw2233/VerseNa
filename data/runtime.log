@@ -217,3 +217,7 @@
 [2026-07-18 13:05:26] [ERROR] [QQ] 发送失败
 [2026-07-18 13:05:26] [INFO] [Agent] [WARN] 重试中
 [2026-07-18 13:05:26] [INFO] [Chat] WS消息: session=test content=你好世界
+[2026-07-18 13:06:55] [INFO] [Chat] WS消息: session=session_5357a8ad content=你好
+[2026-07-18 13:07:01] [INFO] [Chat] 会话结束: session=session_5357a8ad
+[2026-07-18 13:07:10] [ERROR] [Session] 自动命名失败: 
+[2026-07-18 13:09:52] [INFO] [Asset] 上传请求: theme=null file=chat-bg.png size=86761

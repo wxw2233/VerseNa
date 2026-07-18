@@ -1,3 +1,14 @@
 :root {
-  --primary: #7c5cfc;
+  --primary: #3fa5e4;
+  --bg-primary: #0f0f1a;
+  --bg-secondary: #1a1a2e;
+  --text-primary: #e8e8f0;
+  --text-secondary: #8888aa;
+  --border: #2a2a40;
+  --bubble-user: rgba(124,92,252,0.15);
+  --bubble-agent: rgba(30,30,50,0.9);
+  --font-family: 'Noto Sans SC', sans-serif;
+  --font-size-base: 14px;
+  --font-size-small: 12px;
+  --line-height: 1.6;
 }
