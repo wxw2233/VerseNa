@@ -348,7 +348,7 @@ async function saveEdit() {
 .session-item {
   padding: 8px 12px 8px 24px;
   cursor: pointer;
-  border: 1px solid transparent;
+  border: 1px solid rgba(255,255,255,0.10);
   box-shadow: 0 1px 4px rgba(0,0,0,0.04);
   position: relative;
   transition: background 0.15s, transform 0.15s;
