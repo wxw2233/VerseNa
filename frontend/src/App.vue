@@ -12,13 +12,15 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useThemeStore } from './stores/theme'
 
 const route = useRoute()
 const router = useRouter()
 const themeStore = useThemeStore()
+
+onMounted(() => { themeStore.restoreTheme() })
 
 const bgStyle = computed(() => {
   const themeId = themeStore.current

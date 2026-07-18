@@ -23,8 +23,16 @@ export const useThemeStore = defineStore('theme', () => {
     }
     styleEl.textContent = css
     current.value = name
+    localStorage.setItem('current-theme', name)
+  }
+
+  function restoreTheme() {
+    const saved = localStorage.getItem('current-theme')
+    if (saved && saved !== 'default' && saved !== 'null') {
+      applyTheme(saved)
+    }
   }
 
   function ensureValidTheme() { if (!current.value || current.value === "null") applyTheme("default") }
-  return { themes, current, fetchThemes, applyTheme, ensureValidTheme }
+  return { themes, current, fetchThemes, applyTheme, ensureValidTheme, restoreTheme }
 })
