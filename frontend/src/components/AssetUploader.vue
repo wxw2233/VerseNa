@@ -45,7 +45,7 @@ async function loadBg() {
   try {
     const resp = await fetch('/api/themes/' + themeId + '/assets/bg.png')
     if (resp.ok) {
-      bgUrl.value = '/api/themes/' + themeId + '/assets/bg.png?t=' + Date.now()
+      bgUrl.value = '/api/themes/' + themeId + '/assets/bg.png?t=' + Date.now(); localStorage.setItem('bg-ts', Date.now())
     } else {
       bgUrl.value = ''
     }
@@ -68,7 +68,7 @@ async function handleUpload(event) {
 
   const resp = await fetch('/api/themes/' + themeId + '/upload', { method: 'POST', body: formData })
   if (resp.ok) {
-    bgUrl.value = '/api/themes/' + themeId + '/assets/bg.png?t=' + Date.now()
+    bgUrl.value = '/api/themes/' + themeId + '/assets/bg.png?t=' + Date.now(); localStorage.setItem('bg-ts', Date.now())
   } else {
     alert('上传失败')
   }

@@ -20,25 +20,26 @@ const route = useRoute()
 const router = useRouter()
 const themeStore = useThemeStore()
 
-onMounted(() => { themeStore.restoreTheme() })
+const bgTs = localStorage.getItem('bg-ts') || '0'
 
 const bgStyle = computed(() => {
   const themeId = themeStore.current
   if (!themeId || themeId === 'null') return {}
   const opacity = localStorage.getItem('bg-opacity') || '0.3'
+  const ts = localStorage.getItem('bg-ts') || '0'
   return {
-    backgroundImage: "url(/api/themes/" + themeId + "/assets/bg.png)",
+    backgroundImage: 'url(/api/themes/' + themeId + '/assets/bg.png?ts=' + ts + ')',
     opacity: opacity,
   }
 })
+
 const isSettings = computed(() => route.path === '/settings')
 function toggleSettings() {
-  if (isSettings.value) {
-    router.push('/')
-  } else {
-    router.push('/settings')
-  }
+  if (isSettings.value) { router.push('/') }
+  else { router.push('/settings') }
 }
+
+onMounted(() => { themeStore.restoreTheme() })
 </script>
 
 <style scoped>
@@ -51,54 +52,24 @@ function toggleSettings() {
   pointer-events: none;
   opacity: var(--bg-opacity, 0.3);
 }
-.top-bar, .main-content {
-  position: relative;
-  z-index: 1;
-}
+.top-bar, .main-content { position: relative; z-index: 1; }
 
-/* L1: Top bar — 12px blur, 0.75 opacity, inner glow, no bottom border */
 .top-bar {
-  display: flex;
-  align-items: center;
-  padding: 12px 20px;
-  background: transparent;
-   
-
-  box-shadow: none;
-  /* no bottom border — perceptual border via box-shadow instead */
+  display: flex; align-items: center; padding: 12px 20px;
+  background: transparent; box-shadow: none;
 }
-.nav-title { text-shadow: 0 0 8px rgba(0,0,0,0.5);
-  font-size: 18px;
-  font-weight: bold;
-  color: var(--primary);
-  text-decoration: none;
-  margin-right: auto;
-  letter-spacing: 1px;
+.nav-title {
+  text-shadow: 0 0 8px rgba(0,0,0,0.5);
+  font-size: 18px; font-weight: bold; color: var(--primary);
+  text-decoration: none; margin-right: auto; letter-spacing: 1px;
 }
 .nav-link {
-  color: var(--text-secondary);
-  text-decoration: none;
-  font-size: 14px;
-  cursor: pointer;
-  padding: 4px 12px;
-  border-radius: 8px;
-  transition: background 0.2s, color 0.2s;
-}
-.nav-link {
-  color: var(--text-secondary); text-decoration: none; font-size: 14px;
-  cursor: pointer; padding: 4px 12px; border-radius: 8px;
+  color: var(--text-secondary); font-size: 14px; cursor: pointer;
+  padding: 4px 12px; border-radius: 8px;
   transition: background 0.15s, color 0.15s;
   text-shadow: 0 0 4px rgba(0,0,0,0.3);
 }
-.nav-link:hover {
-  color: var(--primary);
-  background: rgba(124, 92, 252, 0.15);
-}
-.nav-link.active {
-  color: var(--primary);
-}
-.main-content {
-  flex: 1;
-  overflow: hidden;
-}
+.nav-link:hover { color: var(--primary); background: rgba(124, 92, 252, 0.15); }
+.nav-link.active { color: var(--primary); }
+.main-content { flex: 1; overflow: hidden; }
 </style>
