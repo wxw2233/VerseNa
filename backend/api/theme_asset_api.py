@@ -4,6 +4,22 @@ from fastapi import APIRouter, UploadFile, File, HTTPException
 from fastapi.responses import FileResponse
 
 router = APIRouter()
+
+@router.post("/api/themes/{theme_id}/rename/{filename}")
+async def rename_asset(theme_id: str, filename: str, to: str = ""):
+    """重命名素材文件"""
+    theme_dir = THEMES_DIR / theme_id
+    src = theme_dir / "assets" / filename
+    dst = theme_dir / "assets" / to
+    if src.exists():
+        src.rename(dst)
+        # Also sync to themepacks
+        tm_dir = THEMES_DIR.parent / "themepacks" / theme_id / "assets"
+        tm_src = tm_dir / filename
+        if tm_src.exists():
+            tm_src.rename(tm_dir / to)
+        return {"status": "ok"}
+    return {"status": "not_found"}
 THEMES_DIR = Path(__file__).parent.parent.parent / "themes"
 
 @router.post("/api/themes/{theme_id}/upload")

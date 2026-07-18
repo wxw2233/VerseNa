@@ -221,3 +221,5 @@
 [2026-07-18 13:07:01] [INFO] [Chat] 会话结束: session=session_5357a8ad
 [2026-07-18 13:07:10] [ERROR] [Session] 自动命名失败: 
 [2026-07-18 13:09:52] [INFO] [Asset] 上传请求: theme=null file=chat-bg.png size=86761
+[2026-07-18 13:22:54] [INFO] [Asset] 上传请求: theme=芙宁娜 file=chat-bg.png size=86761
+[2026-07-18 13:24:44] [INFO] [Asset] 上传请求: theme=芙宁娜 file=test.png size=687
