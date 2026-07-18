@@ -132,13 +132,13 @@ function summarizeArgs(args) {
 
 /* Asymmetric bottom radius: user bubble bottom-right 8px */
 .bubble.user {
-  background: rgba(124, 92, 252, 0.05);
+  background: rgba(124, 92, 252, 0.12);
   border-bottom-right-radius: 8px;
 }
 
 /* Asymmetric bottom radius: assistant bubble bottom-left 8px */
 .bubble.assistant {
-  background: rgba(20, 20, 40, 0.10);
+  background: rgba(20, 20, 40, 0.25);
   border-bottom-left-radius: 8px;
 }
 
