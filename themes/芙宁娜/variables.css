@@ -1,10 +1,10 @@
 :root {
-  --primary: #000000;
-  --bg-primary: #0000ff;
-  --bg-secondary: #36367d;
+  --primary: #4d58ff;
+  --bg-primary: #313181;
+  --bg-secondary: #2f2f6f;
   --text-primary: #e8e8f0;
   --text-secondary: #8888aa;
-  --border: #2a2a40;
+  --border: #0000ff;
   --bubble-user: rgba(124,92,252,0.15);
   --bubble-agent: rgba(30,30,50,0.9);
   --font-family: 'Noto Sans SC', sans-serif;

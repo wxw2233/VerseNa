@@ -407,12 +407,7 @@ onMounted(async () => {
   form_model.api_key = data.api_key || ''
   await loadThemePacks()
       // 重新应用主题 CSS
-      if (themeStore.current === editingPackId.value) {
-        await themeStore.applyTheme(editingPackId.value)
-      } else {
-        await themeStore.applyTheme(editingPackId.value)
-        await themeStore.applyTheme(themeStore.current)
-      }
+      await themeStore.applyTheme(editingPackId.value)
   await loadMemories()
 })
 

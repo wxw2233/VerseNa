@@ -210,3 +210,10 @@
 [2026-07-18 00:57:26] [INFO] [Chat] WS消息: session=session_92684f10 content=你好
 [2026-07-18 00:57:34] [INFO] [Chat] 会话结束: session=session_92684f10
 [2026-07-18 00:57:38] [INFO] [Session] 自动命名: session_92684f10 -> 热情迎客
+[2026-07-18 12:59:41] [INFO] [Asset] 上传请求: theme=null file=chat-bg.png size=86761
+[2026-07-18 13:05:26] [INFO] [Test] 集成测试日志
+[2026-07-18 13:05:26] [ERROR] [Test] 错误日志
+[2026-07-18 13:05:26] [INFO] [Chat] 用户消息
+[2026-07-18 13:05:26] [ERROR] [QQ] 发送失败
+[2026-07-18 13:05:26] [INFO] [Agent] [WARN] 重试中
+[2026-07-18 13:05:26] [INFO] [Chat] WS消息: session=test content=你好世界
