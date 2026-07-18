@@ -9,7 +9,7 @@
     "textSecondary": "#ffffff",
     "border": "#000000",
     "bubbleUser": "rgba(92,92,92,0.15)",
-    "bubbleAgent": "#4d4d4d",
+    "bubbleAgent": "#8a8a8a",
     "--primary": "#f50000",
     "--bg-primary": "#f425e2",
     "--bg-secondary": "#00e1ff",

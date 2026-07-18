@@ -5,10 +5,10 @@
   --text-secondary: #8888aa;
 
   /* 面板层级 — 深色底 */
-  --panel-l1: rgba(12, 12, 28, 0.92);
-  --panel-l2: rgba(15, 15, 32, 0.88);
-  --panel-l3: rgba(20, 20, 40, 0.85);
-  --panel-l4: rgba(25, 25, 48, 0.82);
+  --panel-l1: rgba(12, 12, 28, 0.35);
+  --panel-l2: rgba(15, 15, 32, 0.25);
+  --panel-l3: rgba(20, 20, 40, 0.30);
+  --panel-l4: rgba(25, 25, 48, 0.35);
 
   /* 感知边框 — 4% 白透明 */
   --border-subtle: 0 0 0 1px rgba(255, 255, 255, 0.04);
