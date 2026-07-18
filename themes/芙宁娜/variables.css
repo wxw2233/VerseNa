@@ -1,11 +1,11 @@
 :root {
-  --primary: #4d58ff;
+  --primary: #545454;
   --bg-primary: #313181;
-  --bg-secondary: #2f2f6f;
+  --bg-secondary: #737373;
   --text-primary: #e8e8f0;
-  --text-secondary: #8888aa;
+  --text-secondary: #ffffff;
   --border: #0000ff;
-  --bubble-user: rgba(124,92,252,0.15);
+  --bubble-user: rgba(146,122,240,0.15);
   --bubble-agent: rgba(30,30,50,0.9);
   --font-family: 'Noto Sans SC', sans-serif;
   --font-size-base: 14px;

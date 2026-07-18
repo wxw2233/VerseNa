@@ -252,3 +252,4 @@
 [2026-07-18 13:50:48] [ERROR] [QQ] 发送失败
 [2026-07-18 13:50:48] [INFO] [Agent] [WARN] 重试中
 [2026-07-18 13:50:48] [INFO] [Chat] WS消息: session=test content=你好世界
+[2026-07-18 13:53:50] [INFO] [Asset] 上传请求: theme=芙宁娜 file=bg.png size=86761

@@ -23,10 +23,8 @@ const themeStore = useThemeStore()
 const bgStyle = computed(() => {
   const themeId = themeStore.current
   if (!themeId || themeId === 'null') return {}
-  const opacity = localStorage.getItem('bg-opacity') || '0.3'
   return {
     backgroundImage: "url(/api/themes/" + themeId + "/assets/bg.png)",
-    opacity: opacity,
   }
 })
 const isSettings = computed(() => route.path === '/settings')
@@ -47,6 +45,7 @@ function toggleSettings() {
   background-position: center;
   z-index: 0;
   pointer-events: none;
+  opacity: var(--bg-opacity, 0.3);
 }
 .top-bar, .main-content {
   position: relative;

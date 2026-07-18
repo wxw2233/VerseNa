@@ -29,11 +29,14 @@ const bgOpacity = ref(parseFloat(localStorage.getItem('bg-opacity') || '0.3'))
 
 function updateOpacity() {
   localStorage.setItem('bg-opacity', bgOpacity.value)
-  const bg = document.querySelector('.bg-layer')
-  if (bg) bg.style.opacity = bgOpacity.value
+  document.documentElement.style.setProperty('--bg-opacity', bgOpacity.value)
 }
 
-onMounted(() => { loadBg() })
+onMounted(() => {
+  loadBg()
+  const savedOpacity = localStorage.getItem('bg-opacity') || '0.3'
+  document.documentElement.style.setProperty('--bg-opacity', savedOpacity)
+})
 watch(() => themeStore.current, () => { loadBg() })
 
 async function loadBg() {
