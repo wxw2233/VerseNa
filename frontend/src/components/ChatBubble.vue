@@ -158,8 +158,8 @@ function summarizeArgs(args) {
 .text-seg :deep(img) { max-width: 100%; border-radius: 6px; }
 .text-seg :deep(table) { border-collapse: collapse; margin: 8px 0; width: 100%; font-size: 13px; }
 .text-seg :deep(th), .text-seg :deep(td) { box-shadow: 0 0 0 1px rgba(255,255,255,0.06); padding: 6px 10px; text-align: left; }
-.text-seg :deep(th) { background: rgba(124, 92, 252, 0.12); font-weight: 600; }
-.text-seg :deep(tr:nth-child(even)) { background: rgba(255,255,255,0.02); }
+.text-seg :deep(th) { background: rgba(124, 92, 252, 0.18); font-weight: 600; padding: 8px 12px; }
+.text-seg :deep(tr:nth-child(even)) { background: rgba(255,255,255,0.04); }
 .text-seg :deep(strong) { color: var(--text-primary); font-weight: 700; }
 .text-seg :deep(em) { font-style: italic; }
 .text-seg :deep(del) { text-decoration: line-through; color: var(--text-secondary); }

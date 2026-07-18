@@ -41,7 +41,7 @@ async function handleFile(e) {
 .input-bar {
   display: flex;
   gap: 8px;
-  padding: 12px 16px;
+  padding: 12px 24px;
   background: var(--panel-l2);
    
 
