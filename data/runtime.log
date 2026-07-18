@@ -293,3 +293,6 @@
 [2026-07-18 16:15:56] [ERROR] [QQ] 发送失败
 [2026-07-18 16:15:56] [INFO] [Agent] [WARN] 重试中
 [2026-07-18 16:15:56] [INFO] [Chat] WS消息: session=test content=你好世界
+[2026-07-18 16:38:52] [INFO] [Chat] WS消息: session=session_ad8ef8a9 content=再测试一下工具
+[2026-07-18 16:39:11] [INFO] [Chat] 会话结束: session=session_ad8ef8a9
+[2026-07-18 16:39:11] [INFO] [Chat] 保存 1 个 tool segments

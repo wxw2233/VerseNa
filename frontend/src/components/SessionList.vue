@@ -348,6 +348,8 @@ async function saveEdit() {
 .session-item {
   padding: 8px 12px 8px 24px;
   cursor: pointer;
+  border: 1px solid transparent;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.04);
   position: relative;
   transition: background 0.15s, transform 0.15s;
 }
@@ -357,7 +359,8 @@ async function saveEdit() {
 /* Selected session: left border indicator */
 .session-item.active {
   background: rgba(124, 92, 252, 0.12);
-  border-left: 3px solid var(--primary);
+  border-left: 3px solid rgba(100,180,255,0.7);
+  border: 1px solid rgba(255,255,255,0.10);
   border-radius: 0 8px 8px 0;
 }
 .session-name {
