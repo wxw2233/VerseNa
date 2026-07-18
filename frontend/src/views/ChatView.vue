@@ -70,17 +70,6 @@ const confirmDialog = reactive({
   dir_count: undefined
 })
 
-// bg-layer moved to App.vue
-const bgStyle = computed(() => {
-  const themeId = themeStore.current
-  return {
-    backgroundImage: `url(/api/themes/${themeId}/assets/bg.png)`,
-    backgroundSize: 'cover',
-    backgroundPosition: 'center',
-    backgroundRepeat: 'no-repeat',
-    opacity: store.bgOpacity ?? 0.3,
-  }
-})
 
 function scrollToBottom() {
   nextTick(() => {
@@ -228,12 +217,6 @@ setTimeout(loadToolExpanded, 100)
   min-width: 0;
   position: relative;
   overflow: hidden;
-}
-.bg-layer {
-  position: absolute;
-  top: 0; left: 0; right: 0; bottom: 0;
-  z-index: 0;
-  pointer-events: none;
 }
 .messages {
   flex: 1;

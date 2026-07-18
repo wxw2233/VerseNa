@@ -246,3 +246,9 @@
 [2026-07-18 13:37:19] [INFO] [Asset] 上传请求: theme=芙宁娜 file=topbar-bg.png size=821559
 [2026-07-18 13:38:31] [INFO] [Asset] 上传请求: theme=芙宁娜 file=card-bg.png size=82080
 [2026-07-18 13:41:15] [INFO] [Asset] 上传请求: theme=芙宁娜 file=bg.png size=86761
+[2026-07-18 13:50:48] [INFO] [Test] 集成测试日志
+[2026-07-18 13:50:48] [ERROR] [Test] 错误日志
+[2026-07-18 13:50:48] [INFO] [Chat] 用户消息
+[2026-07-18 13:50:48] [ERROR] [QQ] 发送失败
+[2026-07-18 13:50:48] [INFO] [Agent] [WARN] 重试中
+[2026-07-18 13:50:48] [INFO] [Chat] WS消息: session=test content=你好世界
