@@ -1,9 +1,9 @@
 :root {
-  --primary: #e100ff;
+  --primary: #9ed0ff;
   --bg-primary: #ff0000;
   --bg-secondary: #ff0000;
-  --text-primary: #e100ff;
-  --text-secondary: #ff00dd;
+  --text-primary: #9ed0ff;
+  --text-secondary: #9ed0ff;
   --border: #ff0000;
   --bubble-user: rgba(255,0,0,0.15);
   --bubble-agent: #ff0000;
