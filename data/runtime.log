@@ -223,3 +223,25 @@
 [2026-07-18 13:09:52] [INFO] [Asset] 上传请求: theme=null file=chat-bg.png size=86761
 [2026-07-18 13:22:54] [INFO] [Asset] 上传请求: theme=芙宁娜 file=chat-bg.png size=86761
 [2026-07-18 13:24:44] [INFO] [Asset] 上传请求: theme=芙宁娜 file=test.png size=687
+[2026-07-18 13:26:58] [INFO] [Asset] 上传请求: theme=芙宁娜 file=chat-bg.png size=86761
+[2026-07-18 13:27:23] [INFO] [Chat] WS消息: session=session_e8a0cc8e content=你好
+[2026-07-18 13:27:45] [INFO] [Chat] 会话结束: session=session_e8a0cc8e
+[2026-07-18 13:27:45] [INFO] [Chat] 保存 1 个 tool segments
+[2026-07-18 13:27:53] [ERROR] [Session] 自动命名失败: 
+[2026-07-18 13:29:18] [INFO] [Asset] 上传请求: theme=芙宁娜 file=sidebar-bg.png size=130872
+[2026-07-18 13:29:50] [INFO] [Asset] 上传请求: theme=芙宁娜 file=topbar-bg.png size=86761
+[2026-07-18 13:30:15] [INFO] [Asset] 上传请求: theme=芙宁娜 file=send-btn.png size=1136985
+[2026-07-18 13:30:34] [INFO] [Asset] 上传请求: theme=芙宁娜 file=input-bg.png size=391710
+[2026-07-18 13:30:47] [INFO] [Asset] 上传请求: theme=芙宁娜 file=sidebar-divider.png size=1144347
+[2026-07-18 13:30:51] [INFO] [Asset] 上传请求: theme=芙宁娜 file=corner-decor.png size=892299
+[2026-07-18 13:30:55] [INFO] [Asset] 上传请求: theme=芙宁娜 file=bubble-agent.png size=254645
+[2026-07-18 13:31:02] [INFO] [Asset] 上传请求: theme=芙宁娜 file=avatar-frame.png size=256123
+[2026-07-18 13:31:06] [INFO] [Asset] 上传请求: theme=芙宁娜 file=bubble-user.png size=82080
+[2026-07-18 13:31:10] [INFO] [Asset] 上传请求: theme=芙宁娜 file=card-bg.png size=126222
+[2026-07-18 13:35:11] [INFO] [Asset] 上传请求: theme=芙宁娜 file=topbar-bg.png size=86761
+[2026-07-18 13:35:20] [INFO] [Asset] 上传请求: theme=芙宁娜 file=sidebar-bg.png size=256123
+[2026-07-18 13:35:42] [INFO] [Asset] 上传请求: theme=芙宁娜 file=input-bg.png size=86761
+[2026-07-18 13:36:31] [INFO] [Asset] 上传请求: theme=芙宁娜 file=input-bg.png size=86761
+[2026-07-18 13:36:46] [INFO] [Asset] 上传请求: theme=芙宁娜 file=chat-bg.png size=391710
+[2026-07-18 13:37:19] [INFO] [Asset] 上传请求: theme=芙宁娜 file=topbar-bg.png size=821559
+[2026-07-18 13:38:31] [INFO] [Asset] 上传请求: theme=芙宁娜 file=card-bg.png size=82080
