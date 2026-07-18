@@ -12,7 +12,7 @@ export const useThemeStore = defineStore('theme', () => {
 
   async function applyTheme(name) {
     if (!name || name === 'null' || name === 'undefined') return
-    const resp = await fetch(`/api/themes/${name}/css`)
+    const resp = await fetch(`/api/themes/${name}/css?t=${Date.now()}`)
     if (!resp.ok) return
     const css = await resp.text()
     let styleEl = document.getElementById('theme-style')
