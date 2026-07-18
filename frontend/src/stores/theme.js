@@ -26,10 +26,10 @@ export const useThemeStore = defineStore('theme', () => {
     localStorage.setItem('current-theme', name)
   }
 
-  function restoreTheme() {
+  async function restoreTheme() {
     const saved = localStorage.getItem('current-theme')
     if (saved && saved !== 'default' && saved !== 'null') {
-      applyTheme(saved)
+      await applyTheme(saved)
     }
   }
 
