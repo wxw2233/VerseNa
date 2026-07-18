@@ -39,7 +39,7 @@ function toggleSettings() {
   else { router.push('/settings') }
 }
 
-onMounted(() => { themeStore.restoreTheme() })
+onMounted(async () => { await themeStore.restoreTheme(); document.getElementById('app-root').style.visibility = 'visible' })
 </script>
 
 <style scoped>
