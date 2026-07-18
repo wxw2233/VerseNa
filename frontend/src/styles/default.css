@@ -1,16 +1,16 @@
 :root {
   /* === Glassmorphism Layer System === */
   /* L1: Top bar, Sidebar — 12px blur, 0.75 opacity */
-  --glass-l1-bg: rgba(15, 15, 30, 0.75);
+  --glass-l1-bg: rgba(15, 15, 30, 0.50);
   --glass-l1-blur: blur(12px);
   /* L2: Chat area, Settings content area — 8px blur, 0.62 opacity */
-  --glass-l2-bg: rgba(20, 20, 40, 0.62);
+  --glass-l2-bg: rgba(20, 20, 40, 0.40);
   --glass-l2-blur: blur(8px);
   /* L3: Cards, Chat bubbles — 6px blur, 0.55 opacity */
-  --glass-l3-bg: rgba(25, 25, 45, 0.55);
+  --glass-l3-bg: rgba(25, 25, 45, 0.35);
   --glass-l3-blur: blur(6px);
   /* L4: Input, Buttons — no blur, 0.60 opacity */
-  --glass-l4-bg: rgba(30, 30, 50, 0.6);
+  --glass-l4-bg: rgba(30, 30, 50, 0.45);
 
   /* Perceptual border — replaces all hard border: 1px solid var(--border) */
   --glass-border: 0 0 0 1px rgba(255, 255, 255, 0.04);
