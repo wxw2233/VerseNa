@@ -125,13 +125,9 @@ async def update_pack(pack_id: str, req: PackUpdate):
         css_vars = []
         css_map = {
             "primary": "--primary",
-            "bgPrimary": "--bg-primary",
-            "bgSecondary": "--bg-secondary",
             "textPrimary": "--text-primary",
             "textSecondary": "--text-secondary",
             "border": "--border",
-            "bubbleUser": "--bubble-user",
-            "bubbleAgent": "--bubble-agent",
         }
         for key, css_var in css_map.items():
             if key in colors:
