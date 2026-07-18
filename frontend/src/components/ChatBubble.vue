@@ -124,7 +124,7 @@ function summarizeArgs(args) {
   padding: var(--bubble-padding);
   position: relative;
   border-radius: var(--radius);
-  background: var(--panel-l3);
+  background: transparent;
    
 
   box-shadow: var(--border-subtle), var(--glow-inner);
@@ -132,13 +132,13 @@ function summarizeArgs(args) {
 
 /* Asymmetric bottom radius: user bubble bottom-right 8px */
 .bubble.user {
-  background: var(--bubble-user);
+  background: rgba(124, 92, 252, 0.05);
   border-bottom-right-radius: 8px;
 }
 
 /* Asymmetric bottom radius: assistant bubble bottom-left 8px */
 .bubble.assistant {
-  background: var(--bubble-agent);
+  background: rgba(20, 20, 40, 0.10);
   border-bottom-left-radius: 8px;
 }
 
