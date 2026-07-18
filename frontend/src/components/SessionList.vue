@@ -282,10 +282,10 @@ async function saveEdit() {
 /* L1: Sidebar — 12px blur, 0.75 opacity, inner glow, no hard right border */
 .session-panel {
   width: var(--sidebar-width, 220px);
-  background: var(--panel-l1);
+  background: transparent;
    
 
-  box-shadow: var(--glow-inner);
+  box-shadow: none;
   display: flex;
   flex-direction: column;
   height: calc(100vh - 52px);

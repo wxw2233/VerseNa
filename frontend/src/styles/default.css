@@ -5,10 +5,10 @@
   --text-secondary: #8888aa;
 
   /* 面板层级 — 深色底 */
-  --panel-l1: rgba(12, 12, 28, 0.35);
-  --panel-l2: rgba(15, 15, 32, 0.25);
-  --panel-l3: rgba(20, 20, 40, 0.30);
-  --panel-l4: rgba(25, 25, 48, 0.35);
+  --panel-l1: transparent;
+  --panel-l2: transparent;
+  --panel-l3: transparent;
+  --panel-l4: transparent;
 
   /* 感知边框 — 4% 白透明 */
   --border-subtle: 0 0 0 1px rgba(255, 255, 255, 0.04);
@@ -39,11 +39,11 @@
 
   /* 侧栏 */
   --sidebar-width: 220px;
-  --sidebar-bg: var(--panel-l1);
+  --sidebar-bg: transparent;
 
   /* 输入框 */
   --input-radius: var(--radius);
-  --input-bg: var(--panel-l4);
+  --input-bg: rgba(25, 25, 48, 0.30);
   --input-glow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
 }
 

@@ -54,7 +54,7 @@ textarea {
   border: none;
   border-radius: var(--radius);
   padding: 8px 12px;
-  background: var(--panel-l4);
+  background: transparent;
   color: var(--text-primary);
   font-size: 14px;
   outline: none;
@@ -91,7 +91,7 @@ button:disabled {
 /* Attach button: subtle glass style */
 .attach-btn {
   padding: 8px 12px;
-  background: var(--panel-l4);
+  background: transparent;
   border: none;
   border-radius: var(--radius-sm);
   box-shadow: var(--border-subtle);

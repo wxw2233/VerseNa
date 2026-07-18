@@ -817,7 +817,7 @@ watch(() => activeTab.value, (tab) => {
 .sidebar {
   width: var(--sidebar-width, 180px);
   min-width: var(--sidebar-width, 180px);
-  background: var(--panel-l1);
+  background: transparent;
    
 
   box-shadow: var(--glow-inner);
@@ -865,7 +865,7 @@ watch(() => activeTab.value, (tab) => {
   flex: 1;
   overflow-y: auto;
   padding: 28px 36px;
-  background: var(--panel-l2);
+  background: transparent;
    
 
 }
@@ -888,7 +888,7 @@ watch(() => activeTab.value, (tab) => {
   align-items: center;
   gap: 12px;
   padding: 14px 16px;
-  background: var(--panel-l3);
+  background: transparent;
    
 
   box-shadow: var(--border-subtle), var(--glow-inner);
@@ -932,7 +932,7 @@ watch(() => activeTab.value, (tab) => {
 
 /* Inline pack editor — L3 */
 .pack-editor {
-  background: var(--panel-l3);
+  background: transparent;
    
 
   box-shadow: var(--border-subtle), var(--glow-inner);
@@ -1202,7 +1202,7 @@ legend {
   align-items: center;
   gap: 12px;
   padding: 14px 16px;
-  background: var(--panel-l3);
+  background: transparent;
    
 
   box-shadow: var(--border-subtle), var(--glow-inner);
@@ -1302,7 +1302,7 @@ legend {
   align-items: center;
   gap: 14px;
   padding: 16px 20px;
-  background: var(--panel-l3);
+  background: transparent;
    
 
   box-shadow: var(--border-subtle), var(--glow-inner);
@@ -1386,7 +1386,7 @@ legend {
   align-items: center;
   justify-content: space-between;
   padding: 16px;
-  background: var(--panel-l3);
+  background: transparent;
    
 
   border-radius: var(--radius);
@@ -1488,7 +1488,7 @@ legend {
 .memory-list { display: flex; flex-direction: column; gap: 8px; }
 .memory-card {
   padding: 12px;
-  background: var(--panel-l3);
+  background: transparent;
    
 
   border-radius: var(--radius);

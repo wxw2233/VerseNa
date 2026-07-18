@@ -252,7 +252,7 @@ setTimeout(loadToolExpanded, 100)
   text-align: center;
   color: var(--text-secondary);
 }
-.empty p { font-size: 24px; }
+.empty p { text-shadow: 0 0 6px rgba(0,0,0,0.4); font-size: 24px; }
 .empty .sub { font-size: 14px; margin-top: 8px; }
 
 /* Confirm Dialog — glass L3 style */

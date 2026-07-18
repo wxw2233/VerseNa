@@ -57,13 +57,13 @@ function toggleSettings() {
   display: flex;
   align-items: center;
   padding: 12px 20px;
-  background: var(--panel-l1);
+  background: transparent;
    
 
-  box-shadow: var(--glow-inner);
+  box-shadow: none;
   /* no bottom border — perceptual border via box-shadow instead */
 }
-.nav-title {
+.nav-title { text-shadow: 0 0 8px rgba(0,0,0,0.5);
   font-size: 18px;
   font-weight: bold;
   color: var(--primary);
