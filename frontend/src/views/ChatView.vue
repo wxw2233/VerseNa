@@ -2,24 +2,24 @@
   <div class="chat-view">
     <SessionList />
     <div class="chat-main">
-      <Transition name="chat-switch" mode="out-in">
-        <div class="messages" ref="messagesRef" :key="sessionStore.currentSessionId">
-          <ChatBubble
-            v-for="(msg, i) in store.messages"
-            :key="i"
-            :msg="msg"
-            class="msg-enter"
-            :style="{ animationDelay: Math.min(i * 40, 300) + 'ms' }"
-          />
-          <div v-if="store.messages.length === 0" class="empty">
-            <p>✨ 次元人格 ✨</p>
-            <p class="sub">点击「+ 新对话」开始聊天</p>
-          </div>
+      <div class="messages" ref="messagesRef">
+        <ChatBubble
+          v-for="(msg, i) in store.messages"
+          :key="sessionStore.currentSessionId + '_' + i"
+          :msg="msg"
+          class="msg-item"
+          :style="{ animationDelay: Math.min(i * 30, 200) + 'ms' }"
+        />
+        <div v-if="store.messages.length === 0" class="empty">
+          <p>✨ 次元人格 ✨</p>
+          <p class="sub">点击「+ 新对话」开始聊天</p>
         </div>
-      </Transition>
+      </div>
       <ChatInput
         @send="handleSend"
+        @stop="handleStop"
         :auto-tts="autoTTS"
+        :is-streaming="store.isStreaming"
         @toggle-tts="autoTTS = !autoTTS; localStorage.setItem('auto-tts', autoTTS)"
       />
     </div>
@@ -86,6 +86,7 @@ let ttsAudio = null
 
 
 
+
 function scrollToBottom(smooth = false) {
   nextTick(() => {
     if (messagesRef.value) {
@@ -97,11 +98,14 @@ function scrollToBottom(smooth = false) {
   })
 }
 
-watch(() => store.messages.length, () => scrollToBottom())
+watch(() => store.messages.length, (newLen, oldLen) => {
+  // 只在消息增加时滚动（不清空时），避免 Transition 期间误触发
+  if (newLen > oldLen) scrollToBottom()
+})
 
-// 会话切换时平滑滚动到底部
+// 会话切换后滚动到底部
 watch(() => sessionStore.currentSessionId, () => {
-  nextTick(() => scrollToBottom(true))
+  nextTick(() => scrollToBottom())
 })
 
 onMounted(() => {
@@ -158,6 +162,11 @@ function onConfirm(confirmed) {
   }
 }
 
+function handleStop() {
+  send({ type: 'stop' })
+  store.isStreaming = false
+}
+
 function handleSend(content) {
   if (typeof content === 'object' && content.image) {
     store.messages.push({
@@ -179,7 +188,6 @@ function handleSend(content) {
       image_url: content.image.dataUrl,
     })
   } else if (typeof content === 'object' && content.file) {
-    // 文件附件
     store.messages.push({
       role: 'user',
       content: content.text || '',
@@ -204,7 +212,7 @@ function handleSend(content) {
       session_id: sessionStore.currentSessionId,
       content,
       persona: personaStore.current,
-      system_prompt: ''
+      system_prompt: '',
     })
   }
 }
@@ -358,7 +366,21 @@ setTimeout(loadToolExpanded, 100)
   flex-direction: column;
   position: relative;
   z-index: 1;
-  /* transparent — inherits from chat-main L2 */
+}
+
+/* 消息淡入动画 */
+.msg-item {
+  animation: msg-appear 0.25s ease both;
+}
+@keyframes msg-appear {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 .empty {
   margin: auto;
@@ -368,36 +390,6 @@ setTimeout(loadToolExpanded, 100)
 .empty p { text-shadow: 0 0 6px rgba(0,0,0,0.4); font-size: 24px; }
 .empty .sub { font-size: 14px; margin-top: 8px; }
 
-/* 会话切换动画 — 上下淡隐平移 */
-.chat-switch-leave-active {
-  transition: opacity 0.25s ease, transform 0.25s ease;
-}
-.chat-switch-enter-active {
-  transition: opacity 0.3s ease, transform 0.3s ease;
-}
-.chat-switch-leave-to {
-  opacity: 0;
-  transform: translateY(12px);
-}
-.chat-switch-enter-from {
-  opacity: 0;
-  transform: translateY(-12px);
-}
-
-/* 消息逐条渐显 */
-.msg-enter {
-  animation: msg-fade-in 0.3s ease both;
-}
-@keyframes msg-fade-in {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
 
 /* Confirm Dialog — glass L3 style */
 .confirm-overlay {

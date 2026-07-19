@@ -74,34 +74,125 @@ async def websocket_chat(ws: WebSocket):
         finally:
             pending_confirms.pop(request_id, None)
 
+    # 停止信号（每个连接独立）
+    stop_event = asyncio.Event()
+    msg_queue = asyncio.Queue()
+    reader_done = False  # ws_reader 是否已退出
+
+    # 后台持续读取 WebSocket 消息
+    async def ws_reader():
+        nonlocal reader_done
+        try:
+            while True:
+                raw = await ws.receive_text()
+                m = json.loads(raw)
+                if m.get('type') == 'stop':
+                    stop_event.set()
+                elif m.get('type') == 'confirm_response':
+                    rid = m.get('request_id', '')
+                    fut = pending_confirms.get(rid)
+                    if fut and not fut.done():
+                        fut.set_result(m.get('confirmed', False))
+                else:
+                    await msg_queue.put(m)
+        except Exception:
+            pass
+        finally:
+            reader_done = True
+            stop_event.set()  # 如果 Agent 正在运行，通知它停止
+            await msg_queue.put(None)  # 唤醒主循环退出
+
+    reader_task = asyncio.create_task(ws_reader())
+
     try:
         while True:
-            data = await ws.receive_text()
-            msg = json.loads(data)
-
-            # 处理前端确认响应
-            if msg.get('type') == 'confirm_response':
-                request_id = msg.get('request_id', '')
-                future = pending_confirms.get(request_id)
-                if future and not future.done():
-                    future.set_result(msg.get('confirmed', False))
-                continue
+            msg = await msg_queue.get()
+            if msg is None:
+                # ws_reader 已退出（连接断开），结束主循环
+                break
 
             session_id = msg.get("session_id", "default")
             content = msg.get("content", "")
             image_url = msg.get("image_url", "")
             log_info("Chat", f"WS消息: session={session_id} content={content[:80]} image={'yes' if image_url else 'no'}")
             persona_name = msg.get("persona", "default")
+
+            # 处理 /skill install 命令
+            if content.strip().startswith("/skill install"):
+                url = content.strip().replace("/skill install", "").strip()
+                if url:
+                    from skills.manager import skill_manager
+                    data, error = skill_manager.install_from_github(url)
+                    if error:
+                        await ws.send_text(json.dumps({"type": "segment", "segment": {"type": "text", "content": f"❌ 技能安装失败: {error}"}}, ensure_ascii=False))
+                    else:
+                        await ws.send_text(json.dumps({"type": "segment", "segment": {"type": "text", "content": f"✅ 技能「{data['name']}」安装成功！\n\n{data['description']}"}}, ensure_ascii=False))
+                    await ws.send_text(json.dumps({"type": "done"}))
+                    continue
+                else:
+                    await ws.send_text(json.dumps({"type": "segment", "segment": {"type": "text", "content": "用法: /skill install <github-repo-url>"}}, ensure_ascii=False))
+                    await ws.send_text(json.dumps({"type": "done"}))
+                    continue
+
             system_prompt = persona_manager.get_system_prompt(persona_name)
+
+            # 注入技能列表（Agent 自动选择）
+            from skills.manager import skill_manager
+            skill_prompt = skill_manager.get_skill_prompt()
+            if skill_prompt:
+                system_prompt += f"\n\n{skill_prompt}"
+
             tool_desc = "\n".join(f"- {t['function']['name']}: {t['function']['description']}" for t in tool_registry.get_tools())
             system_prompt += f"\n\n## 可用工具\n你有以下工具可以调用，请在需要时主动使用：\n{tool_desc}\n\n使用工具时请通过 function calling 调用，不要直接告诉用户你没有工具。"
             system_prompt += "\n\n## 重要：你必须始终使用中文回复，不要使用英文。"
+
+            available_tools = tool_registry.get_tools()
             emotion = persona_manager.get_emotion_engine(persona_name)
             emotion_state = emotion.pick_emotion()
 
-            tool_segments = []
+            # 将情感状态注入系统提示词，让 Agent 的回复带有对应情感
+            emotion_prompts = {
+                "cheerful": "你现在心情很好，语气活泼开朗，积极向上。",
+                "shy": "你现在有些害羞，语气略带羞涩和不好意思。",
+                "curious": "你现在充满好奇，喜欢追问细节和深入探讨。",
+                "angry": "你现在有些不满，语气略带抱怨和不耐烦。",
+                "sad": "你现在心情低落，语气略带伤感和惆怅。",
+            }
+            if emotion_state.primary in emotion_prompts:
+                system_prompt += f"\n\n## 当前情感\n{emotion_prompts[emotion_state.primary]}（情感强度：{emotion_state.intensity:.1f}）"
+
+            # 读取 Agent 高级配置
+            agent_config = {}
             try:
-                async for event in agent.run(session_id, content, system_prompt=system_prompt, tools=tool_registry.get_tools(), persona=persona_name, confirm_callback=confirm_callback, image_url=image_url if image_url else None):
+                from api.config_api import AGENT_CONFIG_DEFAULTS
+                for key, default in AGENT_CONFIG_DEFAULTS.items():
+                    raw = await db.get_config(f"agent_{key}", None)
+                    if raw is None:
+                        agent_config[key] = default
+                    elif key in ("custom_instructions",):
+                        agent_config[key] = raw
+                    else:
+                        try:
+                            agent_config[key] = type(default)(raw)
+                        except (ValueError, TypeError):
+                            agent_config[key] = default
+            except Exception:
+                pass
+
+            # 主题包角色的 temperature/top_p 覆盖全局配置
+            try:
+                persona_data = persona_manager.get_persona(persona_name)
+                if persona_data.temperature is not None:
+                    agent_config["temperature"] = persona_data.temperature
+                if persona_data.top_p is not None:
+                    agent_config["top_p"] = persona_data.top_p
+            except Exception:
+                pass
+
+            tool_segments = []
+            stop_event.clear()  # 新消息开始前清除停止信号
+            try:
+                async for event in agent.run(session_id, content, system_prompt=system_prompt, tools=available_tools, persona=persona_name, confirm_callback=confirm_callback, image_url=image_url if image_url else None, stop_event=stop_event, agent_config=agent_config):
                     await ws.send_text(json.dumps(event, ensure_ascii=False))
                     if event.get("type") == "segment" and event.get("segment", {}).get("type") == "tool":
                         tool_segments.append(event["segment"])
@@ -135,6 +226,6 @@ async def websocket_chat(ws: WebSocket):
                 pass
 
     except WebSocketDisconnect:
-        pass
+        reader_task.cancel()
     except Exception:
-        pass
+        reader_task.cancel()

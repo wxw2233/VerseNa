@@ -47,17 +47,11 @@
         </div>
       </div>
 
-      <div v-if="activeTab === 'skill'" class="tab-content">
-        <h2>技能</h2>
-        <div class="empty-state">
-          <div class="empty-icon">⚡</div>
-          <div class="empty-title">技能管理</div>
-          <div class="empty-desc">自定义技能编排与热加载功能即将推出</div>
-        </div>
-      </div>
+      <SkillTab v-if="activeTab === 'skill'" />
 
       <ToolTab v-if="activeTab === 'tool'" />
       <MemoryTab v-if="activeTab === 'memory'" />
+      <AdvancedTab v-if="activeTab === 'advanced'" />
       <MonitorTab v-if="activeTab === 'monitor'" />
     </section>
   </div>
@@ -72,6 +66,8 @@ import ModelTab from '../components/settings/ModelTab.vue'
 import ToolTab from '../components/settings/ToolTab.vue'
 import MemoryTab from '../components/settings/MemoryTab.vue'
 import MonitorTab from '../components/settings/MonitorTab.vue'
+import SkillTab from '../components/settings/SkillTab.vue'
+import AdvancedTab from '../components/settings/AdvancedTab.vue'
 import QQBotConfig from '../components/QQBotConfig.vue'
 
 const activeTab = ref('persona')
@@ -87,6 +83,7 @@ const menuItems = [
   { id: 'skill', icon: '⚡', label: '技能' },
   { id: 'tool', icon: '🔧', label: '工具' },
   { id: 'memory', icon: '🧠', label: '记忆' },
+  { id: 'advanced', icon: '⚙️', label: '高级' },
   { id: 'monitor', icon: '📊', label: '监控' },
 ]
 

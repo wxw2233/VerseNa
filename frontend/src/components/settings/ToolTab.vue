@@ -1,31 +1,18 @@
 <template>
   <div class="tab-content">
     <h2>工具</h2>
+    <p class="tab-desc">Agent 可以自动调用以下工具来完成任务。</p>
+
     <div class="tool-list">
-      <div class="tool-card">
-        <div class="tool-icon">🔍</div>
+      <div v-for="tool in tools" :key="tool.name" class="tool-card">
+        <div class="tool-icon">{{ toolIcons[tool.name] || '🔧' }}</div>
         <div class="tool-info">
-          <div class="tool-name">web_search</div>
-          <div class="tool-desc">联网搜索工具，支持通过搜索引擎查询实时信息</div>
+          <div class="tool-name">{{ tool.name }}</div>
+          <div class="tool-desc">{{ tool.description }}</div>
         </div>
         <span class="tool-badge builtin">内置</span>
       </div>
-      <div class="tool-card">
-        <div class="tool-icon">💻</div>
-        <div class="tool-info">
-          <div class="tool-name">code_exec</div>
-          <div class="tool-desc">代码执行工具，支持在沙箱环境中运行 Python 代码</div>
-        </div>
-        <span class="tool-badge builtin">内置</span>
-      </div>
-      <div class="tool-card">
-        <div class="tool-icon">📁</div>
-        <div class="tool-info">
-          <div class="tool-name">file_manager</div>
-          <div class="tool-desc">文件管理器，支持读取、写入、搜索、编辑、复制、移动、删除等操作</div>
-        </div>
-        <span class="tool-badge builtin">内置</span>
-      </div>
+      <div v-if="tools.length === 0" class="empty-hint">加载中...</div>
     </div>
 
     <hr class="divider" />
@@ -46,7 +33,25 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 
+const tools = ref([])
 const trustMode = ref(false)
+
+const toolIcons = {
+  web_search: '🔍',
+  web_fetch: '🌐',
+  code_exec: '💻',
+  file_manager: '📁',
+  save_memory: '🧠',
+  datetime: '🕐',
+  calculator: '🧮',
+}
+
+async function loadTools() {
+  try {
+    const resp = await fetch('/api/tools')
+    tools.value = await resp.json()
+  } catch { tools.value = [] }
+}
 
 async function loadTrustMode() {
   try {
@@ -66,26 +71,35 @@ async function saveTrustMode() {
   } catch {}
 }
 
-onMounted(() => loadTrustMode())
+onMounted(() => {
+  loadTools()
+  loadTrustMode()
+})
 </script>
 
 <style scoped>
+.tab-desc { font-size: 13px; color: var(--text-secondary); margin-bottom: 16px; }
+
 .tool-list {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
 }
 .tool-card {
   display: flex;
   align-items: center;
   gap: 14px;
-  padding: 16px 20px;
-  background: rgba(20, 20, 40, 0.60);
-  box-shadow: var(--ui-border);
-  border-radius: var(--radius);
+  padding: 14px 18px;
+  background: rgba(20, 20, 40, 0.45);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  transition: box-shadow 0.2s;
+}
+.tool-card:hover {
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.18);
 }
 .tool-icon {
-  font-size: 24px;
+  font-size: 22px;
   width: 36px;
   height: 36px;
   display: flex;
@@ -93,18 +107,21 @@ onMounted(() => loadTrustMode())
   justify-content: center;
   background: rgba(20, 20, 40, 0.60);
   border-radius: 8px;
-  box-shadow: 0 0 0 1px rgba(255,255,255,0.20);
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.12);
+  flex-shrink: 0;
 }
-.tool-info { flex: 1; }
+.tool-info { flex: 1; min-width: 0; }
 .tool-name {
   font-size: 14px;
   font-weight: 600;
   font-family: monospace;
+  color: var(--text-primary);
 }
 .tool-desc {
-  font-size: 13px;
+  font-size: 12px;
   color: var(--text-secondary);
   margin-top: 2px;
+  line-height: 1.4;
 }
 .tool-badge {
   font-size: 11px;
@@ -113,12 +130,20 @@ onMounted(() => loadTrustMode())
   background: rgba(124, 92, 252, 0.12);
   color: var(--primary);
   font-weight: 600;
+  flex-shrink: 0;
+}
+
+.empty-hint {
+  text-align: center;
+  padding: 24px;
+  color: var(--text-secondary);
+  font-size: 14px;
 }
 
 .divider {
   border: none;
   box-shadow: 0 -1px 0 rgba(255, 255, 255, 0.04);
-  margin: 28px 0;
+  margin: 24px 0;
   height: 1px;
 }
 
@@ -126,10 +151,10 @@ onMounted(() => loadTrustMode())
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px;
-  background: rgba(20, 20, 40, 0.60);
-  border-radius: var(--radius);
-  box-shadow: var(--ui-border);
+  padding: 14px 18px;
+  background: rgba(20, 20, 40, 0.45);
+  border-radius: 10px;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08);
 }
 .trust-label { font-size: 14px; font-weight: 600; color: var(--text-primary); }
 .trust-desc { font-size: 12px; color: var(--text-secondary); margin-top: 4px; }

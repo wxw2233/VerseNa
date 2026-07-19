@@ -137,10 +137,18 @@ const hasTextContent = computed(() => {
 
 function stripActions(text) {
   return text
-    .replace(/\*[^*]+\*/g, '')
-    .replace(/（[^）]+）/g, '')
-    .replace(/\([^)]+\)/g, '')
-    .replace(/【[^】]+】/g, '')
+    // 多行动作：*...\n...*（用 [\s\S] 匹配换行）
+    .replace(/\*[\s\S]*?\*/g, '')
+    // 中文括号
+    .replace(/（[\s\S]*?）/g, '')
+    // 英文括号
+    .replace(/\([\s\S]*?\)/g, '')
+    // 中文方括号
+    .replace(/【[\s\S]*?】/g, '')
+    // 斜体：_text_ 和 **bold** 保留内容
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/_([^_]+)_/g, '$1')
+    // 清理多余空行
     .replace(/\n{2,}/g, '\n')
     .trim()
 }

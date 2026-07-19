@@ -7,14 +7,27 @@ from config import settings
 from persona.manager import persona_manager
 
 class ReActAgent:
-    def __init__(self, model: BaseModelAdapter, memory: MemoryManager, tool_registry=None):
+    def __init__(self, model: BaseModelAdapter, memory: MemoryManager, tool_registry=None, max_steps: int = None):
         self.model = model
         self.memory = memory
         self.tool_registry = tool_registry
+        self.max_steps = max_steps or settings.MAX_REACT_LOOPS
 
-    async def run(self, session_id: str, user_message: str, system_prompt: str = "", tools: list = None, persona: str = "default", confirm_callback=None, image_url: str = None) -> AsyncGenerator[dict, None]:
+    async def run(self, session_id: str, user_message: str, system_prompt: str = "", tools: list = None, persona: str = "default", confirm_callback=None, image_url: str = None, stop_event=None, agent_config: dict = None) -> AsyncGenerator[dict, None]:
+        cfg = agent_config or {}
+        max_steps = cfg.get("max_steps", self.max_steps)
+        temperature = cfg.get("temperature", 0.8)
+        top_p = cfg.get("top_p", 0.9)
+        max_tokens = cfg.get("max_tokens", 4096)
+        max_history = cfg.get("max_history", 20)
+        max_context = cfg.get("max_context", 4096)
+        custom_instructions = cfg.get("custom_instructions", "")
+
+        if custom_instructions and system_prompt:
+            system_prompt += f"\n\n## 自定义指令\n{custom_instructions}"
+
         await self.memory.add_message(session_id, "user", user_message, persona=persona)
-        messages = await self.memory.get_context(session_id, system_prompt)
+        messages = await self.memory.get_context(session_id, system_prompt, max_history=max_history, max_context=max_context)
 
         # 如果有图片，将最后一条用户消息替换为视觉格式
         if image_url and messages:
@@ -31,7 +44,12 @@ class ReActAgent:
         tool_seq = 0  # 工具调用序号
 
         try:
-            while loops < settings.MAX_REACT_LOOPS:
+            while loops < max_steps:
+                # 检查停止信号
+                if stop_event and stop_event.is_set():
+                    yield {"type": "segment", "segment": {"type": "text", "content": "\n\n[已停止]"}}
+                    break
+
                 loops += 1
                 chunk_content = ""
                 tool_calls = []
@@ -41,7 +59,7 @@ class ReActAgent:
                 last_error = None
                 for attempt in range(3):
                     try:
-                        async for chunk in self.model.chat(messages, tools=tools, stream=True):
+                        async for chunk in self.model.chat(messages, tools=tools, stream=True, temperature=temperature, top_p=top_p, max_tokens=max_tokens):
                             if chunk.content:
                                 chunk_content += chunk.content
                                 yield {"type": "segment", "segment": {"type": "text", "content": chunk.content}}

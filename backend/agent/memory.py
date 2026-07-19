@@ -15,7 +15,9 @@ class MemoryManager:
             total += len(msg.get('content', '')) // 2
         return total
 
-    async def get_context(self, session_id, system_prompt=''):
+    async def get_context(self, session_id, system_prompt='', max_history=None, max_context=None):
+        max_ctx = max_context or self.max_tokens
+        max_hist = max_history or 20
         messages = []
 
         # 1. system_prompt
@@ -39,13 +41,13 @@ class MemoryManager:
                 'content': f'## 对话摘要（第{s["msg_from"]+1}-{s["msg_to"]}轮）\n{s["content"]}'
             })
 
-        # 4. 最近 20 轮原文
-        history = await db.get_history(session_id, limit=20)
+        # 4. 最近 N 轮原文
+        history = await db.get_history(session_id, limit=max_hist)
         for msg in history:
             messages.append({'role': msg['role'], 'content': msg['content']})
 
         # 5. token 裁剪（旧摘要 > 长期记忆 > system_prompt）
-        while self._estimate_tokens(messages) > self.max_tokens and len(messages) > 3:
+        while self._estimate_tokens(messages) > max_ctx and len(messages) > 3:
             removed = False
             for i in range(2, len(messages)):
                 if messages[i]['role'] == 'system' and '对话摘要' in messages[i].get('content', ''):

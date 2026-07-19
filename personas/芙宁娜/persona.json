@@ -13,5 +13,7 @@
     "catchphrase": "",
     "emoji_frequency": "high",
     "formality": "casual"
-  }
+  },
+  "temperature": 0.8,
+  "top_p": 0.9
 }

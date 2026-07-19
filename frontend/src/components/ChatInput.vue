@@ -35,7 +35,8 @@
         @click="emit('toggle-tts')"
         :title="autoTts ? '语音输出：开' : '语音输出：关'"
       >{{ autoTts ? '🔊' : '🔇' }}</button>
-      <button class="send-btn" @click="send" :disabled="!text.trim() && !pendingImage">发送</button>
+      <button v-if="isStreaming" class="stop-btn" @click="emit('stop')">⏹ 停止</button>
+      <button v-else class="send-btn" @click="send" :disabled="!text.trim() && !pendingImage">发送</button>
     </div>
   </div>
 </template>
@@ -46,8 +47,9 @@ import { useToast } from '../composables/useToast'
 
 const props = defineProps({
   autoTts: { type: Boolean, default: false },
+  isStreaming: { type: Boolean, default: false },
 })
-const emit = defineEmits(['send', 'toggle-tts'])
+const emit = defineEmits(['send', 'toggle-tts', 'stop'])
 const text = ref('')
 const textareaRef = ref(null)
 const fileInput = ref(null)
@@ -323,5 +325,20 @@ textarea:focus {
   cursor: not-allowed;
   filter: none;
   transform: none;
+}
+.stop-btn {
+  padding: 8px 20px;
+  background: rgba(239, 68, 68, 0.8);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 14px;
+  transition: filter 0.2s, transform 0.2s;
+  flex-shrink: 0;
+}
+.stop-btn:hover {
+  filter: brightness(1.1);
+  transform: translateY(-1px);
 }
 </style>

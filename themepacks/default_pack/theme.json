@@ -19,7 +19,8 @@
     "--border": "#2a2a40",
     "--bubble-user": "rgba(124,92,252,0.15)",
     "--bubble-agent": "rgba(30,30,50,0.9)",
-    "secondary": "#ff00ff"
+    "secondary": "#ff00ff",
+    "highlight": "#7c5cfc"
   },
   "font": "Noto Sans SC",
   "effects": {}

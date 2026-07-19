@@ -277,6 +277,52 @@ async def set_trust_mode(req: dict):
     return {"status": "ok", "enabled": enabled}
 
 
+# ========== Agent 高级配置 ==========
+
+AGENT_CONFIG_DEFAULTS = {
+    "max_steps": 15,
+    "max_history": 30,
+    "max_context": 4096,
+    "max_tokens": 4096,
+    "custom_instructions": "",
+}
+
+@router.get("/api/config/agent")
+async def get_agent_config():
+    """获取 Agent 高级配置"""
+    result = {}
+    for key, default in AGENT_CONFIG_DEFAULTS.items():
+        raw = await db.get_config(f"agent_{key}", None)
+        if raw is None:
+            result[key] = default
+        elif key in ("custom_instructions",):
+            result[key] = raw
+        else:
+            try:
+                result[key] = type(default)(raw)
+            except (ValueError, TypeError):
+                result[key] = default
+    return result
+
+class AgentConfigReq(BaseModel):
+    max_steps: int | None = None
+    max_history: int | None = None
+    max_context: int | None = None
+    temperature: float | None = None
+    top_p: float | None = None
+    max_tokens: int | None = None
+    custom_instructions: str | None = None
+
+@router.post("/api/config/agent")
+async def set_agent_config(req: AgentConfigReq):
+    """保存 Agent 高级配置"""
+    updates = req.model_dump(exclude_none=True)
+    for key, value in updates.items():
+        if key in AGENT_CONFIG_DEFAULTS:
+            await db.set_config(f"agent_{key}", str(value))
+    return {"status": "ok"}
+
+
 # ========== 启动时加载 ==========
 
 async def load_saved_config():
@@ -341,4 +387,51 @@ async def update_memory(memory_id: int, req: dict):
 @router.delete("/api/memories/{memory_id}")
 async def delete_memory(memory_id: int):
     await db.delete_memory(memory_id)
+    return {"status": "ok"}
+
+
+# ========== 工具列表 API ==========
+
+@router.get("/api/tools")
+async def list_tools():
+    """返回所有已注册的工具"""
+    from tools.registry import tool_registry
+    tools = tool_registry.get_tools()
+    return [
+        {"name": t["function"]["name"], "description": t["function"]["description"]}
+        for t in tools
+    ]
+
+
+# ========== 搜索 API 配置 ==========
+
+SEARCH_API_DEFAULTS = {
+    "search_strategy": "auto",      # "auto" | "指定"
+    "search_provider": "builtin",   # "builtin" | "serpapi" | "tavily" | "bing"
+    "serpapi_key": "",
+    "tavily_key": "",
+    "bing_key": "",
+}
+
+@router.get("/api/search/config")
+async def get_search_config():
+    result = {}
+    for key, default in SEARCH_API_DEFAULTS.items():
+        raw = await db.get_config(f"search_{key}", None)
+        result[key] = raw if raw is not None else default
+    return result
+
+class SearchConfigReq(BaseModel):
+    search_strategy: str | None = None
+    search_provider: str | None = None
+    serpapi_key: str | None = None
+    tavily_key: str | None = None
+    bing_key: str | None = None
+
+@router.post("/api/search/config")
+async def set_search_config(req: SearchConfigReq):
+    updates = req.model_dump(exclude_none=True)
+    for key, value in updates.items():
+        if key in SEARCH_API_DEFAULTS:
+            await db.set_config(f"search_{key}", str(value))
     return {"status": "ok"}

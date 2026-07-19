@@ -3,4 +3,9 @@
   --highlight: #7c5cfc;
   --text-primary: #e8e8f0;
   --text-secondary: #8888aa;
+  --border: #2a2a40;
+  --font-family: 'Noto Sans SC', sans-serif;
+  --font-size-base: 14px;
+  --font-size-small: 12px;
+  --line-height: 1.6;
 }

@@ -184,39 +184,101 @@ async def delete_pack(pack_id: str):
 
 @router.get("/api/themepacks/{pack_id}/export")
 async def export_pack(pack_id: str):
+    from api.log_api import log_info, log_error
     pack_dir = pack_manager.get_pack_dir(pack_id)
     if not pack_dir.exists():
         raise HTTPException(404, f"Pack '{pack_id}' not found")
-    buffer = io.BytesIO()
-    with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
-        for file_path in pack_dir.rglob('*'):
-            if file_path.is_file():
-                zf.write(file_path, file_path.relative_to(pack_dir))
-    buffer.seek(0)
-    return StreamingResponse(buffer, media_type='application/zip',
-        headers={'Content-Disposition': f'attachment; filename="{pack_id}.zip"'})
+    try:
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
+            for file_path in pack_dir.rglob('*'):
+                if file_path.is_file():
+                    arcname = file_path.relative_to(pack_dir).as_posix()
+                    zf.write(file_path, arcname)
+        buffer.seek(0)
+        size = buffer.getbuffer().nbytes
+        log_info("Themepack", f"导出成功: {pack_id}, 大小: {size} bytes")
+        from fastapi.responses import Response
+        return Response(
+            content=buffer.getvalue(),
+            media_type='application/zip',
+            headers={
+                'Content-Disposition': 'attachment; filename="themepack.zip"',
+            }
+        )
+    except Exception as e:
+        log_error("Themepack", f"导出失败: {e}")
+        raise HTTPException(500, f"导出失败: {e}")
 
 @router.post("/api/themepacks/import")
 async def import_pack(file: UploadFile = File(...)):
-    import tempfile, shutil
+    import shutil
+    from api.log_api import log_info, log_error
+
     content = await file.read()
-    buffer = io.BytesIO(content)
-    with zipfile.ZipFile(buffer, 'r') as zf:
-        # 找到 pack.json 来确定 id
-        pack_json_name = None
-        for name in zf.namelist():
-            if name.endswith('pack.json'):
-                pack_json_name = name
-                break
-        if not pack_json_name:
-            raise HTTPException(400, "Invalid theme pack: no pack.json found")
-        pack_data = json.loads(zf.read(pack_json_name))
-        pack_id = pack_data.get('id', 'imported_' + str(int(__import__('time').time())))
-        pack_dir = pack_manager.get_pack_dir(pack_id)
-        if pack_dir.exists():
-            shutil.rmtree(pack_dir)
-        zf.extractall(pack_dir)
-    return {"status": "ok", "id": pack_id}
+    log_info("Themepack", f"导入请求: file={file.filename}, size={len(content)}")
+
+    try:
+        buffer = io.BytesIO(content)
+        with zipfile.ZipFile(buffer, 'r') as zf:
+            # 找到 pack.json 来确定 id
+            pack_json_name = None
+            for name in zf.namelist():
+                # 处理可能的嵌套目录
+                if name.endswith('pack.json') or name.endswith('/pack.json'):
+                    pack_json_name = name
+                    break
+            if not pack_json_name:
+                raise HTTPException(400, "无效的主题包：找不到 pack.json")
+
+            pack_data = json.loads(zf.read(pack_json_name))
+            pack_id = pack_data.get('id', 'imported_' + str(int(__import__('time').time())))
+            pack_dir = pack_manager.get_pack_dir(pack_id)
+
+            # 清理旧目录
+            if pack_dir.exists():
+                shutil.rmtree(pack_dir)
+            pack_dir.mkdir(parents=True, exist_ok=True)
+
+            # 解压，处理可能的嵌套目录
+            for member in zf.namelist():
+                # 获取文件在 zip 中的实际路径
+                # 如果 pack.json 在子目录里，需要去掉前缀
+                if pack_json_name.count('/') > 0:
+                    prefix = pack_json_name.rsplit('/', 1)[0] + '/'
+                    if member.startswith(prefix):
+                        arcname = member[len(prefix):]
+                    else:
+                        arcname = member
+                else:
+                    arcname = member
+
+                if not arcname:  # 跳过目录条目
+                    continue
+
+                target = pack_dir / arcname
+                if member.endswith('/'):
+                    target.mkdir(parents=True, exist_ok=True)
+                else:
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    with zf.open(member) as src, open(target, 'wb') as dst:
+                        dst.write(src.read())
+
+            # 验证解压结果
+            if not (pack_dir / "pack.json").exists():
+                log_error("Themepack", f"导入后找不到 pack.json: {pack_dir}")
+                raise HTTPException(500, "导入失败：解压后找不到 pack.json")
+
+            log_info("Themepack", f"导入成功: {pack_id}")
+            return {"status": "ok", "id": pack_id, "name": pack_data.get('name', pack_id)}
+
+    except HTTPException:
+        raise
+    except zipfile.BadZipFile:
+        raise HTTPException(400, "无效的 ZIP 文件")
+    except Exception as e:
+        log_error("Themepack", f"导入失败: {e}")
+        raise HTTPException(500, f"导入失败: {e}")
 
 @router.post("/api/themepacks/{pack_id}/apply")
 async def apply_pack_to_sessions(pack_id: str):

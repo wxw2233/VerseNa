@@ -9,7 +9,8 @@ class OpenAIAdapter(BaseModelAdapter):
         self.base_url = base_url.rstrip("/")
         self.model_name = model_name
 
-    async def chat(self, messages: list[dict], tools: list = None, stream: bool = True) -> AsyncGenerator[ModelResponse, None]:
+    async def chat(self, messages: list[dict], tools: list = None, stream: bool = True,
+                   temperature: float = None, top_p: float = None, max_tokens: int = None) -> AsyncGenerator[ModelResponse, None]:
         payload = {
             "model": self.model_name,
             "messages": messages,
@@ -17,6 +18,12 @@ class OpenAIAdapter(BaseModelAdapter):
         }
         if tools:
             payload["tools"] = tools
+        if temperature is not None:
+            payload["temperature"] = temperature
+        if top_p is not None:
+            payload["top_p"] = top_p
+        if max_tokens is not None:
+            payload["max_tokens"] = max_tokens
 
         headers = {
             "Authorization": f"Bearer {self.api_key}",

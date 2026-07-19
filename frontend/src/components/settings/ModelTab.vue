@@ -118,6 +118,58 @@
       <button class="btn-save-roles" @click="saveRoles">保存角色分配</button>
     </div>
 
+    <!-- 分隔线 -->
+    <hr class="divider" />
+
+    <!-- 搜索 API 配置 -->
+    <div class="search-section">
+      <h3>🔍 搜索 API</h3>
+      <p class="roles-hint">配置 Agent 联网搜索时使用的搜索引擎。支持 API 优先，无 Key 时回退到内置爬取。</p>
+
+      <div class="search-strategy">
+        <label class="strategy-label">搜索策略</label>
+        <div class="strategy-options">
+          <label class="radio-card" :class="{ active: searchConfig.search_strategy === 'auto' }">
+            <input type="radio" v-model="searchConfig.search_strategy" value="auto" />
+            <span class="radio-title">🤖 自动</span>
+            <span class="radio-desc">Agent 自行判断是否需要搜索</span>
+          </label>
+          <label class="radio-card" :class="{ active: searchConfig.search_strategy === '指定' }">
+            <input type="radio" v-model="searchConfig.search_strategy" value="指定" />
+            <span class="radio-title">📌 指定</span>
+            <span class="radio-desc">固定使用指定的搜索引擎</span>
+          </label>
+        </div>
+      </div>
+
+      <div v-if="searchConfig.search_strategy === '指定'" class="search-provider-select">
+        <label class="section-label">搜索引擎</label>
+        <div class="provider-radio-group">
+          <label v-for="sp in searchProviders" :key="sp.id" class="provider-radio" :class="{ active: searchConfig.search_provider === sp.id }">
+            <input type="radio" v-model="searchConfig.search_provider" :value="sp.id" />
+            <span>{{ sp.icon }} {{ sp.name }}</span>
+          </label>
+        </div>
+      </div>
+
+      <div class="search-keys">
+        <div class="form-row">
+          <label>SerpAPI Key <span class="hint-inline">（Google 搜索）</span></label>
+          <input v-model="searchConfig.serpapi_key" type="password" placeholder="留空则不使用" />
+        </div>
+        <div class="form-row">
+          <label>Tavily Key <span class="hint-inline">（AI 优化搜索）</span></label>
+          <input v-model="searchConfig.tavily_key" type="password" placeholder="留空则不使用" />
+        </div>
+        <div class="form-row">
+          <label>Bing Key <span class="hint-inline">（Azure 认知搜索）</span></label>
+          <input v-model="searchConfig.bing_key" type="password" placeholder="留空则不使用" />
+        </div>
+      </div>
+
+      <button class="btn-save-roles" @click="saveSearchConfig">保存搜索配置</button>
+    </div>
+
     <!-- 添加自定义提供商弹窗 -->
     <div v-if="showAddCustom" class="modal-overlay" @click.self="showAddCustom = false">
       <div class="modal">
@@ -183,6 +235,21 @@ const roleDefs = [
   { key: 'image_gen', icon: '🎨', label: '图片生成', desc: '根据文字生成图片', modelType: 'image' },
   { key: 'tts', icon: '🎤', label: '语音合成', desc: '将文字转为语音，支持音色克隆', modelType: 'tts' },
 ]
+
+const searchProviders = [
+  { id: 'builtin', icon: '🕷', name: '内置爬取' },
+  { id: 'serpapi', icon: '🔍', name: 'SerpAPI' },
+  { id: 'tavily', icon: '🤖', name: 'Tavily' },
+  { id: 'bing', icon: '🅱', name: 'Bing API' },
+]
+
+const searchConfig = reactive({
+  search_strategy: 'auto',
+  search_provider: 'builtin',
+  serpapi_key: '',
+  tavily_key: '',
+  bing_key: '',
+})
 
 const currentProvider = computed(() =>
   providers.value.find(p => p.id === activeProvider.value)
@@ -436,9 +503,31 @@ watch(activeProvider, () => {
   fillProviderForm()
 })
 
+async function loadSearchConfig() {
+  try {
+    const resp = await fetch('/api/search/config')
+    const data = await resp.json()
+    Object.assign(searchConfig, data)
+  } catch {}
+}
+
+async function saveSearchConfig() {
+  try {
+    await fetch('/api/search/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(searchConfig),
+    })
+    toast.success('搜索配置已保存')
+  } catch (e) {
+    toast.error('保存失败: ' + e.message)
+  }
+}
+
 onMounted(async () => {
   await loadProviders()
   await loadActiveModels()
+  await loadSearchConfig()
   if (providers.value.length > 0) {
     activeProvider.value = providers.value[0].id
     fillProviderForm()
@@ -860,5 +949,87 @@ onMounted(async () => {
 }
 .btn-cancel:hover {
   background: rgba(20, 20, 40, 0.60);
+}
+
+/* Search section */
+.search-section h3 {
+  font-size: 16px;
+  margin-bottom: 6px;
+}
+.search-strategy {
+  margin-bottom: 16px;
+}
+.strategy-label {
+  display: block;
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+.strategy-options {
+  display: flex;
+  gap: 10px;
+}
+.radio-card {
+  flex: 1;
+  padding: 12px 16px;
+  background: rgba(20, 20, 40, 0.45);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.15s;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.radio-card:hover {
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.2);
+}
+.radio-card.active {
+  box-shadow: 0 0 0 1px var(--primary);
+  background: rgba(124, 92, 252, 0.08);
+}
+.radio-card input { display: none; }
+.radio-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.radio-desc {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.search-provider-select {
+  margin-bottom: 16px;
+}
+.provider-radio-group {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.provider-radio {
+  padding: 6px 14px;
+  background: rgba(20, 20, 40, 0.60);
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.15);
+  border-radius: 16px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-secondary);
+  transition: all 0.15s;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.provider-radio:hover {
+  box-shadow: 0 0 0 1px var(--primary);
+  color: var(--text-primary);
+}
+.provider-radio.active {
+  background: rgba(124, 92, 252, 0.15);
+  box-shadow: 0 0 0 1px var(--primary);
+  color: var(--primary);
+}
+.provider-radio input { display: none; }
+.search-keys {
+  margin-bottom: 16px;
 }
 </style>

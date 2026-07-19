@@ -61,6 +61,18 @@
             <input type="range" min="0" max="1" step="0.1" v-model.number="editingPack.character.emotion_weights[key]" />
             <span class="slider-val">{{ (editingPack.character.emotion_weights[key] ?? 0).toFixed(1) }}</span>
           </div>
+          <div class="slider-row" style="margin-top: 8px;">
+            <span class="slider-label">🌡️温度</span>
+            <input type="range" min="0" max="2" step="0.1" v-model.number="editingPack.character.temperature" />
+            <span class="slider-val">{{ (editingPack.character.temperature ?? 0.8).toFixed(1) }}</span>
+            <span class="slider-hint">越低越确定，越高越随机</span>
+          </div>
+          <div class="slider-row">
+            <span class="slider-label">🎯Top-p</span>
+            <input type="range" min="0.1" max="1" step="0.05" v-model.number="editingPack.character.top_p" />
+            <span class="slider-val">{{ (editingPack.character.top_p ?? 0.9).toFixed(2) }}</span>
+            <span class="slider-hint">核采样阈值，控制候选范围</span>
+          </div>
         </fieldset>
         <fieldset class="form-group">
           <legend>说话风格</legend>
@@ -229,6 +241,8 @@ function makeEmptyPack() {
       prompt: '',
       emotion_weights: { cheerful: 0.5, shy: 0.2, curious: 0.5, angry: 0.1, sad: 0.1 },
       speech_style: { tone: '友好', catchphrase: '', emoji_frequency: 'medium', formality: 'casual' },
+      temperature: 0.8,
+      top_p: 0.9,
     },
     theme: {
       name: '',
@@ -283,6 +297,8 @@ function normalizePack(data) {
       prompt: data.character?.prompt || '',
       emotion_weights: { ...empty.character.emotion_weights, ...(data.character?.emotion_weights || {}) },
       speech_style: { ...empty.character.speech_style, ...(data.character?.speech_style || {}) },
+      temperature: data.character?.temperature ?? 0.8,
+      top_p: data.character?.top_p ?? 0.9,
     },
     theme: {
       name: data.theme?.name || '',
@@ -631,9 +647,11 @@ legend {
   margin-bottom: 6px;
 }
 .slider-label {
-  width: 40px;
+  width: 56px;
   font-size: 13px;
   color: var(--text-secondary);
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 .slider-row input[type="range"] {
   flex: 1;
@@ -644,6 +662,13 @@ legend {
   width: 28px;
   font-size: 13px;
   text-align: right;
+}
+.slider-hint {
+  font-size: 11px;
+  color: var(--text-secondary);
+  opacity: 0.7;
+  white-space: nowrap;
+  min-width: 0;
 }
 
 /* Buttons */

@@ -75,6 +75,9 @@ app.include_router(log_router)
 from api.tts_api import router as tts_router
 app.include_router(tts_router)
 
+from api.skill_api import router as skill_router
+app.include_router(skill_router)
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host=settings.HOST, port=settings.PORT, reload=False)

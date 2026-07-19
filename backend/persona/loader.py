@@ -11,6 +11,8 @@ class PersonaData:
         self.emotion_weights = config.get("emotion_weights", {})
         self.speech_style = config.get("speech_style", {})
         self.theme_binding = config.get("theme_binding", "default")
+        self.temperature = config.get("temperature", 0.8)
+        self.top_p = config.get("top_p", 0.9)
 
 class PersonaLoader:
     @staticmethod
