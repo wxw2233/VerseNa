@@ -1,6 +1,7 @@
 :root {
   /* 颜色（可调） */
   --primary: #7c5cfc;
+  --highlight: #7c5cfc;
   --text-primary: #e8e8f0;
   --text-secondary: #a0a0bb;
 
@@ -68,7 +69,7 @@ html, body {
 a { color: var(--primary); text-decoration: none; }
 
 /* 浮层元素：薄玻璃浮起感 */
-.floating, .bubble, .session-item, .tool-seg, .settings-card, textarea {
+.floating, .bubble, .tool-seg, .settings-card, textarea {
   border: 1px solid rgba(255, 255, 255, 0.12);
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.06);
 }
@@ -77,3 +78,50 @@ a { color: var(--primary); text-decoration: none; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.08); border-radius: 2px; }
 ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.18); }
+
+/* ============================================================
+   自适应亮度系统
+   data-brightness="dark"  → 默认暗底，亮边
+   data-brightness="light" → 亮底，加暗边保证对比
+   ============================================================ */
+
+:root {
+  /* 功能性 UI 边框（默认暗底） */
+  --ui-border: 0 0 0 1px rgba(255,255,255,0.10);
+  /* 气泡边框 */
+  --bubble-border: 0 0 0 1px rgba(255,255,255,0.06);
+  /* 文字光晕 */
+  --text-glow: 0 1px 3px rgba(0,0,0,0.25);
+}
+
+[data-brightness="light"] {
+  /* 亮底：双色对比边框（亮边 + 暗边，总有一侧可见） */
+  --ui-border: 0 0 0 1px rgba(255,255,255,0.20), 0 0 0 2px rgba(0,0,0,0.15);
+  --bubble-border: 0 0 0 1px rgba(0,0,0,0.10);
+  --text-glow: 0 1px 4px rgba(0,0,0,0.45);
+}
+
+/* 功能性 UI 使用自适应边框 */
+.top-bar,
+.input-bar,
+.session-item,
+.menu-item,
+.tab-btn,
+.sub-tab-btn,
+.btn-new,
+.btn-save,
+.btn-cancel,
+.btn-sm,
+.btn-action,
+.monitor-btn,
+.memory-filters button,
+.memory-add button {
+  box-shadow: var(--ui-border);
+}
+
+/* 气泡：微毛玻璃 + 轻描边 + 文字光晕 */
+.bubble {
+  backdrop-filter: blur(1px);
+  -webkit-backdrop-filter: blur(1px);
+  box-shadow: var(--bubble-border);
+}

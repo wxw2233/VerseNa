@@ -1,0 +1,11 @@
+:root {
+  --primary: #ff0000;
+  --highlight: #fb2d2d;
+  --text-primary: #ff0000;
+  --text-secondary: #ff0000;
+  --border: #2a2a40;
+  --font-family: 'Noto Sans SC', sans-serif;
+  --font-size-base: 14px;
+  --font-size-small: 12px;
+  --line-height: 1.6;
+}

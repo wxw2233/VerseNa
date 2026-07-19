@@ -125,6 +125,7 @@ async def update_pack(pack_id: str, req: PackUpdate):
         css_vars = []
         css_map = {
             "primary": "--primary",
+            "highlight": "--highlight",
             "textPrimary": "--text-primary",
             "textSecondary": "--text-secondary",
             "border": "--border",
@@ -238,6 +239,12 @@ async def apply_pack_to_sessions(pack_id: str):
             src = pack_dir / f
             if src.exists():
                 shutil.copy2(src, persona_dest / f)
+        # 重载 persona 配置
+        try:
+            from persona.manager import persona_manager
+            persona_manager.reload(persona_ref)
+        except Exception:
+            pass
     # 更新 theme
     if theme_ref:
         theme_dest = Path(__file__).parent.parent.parent / "themes" / theme_ref

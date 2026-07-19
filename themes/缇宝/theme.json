@@ -1,0 +1,15 @@
+{
+  "name": "",
+  "version": "1.0.0",
+  "colors": {
+    "primary": "#ff0000",
+    "highlight": "#fb2d2d",
+    "bgPrimary": "#0f0f1a",
+    "bgSecondary": "#1a1a2e",
+    "textPrimary": "#ff0000",
+    "textSecondary": "#ff0000",
+    "border": "#2a2a40",
+    "bubbleUser": "rgba(124,92,252,0.15)",
+    "bubbleAgent": "rgba(30,30,50,0.9)"
+  }
+}

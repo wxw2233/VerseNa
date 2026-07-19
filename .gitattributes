@@ -1,0 +1,46 @@
+# 统一换行符
+* text=auto
+
+# 文本文件：提交时转为 LF，检出时保持系统格式
+*.py text eol=lf
+*.js text eol=lf
+*.vue text eol=lf
+*.ts text eol=lf
+*.jsx text eol=lf
+*.tsx text eol=lf
+*.css text eol=lf
+*.scss text eol=lf
+*.html text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.toml text eol=lf
+*.ini text eol=lf
+*.cfg text eol=lf
+*.conf text eol=lf
+*.sh text eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# 二进制文件：不转换
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.svg text eol=lf
+*.mp3 binary
+*.wav binary
+*.m4a binary
+*.ogg binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.eot binary
+*.zip binary
+*.7z binary
+*.pdf binary
+*.db binary
+*.sqlite binary

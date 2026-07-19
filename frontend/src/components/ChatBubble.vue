@@ -3,7 +3,14 @@
     <div class="bubble" :class="msg.role">
       <!-- 旧消息兼容 -->
       <template v-if="!msg.segments">
-        <div class="text-seg" v-html="renderText(msg.content || '')"></div>
+        <div v-if="msg.image" class="image-msg">
+          <img :src="msg.image.dataUrl || msg.image.url" :alt="msg.image.filename" />
+        </div>
+        <div v-if="msg.file" class="file-msg">
+          <span class="file-icon">📄</span>
+          <span class="file-name">{{ msg.file.filename }}</span>
+        </div>
+        <div v-if="msg.content" class="text-seg" v-html="renderText(msg.content)"></div>
       </template>
 
       <!-- 新消息 segments 渲染 -->
@@ -19,7 +26,7 @@
           <div v-if="seg.type === 'text'" class="text-seg" v-html="renderText(seg.content)"></div>
 
           <!-- 工具段时间线节点 -->
-          <div v-if="seg.type === 'tool'" class="tool-seg" :data-status="seg.status">
+          <div v-if="seg.type === 'tool'" class="tool-seg" :data-status="seg.status" @click="seg.result_detail ? toggleExpand(seg.tool_call_id) : null">
             <div class="tool-header">
               <span class="tool-icon">{{ toolIcon(seg.tool_name) }}</span>
               <span class="tool-name">{{ seg.tool_name }}</span>
@@ -29,20 +36,14 @@
                 <span v-if="seg.status === 'done'">✅</span>
                 <span v-if="seg.status === 'error'">❌</span>
               </span>
+              <span v-if="seg.result_detail" class="tool-arrow" :class="{ open: expanded(seg.tool_call_id) }">▼</span>
+              <button v-if="seg.status === 'error'" class="tool-retry" @click.stop="$emit('retry')">重试</button>
             </div>
-            <div class="tool-summary" v-if="seg.result_summary">{{ seg.result_summary }}</div>
+            <div class="tool-summary" v-if="seg.result_summary && !expanded(seg.tool_call_id)">{{ seg.result_summary }}</div>
             <div class="tool-detail" v-if="expanded(seg.tool_call_id)">
               <pre v-if="seg.tool_name === 'code_exec'"><code>{{ seg.result_detail }}</code></pre>
               <div v-else-if="seg.tool_name === 'web_search'" v-html="formatSearchResults(seg.result_detail)"></div>
               <pre v-else>{{ seg.result_detail }}</pre>
-            </div>
-            <div class="tool-actions">
-              <button class="tool-expand" @click="toggleExpand(seg.tool_call_id)" v-if="seg.result_detail">
-                {{ expanded(seg.tool_call_id) ? '收起' : '展开详情' }}
-              </button>
-              <button class="tool-retry" v-if="seg.status === 'error'" @click="$emit('retry')">
-                重试
-              </button>
             </div>
           </div>
         </template>
@@ -51,12 +52,25 @@
       <span v-if="msg.emoji" class="emoji">{{ msg.emoji }}</span>
       <span v-if="msg.streaming" class="streaming-indicator">●</span>
     </div>
+    <!-- TTS 播放按钮（仅 assistant 消息） -->
+    <button
+      v-if="msg.role === 'assistant' && !msg.streaming && hasTextContent"
+      class="tts-btn"
+      :class="{ playing: isPlaying }"
+      @click="speakText"
+      title="语音播放"
+    >{{ isPlaying ? '🔊' : '🔈' }}</button>
   </div>
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { ref, computed } from 'vue'
 import { marked } from 'marked'
+import { useSessionStore } from '../stores/session'
+import { useThemeStore } from '../stores/theme'
+
+const sessionStore = useSessionStore()
+const themeStore = useThemeStore()
 
 // 配置 marked：安全渲染，不执行脚本
 marked.setOptions({
@@ -111,6 +125,82 @@ function summarizeArgs(args) {
   if (args.action) return args.action
   return JSON.stringify(args).slice(0, 60)
 }
+
+// --- TTS 语音播放 ---
+const isPlaying = ref(false)
+let audioEl = null
+
+const hasTextContent = computed(() => {
+  if (!props.msg.segments) return !!props.msg.content
+  return props.msg.segments.some(s => s.type === 'text' && s.content?.trim())
+})
+
+function stripActions(text) {
+  return text
+    .replace(/\*[^*]+\*/g, '')
+    .replace(/（[^）]+）/g, '')
+    .replace(/\([^)]+\)/g, '')
+    .replace(/【[^】]+】/g, '')
+    .replace(/\n{2,}/g, '\n')
+    .trim()
+}
+
+function getPlainText() {
+  if (!props.msg.segments) return props.msg.content || ''
+  return stripActions(
+    props.msg.segments
+      .filter(s => s.type === 'text')
+      .map(s => s.content)
+      .join('')
+      .replace(/<[^>]+>/g, '')
+  )
+}
+
+async function speakText() {
+  const text = getPlainText()
+  if (!text) return
+
+  // 如果正在播放，停止
+  if (isPlaying.value && audioEl) {
+    audioEl.pause()
+    audioEl = null
+    isPlaying.value = false
+    return
+  }
+
+  try {
+    isPlaying.value = true
+    const currentSession = sessionStore.currentSessionId
+    const session = sessionStore.sessions.find(s => s.id === currentSession)
+    const packId = session?.theme_pack_id || themeStore.current || ''
+
+    const resp = await fetch('/api/tts/speak', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: text.slice(0, 2000), pack_id: packId })
+    })
+
+    if (!resp.ok) {
+      isPlaying.value = false
+      return
+    }
+
+    const blob = await resp.blob()
+    const url = URL.createObjectURL(blob)
+    audioEl = new Audio(url)
+    audioEl.onended = () => {
+      isPlaying.value = false
+      URL.revokeObjectURL(url)
+    }
+    audioEl.onerror = () => {
+      isPlaying.value = false
+      URL.revokeObjectURL(url)
+    }
+    audioEl.play()
+  } catch {
+    isPlaying.value = false
+  }
+}
 </script>
 
 <style scoped>
@@ -118,33 +208,69 @@ function summarizeArgs(args) {
 .bubble-row.user { justify-content: flex-end; }
 .bubble-row.assistant { justify-content: flex-start; }
 
-/* L3: Chat bubbles — 6px blur, 0.55 opacity, perceptual border, inner glow */
+/* L3: Chat bubbles — 微毛玻璃 + 自适应描边 */
 .bubble {
   max-width: 80%;
   padding: var(--bubble-padding);
   position: relative;
   border-radius: var(--radius);
-  background: transparent;
-  border: 1px solid rgba(255,255,255,0.18);
-  box-shadow: 0 3px 14px rgba(0,0,0,0.12);
-   
-
-  box-shadow: var(--border-subtle), var(--glow-inner);
+  background: rgba(10, 10, 24, 0.60);
+  border: none;
+  box-shadow: var(--bubble-border);
+  backdrop-filter: blur(1px);
+  -webkit-backdrop-filter: blur(1px);
 }
 
 /* Asymmetric bottom radius: user bubble bottom-right 8px */
 .bubble.user {
-  background: rgba(20, 20, 40, 0.25);
+  background: rgba(20, 20, 40, 0.65);
   border-bottom-right-radius: 8px;
 }
 
 /* Asymmetric bottom radius: assistant bubble bottom-left 8px */
 .bubble.assistant {
-  background: rgba(20, 20, 40, 0.25);
+  background: rgba(20, 20, 40, 0.60);
   border-bottom-left-radius: 8px;
 }
 
-.text-seg { text-shadow: 0 1px 2px rgba(0,0,0,0.15); line-height: var(--line-height); font-size: var(--font-size-base); word-break: break-word; }
+.text-seg { text-shadow: var(--text-glow); line-height: var(--line-height); font-size: var(--font-size-base); word-break: break-word; }
+
+/* 图片消息 */
+.image-msg {
+  margin-bottom: 6px;
+}
+.image-msg img {
+  max-width: 300px;
+  max-height: 300px;
+  border-radius: 8px;
+  object-fit: contain;
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.10);
+  cursor: pointer;
+}
+.image-msg img:hover {
+  filter: brightness(1.05);
+}
+
+/* 文件消息 */
+.file-msg {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: rgba(255,255,255,0.06);
+  border-radius: 8px;
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.10);
+  margin-bottom: 6px;
+  max-width: 260px;
+}
+.file-icon { font-size: 20px; flex-shrink: 0; }
+.file-name {
+  font-size: 13px;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .text-seg :deep(pre) { background: rgba(0,0,0,0.2); padding: 8px; border-radius: 4px; overflow-x: auto; margin: 8px 0; font-size: 12px; }
 .text-seg :deep(code) { background: rgba(0,0,0,0.15); padding: 1px 4px; border-radius: 3px; font-size: 0.9em; }
 .text-seg :deep(a) { color: var(--primary); text-decoration: none; }
@@ -170,15 +296,16 @@ function summarizeArgs(args) {
 .tool-toggle-all { background: none; border: none; color: var(--text-secondary); cursor: pointer; font-size: 11px; }
 
 .tool-seg {
-  margin: 6px 0; padding: 8px 12px;
+  margin: 4px 0; padding: 5px 10px;
   background: rgba(124, 92, 252, 0.06);
   box-shadow: 0 0 0 1px rgba(124, 92, 252, 0.12);
-  border-left: 3px solid var(--primary);
-  border-radius: 0 8px 8px 0;
-  font-size: 13px; position: relative;
-   
-
+  border-left: 2px solid var(--primary);
+  border-radius: 0 6px 6px 0;
+  font-size: 12px; position: relative;
+  cursor: default;
+  max-width: 100%;
 }
+.tool-seg:has(.tool-arrow) { cursor: pointer; }
 /* 连续 tool 段连接线 */
 .tool-seg + .tool-seg::before {
   content: ''; position: absolute;
@@ -194,17 +321,24 @@ function summarizeArgs(args) {
 .tool-seg[data-status="error"] { border-left-color: #ef4444; background: rgba(239, 68, 68, 0.06); }
 .tool-seg[data-status="error"] + .tool-seg::before { background: #ef4444; }
 
-.tool-header { display: flex; align-items: center; gap: 6px; }
-.tool-icon { font-size: 14px; }
-.tool-name { font-weight: 600; color: var(--primary); font-size: 12px; }
-.tool-args { color: var(--text-secondary); font-size: 11px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 4px; background: rgba(0,0,0,0.1); border-radius: 4px; }
-.tool-status { flex-shrink: 0; font-size: 12px; }
-.tool-summary { margin-top: 4px; color: var(--text-secondary); font-size: 12px; padding: 2px 6px; background: rgba(0,0,0,0.05); border-radius: 4px; }
-.tool-detail { margin-top: 8px; padding: 8px; background: rgba(0,0,0,0.2); box-shadow: 0 0 0 1px rgba(124,92,252,0.08); border-radius: 6px; font-size: 12px; max-height: 200px; overflow-y: auto; }
+.tool-header { display: flex; align-items: center; gap: 4px; flex-wrap: nowrap; }
+.tool-icon { font-size: 12px; flex-shrink: 0; }
+.tool-name { font-weight: 600; color: var(--primary); font-size: 11px; flex-shrink: 0; }
+.tool-args { color: var(--text-secondary); font-size: 11px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool-status { flex-shrink: 0; font-size: 11px; }
+.tool-arrow {
+  flex-shrink: 0;
+  font-size: 9px;
+  color: var(--text-secondary);
+  transition: transform 0.2s;
+  cursor: pointer;
+  padding: 0 2px;
+}
+.tool-arrow.open { transform: rotate(180deg); }
+.tool-summary { margin-top: 3px; color: var(--text-secondary); font-size: 11px; padding: 2px 6px; background: rgba(0,0,0,0.05); border-radius: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool-detail { margin-top: 6px; padding: 8px; background: rgba(0,0,0,0.2); box-shadow: 0 0 0 1px rgba(124,92,252,0.08); border-radius: 6px; font-size: 11px; max-height: 200px; overflow-y: auto; }
 .tool-detail pre { margin: 0; white-space: pre-wrap; word-break: break-all; }
-.tool-actions { margin-top: 4px; display: flex; gap: 8px; }
-.tool-expand, .tool-retry { background: none; border: none; color: var(--primary); cursor: pointer; font-size: 12px; }
-.tool-retry { color: #ef4444; }
+.tool-retry { background: none; border: none; color: #ef4444; cursor: pointer; font-size: 11px; flex-shrink: 0; padding: 0 4px; }
 .search-result { padding: 2px 0; }
 .search-result a { color: var(--primary); text-decoration: none; }
 .search-result a:hover { text-decoration: underline; }
@@ -214,4 +348,34 @@ function summarizeArgs(args) {
 .streaming-indicator { animation: blink 1s infinite; color: var(--primary); margin-left: 4px; }
 @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
 .emoji { font-size: 20px; position: absolute; bottom: -4px; right: -4px; }
+
+/* TTS 播放按钮 */
+.tts-btn {
+  margin-top: 4px;
+  padding: 3px 8px;
+  background: transparent;
+  border: none;
+  border-radius: 12px;
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--text-secondary);
+  opacity: 0.5;
+  transition: all 0.2s;
+  align-self: flex-start;
+  box-shadow: none;
+}
+.tts-btn:hover {
+  opacity: 1;
+  color: var(--primary);
+  background: rgba(124, 92, 252, 0.1);
+}
+.tts-btn.playing {
+  opacity: 1;
+  color: var(--primary);
+  animation: pulse-tts 1.5s infinite;
+}
+@keyframes pulse-tts {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
 </style>

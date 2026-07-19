@@ -4,10 +4,16 @@ import { ref } from 'vue'
 export const useSessionStore = defineStore('session', () => {
   const sessions = ref([])
   const currentSessionId = ref('default')
+  const loading = ref(false)
 
   async function fetchSessions() {
-    const resp = await fetch('/api/sessions')
-    sessions.value = await resp.json()
+    loading.value = true
+    try {
+      const resp = await fetch('/api/sessions')
+      sessions.value = await resp.json()
+    } finally {
+      loading.value = false
+    }
   }
 
   async function createSession() {
@@ -30,5 +36,5 @@ export const useSessionStore = defineStore('session', () => {
     currentSessionId.value = id
   }
 
-  return { sessions, currentSessionId, fetchSessions, createSession, deleteSession, switchSession }
+  return { sessions, currentSessionId, loading, fetchSessions, createSession, deleteSession, switchSession }
 })

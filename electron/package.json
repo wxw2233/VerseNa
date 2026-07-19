@@ -1,11 +1,96 @@
 {
-  "name": "ciyuan-persona-desktop",
-  "version": "0.1.0",
+  "name": "ciyuan-persona",
+  "version": "1.0.0",
+  "description": "次元人格 - AI 角色扮演聊天桌面客户端",
   "main": "main.js",
+  "author": "wxw",
+  "license": "MIT",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "dev": "cross-env NODE_ENV=development electron .",
+    "build": "electron-builder --win",
+    "build:dir": "electron-builder --win --dir"
+  },
+  "build": {
+    "appId": "com.ciyuan.persona",
+    "productName": "次元人格",
+    "directories": {
+      "output": "C:\\Users\\wxw\\Desktop\\Build_test"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "icon.png",
+      "../frontend/dist/**/*",
+      "../backend/**/*.py",
+      "!../backend/data/**",
+      "!../backend/.venv/**",
+      "!../backend/__pycache__/**",
+      "!../backend/**/__pycache__/**",
+      "!../backend/tests/**"
+    ],
+    "extraResources": [
+      {
+        "from": "../backend",
+        "to": "backend",
+        "filter": [
+          "**/*.py",
+          "**/*.json",
+          "**/*.txt",
+          "**/*.md"
+        ]
+      },
+      {
+        "from": "../frontend/dist",
+        "to": "frontend/dist",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "../themepacks",
+        "to": "themepacks",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "../themes",
+        "to": "themes",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "../personas",
+        "to": "personas",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "次元人格"
+    }
   },
   "devDependencies": {
-    "electron": "^32.0.0"
+    "cross-env": "^7.0.3",
+    "electron": "^32.3.3",
+    "electron-builder": "^25.0.0"
   }
 }

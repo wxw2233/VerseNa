@@ -2,18 +2,26 @@
   <div class="chat-view">
     <SessionList />
     <div class="chat-main">
-
-      <div class="chat-header">
-        <span class="chat-persona-name">🎭 {{ personaStore.current || "default" }}</span>
-      </div>
-      <div class="messages" ref="messagesRef">
-        <ChatBubble v-for="(msg, i) in store.messages" :key="i" :msg="msg" />
-        <div v-if="store.messages.length === 0" class="empty">
-          <p>✨ 次元人格 ✨</p>
-          <p class="sub">点击「+ 新对话」开始聊天</p>
+      <Transition name="chat-switch" mode="out-in">
+        <div class="messages" ref="messagesRef" :key="sessionStore.currentSessionId">
+          <ChatBubble
+            v-for="(msg, i) in store.messages"
+            :key="i"
+            :msg="msg"
+            class="msg-enter"
+            :style="{ animationDelay: Math.min(i * 40, 300) + 'ms' }"
+          />
+          <div v-if="store.messages.length === 0" class="empty">
+            <p>✨ 次元人格 ✨</p>
+            <p class="sub">点击「+ 新对话」开始聊天</p>
+          </div>
         </div>
-      </div>
-      <ChatInput @send="handleSend" />
+      </Transition>
+      <ChatInput
+        @send="handleSend"
+        :auto-tts="autoTTS"
+        @toggle-tts="autoTTS = !autoTTS; localStorage.setItem('auto-tts', autoTTS)"
+      />
     </div>
 
     <!-- Confirm Dialog -->
@@ -42,6 +50,7 @@
 
 <script setup>
 import { ref, reactive, computed, nextTick, onMounted, watch } from 'vue'
+import { useToast } from '../composables/useToast'
 import { useChatStore } from '../stores/chat'
 import { useWebSocket } from '../composables/useWebSocket'
 import { usePersonaStore } from '../stores/persona'
@@ -56,6 +65,7 @@ const personaStore = usePersonaStore()
 const sessionStore = useSessionStore()
 const themeStore = useThemeStore()
 const messagesRef = ref(null)
+const toast = useToast()
 const { connect, send, onMessage, ws } = useWebSocket()
 
 const confirmDialog = reactive({
@@ -70,16 +80,29 @@ const confirmDialog = reactive({
   dir_count: undefined
 })
 
+// 自动 TTS 开关
+const autoTTS = ref(localStorage.getItem('auto-tts') === 'true')
+let ttsAudio = null
 
-function scrollToBottom() {
+
+
+function scrollToBottom(smooth = false) {
   nextTick(() => {
     if (messagesRef.value) {
-      messagesRef.value.scrollTop = messagesRef.value.scrollHeight
+      messagesRef.value.scrollTo({
+        top: messagesRef.value.scrollHeight,
+        behavior: smooth ? 'smooth' : 'instant',
+      })
     }
   })
 }
 
 watch(() => store.messages.length, () => scrollToBottom())
+
+// 会话切换时平滑滚动到底部
+watch(() => sessionStore.currentSessionId, () => {
+  nextTick(() => scrollToBottom(true))
+})
 
 onMounted(() => {
   connect()
@@ -108,6 +131,10 @@ onMounted(() => {
       autoTitleIfNeeded()
       // 保存展开状态
       saveToolExpanded()
+      // 自动 TTS
+      if (autoTTS.value) {
+        autoSpeakLast()
+      }
     } else if (msg.type === 'error') {
       store.handleError(msg.content || msg.message || '未知错误')
     }
@@ -132,15 +159,117 @@ function onConfirm(confirmed) {
 }
 
 function handleSend(content) {
-  store.addUserMessage(content)
-  store.isStreaming = true
-  scrollToBottom()
-  send({
-    session_id: sessionStore.currentSessionId,
-    content,
-    persona: personaStore.current,
-    system_prompt: ''
-  })
+  if (typeof content === 'object' && content.image) {
+    store.messages.push({
+      role: 'user',
+      content: content.text || '',
+      image: content.image,
+      streaming: false,
+    })
+    store.isStreaming = true
+    scrollToBottom()
+    const msgContent = content.text
+      ? content.text + '\n[图片已发送]'
+      : '[图片已发送]'
+    send({
+      session_id: sessionStore.currentSessionId,
+      content: msgContent,
+      persona: personaStore.current,
+      system_prompt: '',
+      image_url: content.image.dataUrl,
+    })
+  } else if (typeof content === 'object' && content.file) {
+    // 文件附件
+    store.messages.push({
+      role: 'user',
+      content: content.text || '',
+      file: content.file,
+      streaming: false,
+    })
+    store.isStreaming = true
+    scrollToBottom()
+    const msgContent = (content.text ? content.text + '\n' : '') +
+      `[文件: ${content.file.filename}]\n${content.file.full_text || content.file.text_preview || ''}`
+    send({
+      session_id: sessionStore.currentSessionId,
+      content: msgContent,
+      persona: personaStore.current,
+      system_prompt: '',
+    })
+  } else {
+    store.addUserMessage(content)
+    store.isStreaming = true
+    scrollToBottom()
+    send({
+      session_id: sessionStore.currentSessionId,
+      content,
+      persona: personaStore.current,
+      system_prompt: ''
+    })
+  }
+}
+
+function stripActions(text) {
+  // 过滤掉动作描述，只保留对话内容
+  return text
+    .replace(/\*[^*]+\*/g, '')           // *动作*
+    .replace(/（[^）]+）/g, '')            // （动作）
+    .replace(/\([^)]+\)/g, '')           // (动作)
+    .replace(/【[^】]+】/g, '')            // 【动作】
+    .replace(/「[^」]*?(?:笑|叹|摇头|点头|眨眼|耸肩|轻声|低声|小声|大喊|尖叫|哭|叹气|沉默|沉默了|顿了顿|想了想|歪头|托腮|摊手|耸肩|鞠躬|行礼|跪|坐|站|走|跑|跳|飞|转|看|望|盯|瞪|闭|睁|摸|碰|推|拉|打|踢|拍|挥|举|放|拿|递|接|抱|握|靠|躺|蹲|趴)[^」]*?」/g, '')
+    .replace(/\n{2,}/g, '\n')
+    .trim()
+}
+
+async function autoSpeakLast() {
+  const msgs = store.messages
+  const last = msgs[msgs.length - 1]
+  if (!last || last.role !== 'assistant') return
+  let text = ''
+  if (last.segments) {
+    text = last.segments.filter(s => s.type === 'text').map(s => s.content).join('')
+  } else {
+    text = last.content || ''
+  }
+  text = text.replace(/<[^>]+>/g, '')
+  text = stripActions(text)
+  if (!text || text.length < 2) return
+
+  try {
+    const session = sessionStore.sessions.find(s => s.id === sessionStore.currentSessionId)
+    // 优先用会话关联的主题包，否则用当前主题
+    const packId = session?.theme_pack_id || themeStore.current || ''
+    const resp = await fetch('/api/tts/speak', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: text.slice(0, 2000), pack_id: packId })
+    })
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}))
+      toast.warning(err.detail || '语音合成失败，请检查 TTS 配置')
+      return
+    }
+    const blob = await resp.blob()
+    if (blob.size === 0) {
+      toast.warning('TTS 返回空音频')
+      return
+    }
+    const url = URL.createObjectURL(blob)
+    if (ttsAudio) { ttsAudio.pause(); ttsAudio = null }
+    ttsAudio = new Audio(url)
+    ttsAudio.onended = () => { URL.revokeObjectURL(url) }
+    ttsAudio.onerror = (e) => {
+      URL.revokeObjectURL(url)
+      toast.warning('音频播放失败')
+    }
+    try {
+      await ttsAudio.play()
+    } catch (e) {
+      toast.warning('浏览器阻止了自动播放，请先点击页面任意位置后再试')
+    }
+  } catch (e) {
+    toast.error('TTS 请求失败: ' + e.message)
+  }
 }
 
 let autoTitleDone = false
@@ -231,22 +360,6 @@ setTimeout(loadToolExpanded, 100)
   z-index: 1;
   /* transparent — inherits from chat-main L2 */
 }
-/* Minimal subtle header */
-.chat-header {
-  padding: 10px 16px 8px;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  position: relative;
-  z-index: 1;
-}
-.chat-persona-name {
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--text-secondary);
-  letter-spacing: 2px;
-  opacity: 0.5;
-}
 .empty {
   margin: auto;
   text-align: center;
@@ -254,6 +367,37 @@ setTimeout(loadToolExpanded, 100)
 }
 .empty p { text-shadow: 0 0 6px rgba(0,0,0,0.4); font-size: 24px; }
 .empty .sub { font-size: 14px; margin-top: 8px; }
+
+/* 会话切换动画 — 上下淡隐平移 */
+.chat-switch-leave-active {
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+.chat-switch-enter-active {
+  transition: opacity 0.3s ease, transform 0.3s ease;
+}
+.chat-switch-leave-to {
+  opacity: 0;
+  transform: translateY(12px);
+}
+.chat-switch-enter-from {
+  opacity: 0;
+  transform: translateY(-12px);
+}
+
+/* 消息逐条渐显 */
+.msg-enter {
+  animation: msg-fade-in 0.3s ease both;
+}
+@keyframes msg-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
 
 /* Confirm Dialog — glass L3 style */
 .confirm-overlay {
@@ -352,4 +496,5 @@ setTimeout(loadToolExpanded, 100)
   filter: brightness(1.08);
   transform: translateY(-1px);
 }
+
 </style>

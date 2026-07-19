@@ -2,14 +2,14 @@
   "name": "",
   "version": "1.0.0",
   "colors": {
-    "primary": "#9ed0ff",
-    "bgPrimary": "#ff0000",
-    "bgSecondary": "#ff0000",
-    "textPrimary": "#8ec6fb",
-    "textSecondary": "#8ec6fb",
-    "border": "#ff0000",
+    "primary": "#42c6ff",
+    "bgPrimary": "#f425e2",
+    "bgSecondary": "#00e1ff",
+    "textPrimary": "#61d7ff",
+    "textSecondary": "#75caff",
+    "border": "#04f500",
     "bubbleUser": "rgba(255,0,0,0.15)",
-    "bubbleAgent": "#ff0000",
+    "bubbleAgent": "rgba(0,0,20,0.9)",
     "--primary": "#f50000",
     "--bg-primary": "#f425e2",
     "--bg-secondary": "#00e1ff",
@@ -17,6 +17,8 @@
     "--text-secondary": "#ffffff",
     "--border": "#04f500",
     "--bubble-user": "rgba(255,0,0,0.15)",
-    "--bubble-agent": "rgba(0,0,20,0.9)"
+    "--bubble-agent": "rgba(0,0,20,0.9)",
+    "secondary": "#f20202",
+    "highlight": "#00558a"
   }
 }

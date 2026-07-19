@@ -6,16 +6,23 @@
     </div>
 
     <div class="session-items">
+      <!-- Loading skeleton -->
+      <template v-if="sessionStore.loading">
+        <div v-for="i in 4" :key="i" class="session-item skeleton-item">
+          <div class="skeleton-line"></div>
+        </div>
+      </template>
       <template v-for="(group, persona) in groupedSessions" :key="persona">
         <div class="group-header" @click="toggleGroup(persona)">
           <span class="group-arrow">{{ collapsedGroups[persona] ? '▶' : '▼' }}</span>
           <span class="group-name">{{ personaName(persona) }}</span>
           <span class="group-count">{{ group.length }}</span>
         </div>
-        <div v-show="!collapsedGroups[persona]">
-          <div
-            v-for="s in group"
-            :key="s.id"
+        <Transition name="group-expand">
+          <div v-show="!collapsedGroups[persona]" class="group-items">
+            <div
+              v-for="s in group"
+              :key="s.id"
             class="session-item"
             :class="{ active: sessionStore.currentSessionId === s.id }"
             @click="handleSwitch(s.id)"
@@ -32,14 +39,14 @@
             </template>
             <template v-else>
               <div class="session-name">{{ s.name && s.name !== s.id ? s.name : s.id.replace('session_', '').slice(0, 12) }}</div>
-              <div class="session-meta">{{ s.msg_count }}条</div>
               <div class="session-actions">
                 <button class="action-btn" @click.stop="startEdit(s)" title="编辑">✏️</button>
                 <button class="action-btn delete" @click.stop="handleDelete(s.id)" title="删除">×</button>
               </div>
             </template>
           </div>
-        </div>
+          </div>
+        </Transition>
       </template>
       <div v-if="Object.keys(groupedSessions).length === 0" class="empty">暂无对话</div>
     </div>
@@ -117,7 +124,7 @@ const editPackId = ref('')
 const groupedSessions = computed(() => {
   const groups = {}
   for (const s of sessionStore.sessions) {
-    const p = s.persona || 'default'
+    const p = s.theme_pack_id || s.persona || 'default'
     if (!groups[p]) groups[p] = []
     groups[p].push(s)
   }
@@ -125,6 +132,10 @@ const groupedSessions = computed(() => {
 })
 
 function personaName(id) {
+  // 先查主题包名称
+  const pack = themepacks.value.find(p => p.id === id)
+  if (pack) return pack.name || pack.id
+  // 再查角色名称
   const p = personaStore.personas.find(p => p.id === id)
   return p ? p.name : id
 }
@@ -187,33 +198,45 @@ onMounted(() => {
   fetchThemepacks()
 })
 
+const currentPackId = ref('')
+
 async function handleSwitch(id) {
-  sessionStore.switchSession(id)
+  const session = sessionStore.sessions.find(s => s.id === id)
+  const newPackId = session?.theme_pack_id || ''
 
-  // 获取会话元数据
-  const sessions = sessionStore.sessions
-  const session = sessions.find(s => s.id === id)
-
-  // 如果有绑定的主题包，应用它
-  if (session && session.theme_pack_id && session.theme_pack_id !== 'default_pack') {
-    const packResp = await fetch(`/api/themepacks/${session.theme_pack_id}`)
+  // 只在主题包真正变化时才切换主题（避免背景重载）
+  if (newPackId && newPackId !== currentPackId.value) {
+    const packResp = await fetch(`/api/themepacks/${newPackId}`)
     if (packResp.ok) {
       const pack = await packResp.json()
-      if (pack.theme_ref) themeStore.applyTheme(pack.theme_ref)
+      const themeId = pack.theme_ref || pack.id
       if (pack.persona_ref) personaStore.switchPersona(pack.persona_ref)
+      const cssVarMap = { primary: '--primary', highlight: '--highlight', textPrimary: '--text-primary', textSecondary: '--text-secondary' }
+      const colorOverrides = {}
+      if (pack.theme?.colors) {
+        for (const [key, cssVar] of Object.entries(cssVarMap)) {
+          if (pack.theme.colors[key]) colorOverrides[cssVar] = pack.theme.colors[key]
+        }
+      }
+      if (themeId) await themeStore.switchTheme(themeId, colorOverrides)
     }
+    currentPackId.value = newPackId
   }
 
   // 加载历史
-  const resp = await fetch(`/api/sessions/${id}/history`)
-  const history = await resp.json()
+  const history = await fetch(`/api/sessions/${id}/history`).then(r => r.json())
+
+  // 切换 session
+  sessionStore.switchSession(id)
+
+  // 等 Vue 完成 out 动画后清空并加载新消息
+  await new Promise(r => setTimeout(r, 50))
   chatStore.clearMessages()
   for (const msg of history) {
     if (msg.role === 'user') chatStore.addUserMessage(msg.content)
     else if (msg.role === 'assistant') {
       const m = { role: 'assistant', streaming: false }
       if (msg.segments && msg.segments.length > 0) {
-        // 把 content 文本作为第一个 text 段加在前面
         if (msg.content && msg.segments.every(s => s.type !== 'text')) {
           m.segments = [...msg.segments, { type: 'text', content: msg.content }]
         } else {
@@ -313,7 +336,7 @@ async function saveEdit() {
   filter: brightness(1.08);
   transform: translateY(-1px);
 }
-.session-items { flex: 1; overflow-y: auto; }
+.session-items { flex: 1; overflow-y: auto; padding: 4px 0; display: flex; flex-direction: column; gap: 3px; }
 
 /* 分组标题 */
 .group-header {
@@ -344,31 +367,32 @@ async function saveEdit() {
   border-radius: 8px;
 }
 
-/* 会话项 — subtle hover, no hard border */
+/* 会话项 — 药丸形 */
 .session-item {
-  padding: 8px 12px 8px 24px;
+  padding: 5px 14px 5px 18px;
   cursor: pointer;
-  border: 1px solid rgba(255,255,255,0.10);
-  box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+  border: 1px solid rgba(255, 255, 255, 0.44) !important;
+  box-shadow: none !important;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.14);
   position: relative;
-  transition: background 0.15s, transform 0.15s;
+  transition: background 0.15s, border-color 0.15s;
+  margin: 2px 6px;
 }
 .session-item:hover {
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(255, 255, 255, 0.24);
+  border-color: rgba(255, 255, 255, 0.60) !important;
 }
-/* Selected session: left border indicator */
+/* Selected session */
 .session-item.active {
-  background: rgba(124, 92, 252, 0.12);
-  border-left: 3px solid rgba(100,180,255,0.7);
-  border: 1px solid rgba(255,255,255,0.10);
-  border-radius: 0 8px 8px 0;
+  background: color-mix(in srgb, var(--highlight) 44%, transparent);
+  border-color: var(--highlight) !important;
 }
 .session-name {
   font-size: 13px; color: var(--text-primary);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   padding-right: 40px;
 }
-.session-meta { font-size: 10px; color: var(--text-secondary); margin-top: 1px; }
 .session-actions {
   position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
   display: flex; gap: 2px; opacity: 0; transition: opacity 0.15s;
@@ -382,27 +406,55 @@ async function saveEdit() {
 .action-btn.delete:hover { color: #ff4757; }
 .rename-input {
   width: 100%; font-size: 13px; color: var(--text-primary);
-  background: var(--panel-l4);
-  box-shadow: 0 0 0 1px var(--primary);
-  border: none;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.20);
   border-radius: 4px; padding: 4px 6px; outline: none;
 }
+.rename-input:focus {
+  border-color: var(--primary);
+}
 .empty { padding: 20px; text-align: center; color: var(--text-secondary); font-size: 13px; }
+
+/* 分组展开/折叠动画 */
+.group-items { overflow: hidden; }
+.group-expand-enter-active { transition: all 0.25s ease; }
+.group-expand-leave-active { transition: all 0.2s ease; }
+.group-expand-enter-from { opacity: 0; max-height: 0; }
+.group-expand-enter-to { opacity: 1; max-height: 500px; }
+.group-expand-leave-from { opacity: 1; max-height: 500px; }
+.group-expand-leave-to { opacity: 0; max-height: 0; }
+
+/* Skeleton loading */
+.skeleton-item {
+  pointer-events: none;
+  animation: skeleton-pulse 1.5s infinite;
+}
+.skeleton-line {
+  height: 14px;
+  border-radius: 4px;
+  background: rgba(255,255,255,0.08);
+  width: 70%;
+}
+@keyframes skeleton-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
 
 /* 弹窗 — L3 glass style */
 .modal-overlay {
   position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
-   
-
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
   display: flex;
   align-items: center; justify-content: center; z-index: 100;
 }
 .modal {
-  background: var(--panel-l3);
-   
-
-  box-shadow: var(--border-subtle), var(--glow-inner);
+  background: rgba(15, 15, 30, 0.85);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
   border-radius: var(--radius);
   padding: 20px; width: 340px; max-height: 70vh; overflow-y: auto;
 }
@@ -410,38 +462,41 @@ async function saveEdit() {
   font-size: 16px; font-weight: 600; color: var(--text-primary);
   margin-bottom: 16px; text-align: center;
 }
-.pack-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
-/* Pack cards in modal: L3 style */
+.pack-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+/* Pack cards in modal: bubble style */
 .pack-card {
-  background: var(--panel-l3);
-  box-shadow: var(--border-subtle);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: var(--radius);
   padding: 12px; cursor: pointer;
-  transition: filter 0.2s, transform 0.2s, box-shadow 0.2s;
+  transition: background 0.15s, border-color 0.15s;
 }
 .pack-card:hover {
-  box-shadow: 0 0 0 1px var(--primary);
-  filter: brightness(1.05);
-  transform: translateY(-1px);
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.25);
 }
 .pack-name { font-size: 14px; font-weight: 600; color: var(--text-primary); }
 .pack-info { font-size: 11px; color: var(--text-secondary); margin-top: 4px; }
 .btn-cancel, .btn-save {
   padding: 6px 16px; border-radius: var(--radius-sm); cursor: pointer;
-  font-size: 13px; border: none;
-  transition: filter 0.2s, transform 0.2s;
+  font-size: 13px;
+  transition: background 0.15s, border-color 0.15s;
 }
 .btn-cancel {
-  background: var(--panel-l4);
+  background: rgba(255, 255, 255, 0.10);
   color: var(--text-secondary);
-  box-shadow: var(--border-subtle);
+  border: 1px solid rgba(255, 255, 255, 0.20);
 }
 .btn-save {
   background: var(--primary); color: white;
+  border: 1px solid rgba(255, 255, 255, 0.15);
 }
-.btn-cancel:hover, .btn-save:hover {
-  filter: brightness(1.08);
-  transform: translateY(-1px);
+.btn-cancel:hover {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.30);
+}
+.btn-save:hover {
+  filter: brightness(1.1);
 }
 .edit-field { margin-bottom: 12px; }
 .edit-field label {
@@ -450,13 +505,12 @@ async function saveEdit() {
 }
 .pack-select {
   width: 100%; font-size: 13px; color: var(--text-primary);
-  background: var(--panel-l4);
-  box-shadow: var(--border-subtle);
-  border: none;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.20);
   border-radius: 4px; padding: 6px 8px; outline: none;
 }
 .pack-select:focus {
-  box-shadow: 0 0 0 1px var(--primary);
+  border-color: var(--primary);
 }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 </style>

@@ -27,19 +27,36 @@ async def upload_asset(theme_id: str, file: UploadFile = File(...)):
     """上传图片素材到主题的 assets 目录"""
     log_info("Asset", f"上传请求: theme={theme_id} file={file.filename} size={file.size if hasattr(file, 'size') else '?'}")
     theme_dir = THEMES_DIR / theme_id
-    if not theme_dir.exists():
-        raise HTTPException(404, f"Theme '{theme_id}' not found")
-    
+    # 自动创建主题目录（新主题包首次上传时需要）
+    theme_dir.mkdir(parents=True, exist_ok=True)
+
     assets_dir = theme_dir / "assets"
     assets_dir.mkdir(exist_ok=True)
     
     # 保留原始文件名，同名直接覆盖
     filename = file.filename
     target = assets_dir / filename
-    
+
+    # 如果上传的是音频文件（ref_audio），清理旧的不同格式的 ref_audio
+    if filename.startswith("ref_audio."):
+        for old in assets_dir.glob("ref_audio.*"):
+            if old.name != filename:
+                old.unlink(missing_ok=True)
+        # 同步清理 themepacks 目录
+        pack_assets_dir = THEMES_DIR.parent / "themepacks" / theme_id / "assets"
+        if pack_assets_dir.exists():
+            for old in pack_assets_dir.glob("ref_audio.*"):
+                if old.name != filename:
+                    old.unlink(missing_ok=True)
+
     content = await file.read()
     target.write_bytes(content)
-    
+
+    # 同步到 themepacks 目录
+    pack_assets = THEMES_DIR.parent / "themepacks" / theme_id / "assets"
+    if pack_assets.exists():
+        (pack_assets / filename).write_bytes(content)
+
     return {
         "status": "ok",
         "filename": target.name,

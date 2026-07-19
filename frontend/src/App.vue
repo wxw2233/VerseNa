@@ -4,23 +4,32 @@
       <router-link to="/" class="nav-title">次元人格</router-link>
       <a class="nav-link" :class="{ active: isSettings }" @click="toggleSettings">{{ isSettings ? '返回' : '设置' }}</a>
     </nav>
-    <div class="bg-layer" :style="bgStyle"></div>
+    <div class="bg-layer" :style="bgStyle" :class="{ 'bg-visible': bgReady }"></div>
     <main class="main-content">
-      <router-view />
+      <router-view v-slot="{ Component, route }">
+        <Transition name="page-fade" mode="out-in">
+          <component :is="Component" :key="route.path" />
+        </Transition>
+      </router-view>
     </main>
+    <Toast />
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useThemeStore } from './stores/theme'
+import { useBrightness } from './composables/useBrightness'
+import Toast from './components/Toast.vue'
 
 const route = useRoute()
 const router = useRouter()
 const themeStore = useThemeStore()
+const { update: updateBrightness } = useBrightness()
 
-const bgTs = localStorage.getItem('bg-ts') || '0'
+const bgReady = ref(true)
+let currentBgUrl = ''
 
 const bgStyle = computed(() => {
   const themeId = themeStore.current
@@ -29,9 +38,24 @@ const bgStyle = computed(() => {
   const ts = localStorage.getItem('bg-ts') || '0'
   return {
     backgroundImage: 'url(/api/themes/' + themeId + '/assets/bg.png?ts=' + ts + ')',
-    opacity: opacity,
+    '--target-opacity': opacity,
   }
 })
+
+watch(bgStyle, (val) => {
+  const url = val.backgroundImage ? val.backgroundImage.replace(/^url\(/, '').replace(/\)$/, '') : ''
+  updateBrightness(url, val['--target-opacity'])
+
+  // 背景图变化时：先隐藏，预加载完成后淡入
+  if (url && url !== currentBgUrl) {
+    currentBgUrl = url
+    bgReady.value = false
+    const img = new Image()
+    img.onload = () => { bgReady.value = true }
+    img.onerror = () => { bgReady.value = true }
+    img.src = url
+  }
+}, { immediate: true })
 
 const isSettings = computed(() => route.path === '/settings')
 function toggleSettings() {
@@ -50,7 +74,12 @@ onMounted(() => { themeStore.restoreTheme() })
   background-position: center;
   z-index: 0;
   pointer-events: none;
-  opacity: var(--bg-opacity, 0.3);
+  opacity: 0;
+  transition: none;
+}
+.bg-layer.bg-visible {
+  opacity: var(--target-opacity, 0.3);
+  transition: opacity 0.4s ease;
 }
 .top-bar, .main-content { position: relative; z-index: 1; }
 
@@ -71,5 +100,23 @@ onMounted(() => { themeStore.restoreTheme() })
 }
 .nav-link:hover { color: var(--primary); background: rgba(124, 92, 252, 0.15); }
 .nav-link.active { color: var(--primary); }
-.main-content { flex: 1; overflow: hidden; }
+.main-content {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+
+/* 路由切换动画 */
+.page-fade-enter-active,
+.page-fade-leave-active {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+.page-fade-enter-from {
+  opacity: 0;
+  transform: translateY(6px);
+}
+.page-fade-leave-to {
+  opacity: 0;
+  transform: translateY(-6px);
+}
 </style>

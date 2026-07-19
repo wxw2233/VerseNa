@@ -8,6 +8,7 @@ router = APIRouter()
 
 class SessionCreate(BaseModel):
     name: str = ""
+    theme_pack_id: str = None
 
 class SessionRename(BaseModel):
     name: str
@@ -77,6 +78,9 @@ async def delete_session(session_id: str):
 async def create_session(req: SessionCreate):
     """创建新会话，返回 session_id"""
     new_id = req.name if req.name else f"session_{uuid.uuid4().hex[:8]}"
+    # 保存主题包关联
+    if req.theme_pack_id:
+        await db.set_session_meta(new_id, theme_pack_id=req.theme_pack_id)
     return {"session_id": new_id}
 
 

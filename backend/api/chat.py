@@ -9,19 +9,48 @@ from persona.manager import persona_manager
 from tools.registry import tool_registry
 from api.log_api import log_info, log_error
 from db.database import db
+from models.providers import get_provider
 
 router = APIRouter()
 
 # 待确认的请求 {request_id: asyncio.Future}
 pending_confirms = {}
 
-def create_agent(api_key: str = None, base_url: str = None, model_name: str = None) -> ReActAgent:
-    key = api_key or settings.DEFAULT_API_KEY
-    url = base_url or settings.DEFAULT_API_BASE
-    model = model_name or settings.DEFAULT_MODEL_NAME
+async def create_agent(api_key: str = None, base_url: str = None, model_name: str = None) -> ReActAgent:
+    """创建 Agent，优先使用新版多模型配置"""
+    key = api_key
+    url = base_url
+    model = model_name
+
+    # 如果没有显式指定，从 active_models 配置读取
+    if not key or not url or not model:
+        try:
+            raw = await db.get_config("active_models", "{}")
+            active = json.loads(raw) if raw else {}
+            chat_config = active.get("chat", {})
+
+            if chat_config.get("provider") and chat_config.get("model"):
+                provider_id = chat_config["provider"]
+                model = model or chat_config["model"]
+
+                # 从用户提供商配置读取 key 和 url
+                providers_raw = await db.get_config("model_providers", "{}")
+                user_providers = json.loads(providers_raw) if providers_raw else {}
+                user_conf = user_providers.get(provider_id, {})
+
+                key = key or user_conf.get("api_key", "")
+                preset = get_provider(provider_id)
+                url = url or user_conf.get("base_url") or (preset["base_url"] if preset else "")
+        except Exception:
+            pass
+
+    # 回退到 settings 默认值
+    key = key or settings.DEFAULT_API_KEY
+    url = url or settings.DEFAULT_API_BASE
+    model = model or settings.DEFAULT_MODEL_NAME
+
     adapter = OpenAIAdapter(api_key=key, base_url=url, model_name=model)
     memory = MemoryManager(model=adapter)
-    # 注入 memory_manager 到 save_memory 工具
     save_mem_tool = tool_registry.get_tool('save_memory')
     if save_mem_tool:
         save_mem_tool._memory = memory
@@ -30,7 +59,7 @@ def create_agent(api_key: str = None, base_url: str = None, model_name: str = No
 @router.websocket("/ws/chat")
 async def websocket_chat(ws: WebSocket):
     await ws.accept()
-    agent = create_agent()
+    agent = await create_agent()
 
     async def confirm_callback(confirm_data):
         """等待前端确认的回调"""
@@ -60,7 +89,8 @@ async def websocket_chat(ws: WebSocket):
 
             session_id = msg.get("session_id", "default")
             content = msg.get("content", "")
-            log_info("Chat", f"WS消息: session={session_id} content={content[:80]}")
+            image_url = msg.get("image_url", "")
+            log_info("Chat", f"WS消息: session={session_id} content={content[:80]} image={'yes' if image_url else 'no'}")
             persona_name = msg.get("persona", "default")
             system_prompt = persona_manager.get_system_prompt(persona_name)
             tool_desc = "\n".join(f"- {t['function']['name']}: {t['function']['description']}" for t in tool_registry.get_tools())
@@ -71,7 +101,7 @@ async def websocket_chat(ws: WebSocket):
 
             tool_segments = []
             try:
-                async for event in agent.run(session_id, content, system_prompt=system_prompt, tools=tool_registry.get_tools(), persona=persona_name, confirm_callback=confirm_callback):
+                async for event in agent.run(session_id, content, system_prompt=system_prompt, tools=tool_registry.get_tools(), persona=persona_name, confirm_callback=confirm_callback, image_url=image_url if image_url else None):
                     await ws.send_text(json.dumps(event, ensure_ascii=False))
                     if event.get("type") == "segment" and event.get("segment", {}).get("type") == "tool":
                         tool_segments.append(event["segment"])

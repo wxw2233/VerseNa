@@ -12,9 +12,19 @@ class ReActAgent:
         self.memory = memory
         self.tool_registry = tool_registry
 
-    async def run(self, session_id: str, user_message: str, system_prompt: str = "", tools: list = None, persona: str = "default", confirm_callback=None) -> AsyncGenerator[dict, None]:
+    async def run(self, session_id: str, user_message: str, system_prompt: str = "", tools: list = None, persona: str = "default", confirm_callback=None, image_url: str = None) -> AsyncGenerator[dict, None]:
         await self.memory.add_message(session_id, "user", user_message, persona=persona)
         messages = await self.memory.get_context(session_id, system_prompt)
+
+        # 如果有图片，将最后一条用户消息替换为视觉格式
+        if image_url and messages:
+            for i in range(len(messages) - 1, -1, -1):
+                if messages[i].get("role") == "user":
+                    messages[i]["content"] = [
+                        {"type": "text", "text": user_message},
+                        {"type": "image_url", "image_url": {"url": image_url}},
+                    ]
+                    break
 
         full_response = ""
         loops = 0

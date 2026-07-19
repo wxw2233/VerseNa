@@ -66,8 +66,15 @@ app.include_router(theme_asset_router)
 from api.theme_package_api import router as theme_package_router
 app.include_router(theme_package_router)
 
+from api.themepack_api import router as themepack_router
+app.include_router(themepack_router)
+
+from api.log_api import router as log_router
+app.include_router(log_router)
+
+from api.tts_api import router as tts_router
+app.include_router(tts_router)
+
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host=settings.HOST, port=settings.PORT, reload=settings.DEBUG)
-from api.themepack_api import router as themepack_router; app.include_router(themepack_router)
-from api.log_api import router as log_router; app.include_router(log_router)
+    uvicorn.run("main:app", host=settings.HOST, port=settings.PORT, reload=False)

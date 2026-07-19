@@ -44,6 +44,22 @@ class ThemePackManager:
                 for f in persona_src.iterdir():
                     if f.is_file():
                         shutil.copy2(f, pack_dir / f.name)
+            else:
+                # 创建默认人设文件
+                default_persona = {"name": name, "description": "", "emotion_weights": {"cheerful": 0.5, "shy": 0.2, "curious": 0.5, "angry": 0.1, "sad": 0.1}, "speech_style": {"tone": "友好", "catchphrase": "", "emoji_frequency": "medium", "formality": "casual"}}
+                (pack_dir / "persona.json").write_text(json.dumps(default_persona, ensure_ascii=False, indent=2), encoding="utf-8")
+                (pack_dir / "prompt.md").write_text(f"你是{name}。", encoding="utf-8")
+                # 复制到 personas 目录
+                persona_dest = Path(__file__).parent.parent.parent / "personas" / persona_ref
+                persona_dest.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(pack_dir / "persona.json", persona_dest / "persona.json")
+                shutil.copy2(pack_dir / "prompt.md", persona_dest / "prompt.md")
+                # 重载 persona 缓存
+                try:
+                    from persona.manager import persona_manager
+                    persona_manager.reload(persona_ref)
+                except Exception:
+                    pass
         # 复制 theme 文件（如果指定了）
         if theme_ref:
             theme_src = Path(__file__).parent.parent.parent / "themes" / theme_ref
