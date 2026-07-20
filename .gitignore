@@ -49,3 +49,9 @@ backend/data/uploads/
 
 # Electron 构建产物
 Build_test/
+
+# .superpowers
+.superpowers/
+
+# 调试文件
+data/debug_request.json

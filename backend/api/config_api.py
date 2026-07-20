@@ -281,10 +281,18 @@ async def set_trust_mode(req: dict):
 
 AGENT_CONFIG_DEFAULTS = {
     "max_steps": 15,
-    "max_history": 30,
-    "max_context": 4096,
-    "max_tokens": 4096,
+    "max_history": 50,
+    "max_context": 128000,
+    "max_tokens": 8192,
     "custom_instructions": "",
+}
+
+# 配置值硬上限（MiMo 百万上下文，放宽限制）
+AGENT_CONFIG_LIMITS = {
+    "max_steps": (1, 100),
+    "max_history": (5, 500),
+    "max_context": (2000, 1000000),
+    "max_tokens": (256, 65536),
 }
 
 @router.get("/api/config/agent")
@@ -319,6 +327,10 @@ async def set_agent_config(req: AgentConfigReq):
     updates = req.model_dump(exclude_none=True)
     for key, value in updates.items():
         if key in AGENT_CONFIG_DEFAULTS:
+            # 数值类型做范围限制
+            if key in AGENT_CONFIG_LIMITS and isinstance(value, (int, float)):
+                lo, hi = AGENT_CONFIG_LIMITS[key]
+                value = max(lo, min(hi, value))
             await db.set_config(f"agent_{key}", str(value))
     return {"status": "ok"}
 

@@ -20,7 +20,7 @@ def _log(level: str, tag: str, message: str):
             f.write(line)
         # 超过上限时截断
         if LOG_FILE.exists() and LOG_FILE.stat().st_size > 100_000:
-            lines = LOG_FILE.read_text(encoding="utf-8").splitlines()
+            lines = LOG_FILE.read_text(encoding="utf-8", errors="replace").splitlines()
             LOG_FILE.write_text("\n".join(lines[-MAX_LINES:]) + "\n", encoding="utf-8")
     except Exception:
         pass
@@ -44,7 +44,7 @@ async def get_logs(lines: int = 100):
     if not LOG_FILE.exists():
         return {"lines": []}
     try:
-        all_lines = LOG_FILE.read_text(encoding="utf-8").splitlines()
+        all_lines = LOG_FILE.read_text(encoding="utf-8", errors="replace").splitlines()
         return {"lines": all_lines[-lines:], "total": len(all_lines)}
     except Exception:
         return {"lines": [], "total": 0}

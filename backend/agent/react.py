@@ -50,6 +50,11 @@ class ReActAgent:
                     yield {"type": "segment", "segment": {"type": "text", "content": "\n\n[已停止]"}}
                     break
 
+                # 消息数保护：防止工具调用无限堆积（MiMo 百万上下文，放宽限制）
+                if len(messages) > 200:
+                    yield {"type": "segment", "segment": {"type": "text", "content": "\n\n[对话过长，自动结束]"}}
+                    break
+
                 loops += 1
                 chunk_content = ""
                 tool_calls = []
@@ -84,7 +89,23 @@ class ReActAgent:
                 if not tool_calls:
                     break
 
-                messages.append({"role": "assistant", "content": chunk_content, "tool_calls": tool_calls})
+                # 验证 tool_calls 的 arguments 是有效 JSON
+                valid_tool_calls = []
+                for tc in tool_calls:
+                    func = tc.get("function", {})
+                    args_str = func.get("arguments", "")
+                    try:
+                        json.loads(args_str) if args_str else {}
+                        valid_tool_calls.append(tc)
+                    except json.JSONDecodeError:
+                        # arguments 不完整，跳过这个 tool call
+                        yield {"type": "segment", "segment": {"type": "text", "content": f"\n[工具调用参数不完整，已跳过]"}}
+                        continue
+
+                if not valid_tool_calls:
+                    break
+
+                messages.append({"role": "assistant", "content": chunk_content, "tool_calls": valid_tool_calls})
 
                 if not self.tool_registry:
                     yield {"type": "segment", "segment": {"type": "text", "content": "工具系统未配置"}}
@@ -142,7 +163,9 @@ class ReActAgent:
                         "result_detail": result_detail
                     }}
 
-                    messages.append({"role": "tool", "tool_call_id": tc.get("id", ""), "content": result})
+                    # MiMo 百万上下文，不截断 tool result
+                    result_for_msg = result if isinstance(result, str) else str(result)
+                    messages.append({"role": "tool", "tool_call_id": tc.get("id", ""), "content": result_for_msg})
 
         except Exception as e:
             yield {"type": "error", "message": str(e)}

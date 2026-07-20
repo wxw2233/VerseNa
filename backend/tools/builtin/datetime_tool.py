@@ -9,7 +9,9 @@ class DateTimeTool(BaseTool):
     description = "获取当前日期、时间、星期几等时间信息"
     parameters = {
         "type": "object",
-        "properties": {},
+        "properties": {
+            "format": {"type": "string", "description": "输出格式，可选 'full' 或 'date' 或 'time'，默认 full"}
+        },
         "required": []
     }
 

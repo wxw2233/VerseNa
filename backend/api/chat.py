@@ -143,7 +143,7 @@ async def websocket_chat(ws: WebSocket):
                 system_prompt += f"\n\n{skill_prompt}"
 
             tool_desc = "\n".join(f"- {t['function']['name']}: {t['function']['description']}" for t in tool_registry.get_tools())
-            system_prompt += f"\n\n## 可用工具\n你有以下工具可以调用，请在需要时主动使用：\n{tool_desc}\n\n使用工具时请通过 function calling 调用，不要直接告诉用户你没有工具。"
+            system_prompt += f"\n\n## 可用工具\n你有以下工具可以调用：\n{tool_desc}\n\n使用工具时请通过 function calling 调用，不要直接告诉用户你没有工具。\n\n## 工具使用原则\n- 只在用户明确需要时才调用工具，不要自作主张\n- 不要未经用户同意就写文件、搜索网页或执行代码\n- 如果用户只是让你「看」「读」「理解」某个内容，用 file_manager 读取即可，不要做额外操作\n- 调用完工具后直接给出结论，不要继续调用其他工具"
             system_prompt += "\n\n## 重要：你必须始终使用中文回复，不要使用英文。"
 
             available_tools = tool_registry.get_tools()
