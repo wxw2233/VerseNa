@@ -13,7 +13,7 @@
           @edit="(newContent) => handleEdit(i, newContent)"
         />
         <div v-if="store.messages.length === 0" class="empty">
-          <p>✨ 次元人格 ✨</p>
+          <p>✨ VerseNa ✨</p>
           <p class="sub">点击「+ 新对话」开始聊天</p>
         </div>
       </div>

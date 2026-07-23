@@ -130,7 +130,7 @@ class QQBotAdapter(BaseAdapter):
                 "intents": (1 << 0) | (1 << 12) | (1 << 25),  # GUILDS + PUBLIC_MESSAGES + DIRECT_MESSAGE
                 "properties": {
                     "os": "windows",
-                    "browser": "次元人格",
+                    "browser": "VerseNa",
                     "device": "ciyuan-persona"
                 }
             }

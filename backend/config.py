@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 
 class Settings:
-    PROJECT_NAME = "次元人格"
+    PROJECT_NAME = "VerseNa"
     VERSION = "0.1.0"
     HOST = "0.0.0.0"
     PORT = 8001

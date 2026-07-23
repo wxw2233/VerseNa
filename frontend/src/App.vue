@@ -1,7 +1,7 @@
 <template>
   <div id="app-root">
     <nav class="top-bar">
-      <router-link to="/" class="nav-title">次元人格</router-link>
+      <router-link to="/" class="nav-title">VerseNa</router-link>
       <a class="nav-link" :class="{ active: isSettings }" @click="toggleSettings">{{ isSettings ? '返回' : '设置' }}</a>
     </nav>
     <div class="bg-layer" :style="bgStyle" :class="{ 'bg-visible': bgReady }"></div>
