@@ -233,9 +233,9 @@ async function handleSwitch(id) {
   await new Promise(r => setTimeout(r, 50))
   chatStore.clearMessages()
   for (const msg of history) {
-    if (msg.role === 'user') chatStore.addUserMessage(msg.content)
+    if (msg.role === 'user') chatStore.addUserMessage(msg.content, msg.id)
     else if (msg.role === 'assistant') {
-      const m = { role: 'assistant', streaming: false }
+      const m = { role: 'assistant', streaming: false, dbId: msg.id }
       if (msg.segments && msg.segments.length > 0) {
         if (msg.content && msg.segments.every(s => s.type !== 'text')) {
           m.segments = [...msg.segments, { type: 'text', content: msg.content }]

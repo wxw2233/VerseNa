@@ -117,6 +117,40 @@ async def websocket_chat(ws: WebSocket):
             log_info("Chat", f"WS消息: session={session_id} content={content[:80]} image={'yes' if image_url else 'no'}")
             persona_name = msg.get("persona", "default")
 
+            # 处理 edit 消息：编辑消息内容并重新生成
+            if msg.get("type") == "edit":
+                edit_id = msg.get("message_id")
+                new_content = msg.get("content", "")
+                if edit_id:
+                    # 删除该消息及之后的所有消息
+                    await db.delete_messages_from(session_id, edit_id)
+                    # 用新内容重新发送
+                    content = new_content
+                    image_url = ""
+                    # 继续走正常的 Agent 处理流程
+
+            # 处理 resend 消息：重新生成最后一条回复
+            if msg.get("type") == "resend":
+                # 删除最后一条助手消息及之后的内容
+                last_msgs = await db.get_history(session_id, limit=2)
+                if last_msgs and last_msgs[-1]["role"] == "assistant":
+                    # 获取最后一条助手消息的 ID
+                    cursor = await db._db.execute(
+                        "SELECT id FROM conversations WHERE session_id = ? ORDER BY id DESC LIMIT 1",
+                        (session_id,)
+                    )
+                    row = await cursor.fetchone()
+                    if row:
+                        await db.delete_messages_from(session_id, row[0])
+                # 获取最后一条用户消息重新发送
+                last_user = await db.get_last_user_message(session_id)
+                if last_user:
+                    content = last_user["content"]
+                    image_url = ""
+                else:
+                    await ws.send_text(json.dumps({"type": "done"}))
+                    continue
+
             # 处理 /skill install 命令
             if content.strip().startswith("/skill install"):
                 url = content.strip().replace("/skill install", "").strip()

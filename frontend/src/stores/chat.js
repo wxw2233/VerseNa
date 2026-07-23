@@ -9,11 +9,12 @@ export const useChatStore = defineStore('chat', () => {
 
   const statusPriority = { running: 1, done: 2, error: 3 }
 
-  function addUserMessage(content) {
+  function addUserMessage(content, dbId) {
     messages.value.push({
       role: 'user',
       content,
-      streaming: false
+      streaming: false,
+      dbId: dbId || null
     })
   }
 
@@ -120,8 +121,47 @@ export const useChatStore = defineStore('chat', () => {
     isStreaming.value = false
   }
 
+  function deleteFrom(index) {
+    messages.value.splice(index)
+  }
+
+  function resendFrom(ws, sessionId, persona) {
+    // 找最后一条用户消息
+    for (let i = messages.value.length - 1; i >= 0; i--) {
+      if (messages.value[i].role === 'user') {
+        // 删除该用户消息之后的所有消息（包括之前的助手回复）
+        messages.value.splice(i + 1)
+        break
+      }
+    }
+    isStreaming.value = true
+    ws.send(JSON.stringify({
+      type: 'resend',
+      session_id: sessionId,
+      persona: persona,
+    }))
+  }
+
+  function editAndResend(ws, sessionId, persona, messageIndex, newContent) {
+    // 编辑指定消息并删除之后的所有消息
+    const msg = messages.value[messageIndex]
+    if (msg) {
+      msg.content = newContent
+      messages.value.splice(messageIndex + 1)
+    }
+    isStreaming.value = true
+    ws.send(JSON.stringify({
+      type: 'edit',
+      session_id: sessionId,
+      persona: persona,
+      message_id: msg?.dbId,
+      content: newContent,
+    }))
+  }
+
   return {
     messages, isStreaming, currentPersona, bgOpacity,
-    addUserMessage, appendSegment, finishStreaming, handleError, clearMessages
+    addUserMessage, appendSegment, finishStreaming, handleError, clearMessages,
+    deleteFrom, resendFrom, editAndResend
   }
 })

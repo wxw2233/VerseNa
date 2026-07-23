@@ -51,7 +51,27 @@
 
       <span v-if="msg.emoji" class="emoji">{{ msg.emoji }}</span>
       <span v-if="msg.streaming" class="streaming-indicator">●</span>
+
+      <!-- 用户消息编辑模式 -->
+      <div v-if="isEditing" class="edit-area">
+        <textarea v-model="editContent" class="edit-textarea" rows="3" @keydown.enter.ctrl="confirmEdit" @keydown.escape="cancelEdit"></textarea>
+        <div class="edit-actions">
+          <button class="edit-btn cancel" @click="cancelEdit">取消</button>
+          <button class="edit-btn confirm" @click="confirmEdit">重新发送 (Ctrl+Enter)</button>
+        </div>
+      </div>
     </div>
+    <!-- 用户消息操作按钮 -->
+    <div v-if="msg.role === 'user' && !msg.streaming && !isEditing" class="msg-actions">
+      <button class="action-btn" @click="startEdit" title="编辑">✏️</button>
+    </div>
+    <!-- 助手消息重试按钮 -->
+    <button
+      v-if="msg.role === 'assistant' && !msg.streaming && hasTextContent"
+      class="action-btn retry-btn"
+      @click="$emit('retry')"
+      title="重新生成"
+    >🔄</button>
     <!-- TTS 播放按钮（仅 assistant 消息） -->
     <button
       v-if="msg.role === 'assistant' && !msg.streaming && hasTextContent"
@@ -84,7 +104,25 @@ function renderText(content) {
 }
 
 const props = defineProps({ msg: Object })
-const emit = defineEmits(['retry'])
+const emit = defineEmits(['retry', 'edit'])
+
+// 编辑模式
+const isEditing = ref(false)
+const editContent = ref('')
+
+function startEdit() {
+  editContent.value = props.msg.content || ''
+  isEditing.value = true
+}
+function cancelEdit() {
+  isEditing.value = false
+}
+function confirmEdit() {
+  if (editContent.value.trim()) {
+    emit('edit', editContent.value.trim())
+  }
+  isEditing.value = false
+}
 
 const hasTools = computed(() =>
   props.msg.segments?.some(s => s.type === 'tool')
@@ -385,5 +423,80 @@ async function speakText() {
 @keyframes pulse-tts {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }
+}
+
+/* 编辑模式 */
+.edit-area { margin-top: 8px; }
+.edit-textarea {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(20, 20, 40, 0.60);
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.20);
+  border: none;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: inherit;
+  resize: vertical;
+  min-height: 60px;
+  outline: none;
+}
+.edit-textarea:focus {
+  box-shadow: 0 0 0 1px var(--primary);
+}
+.edit-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+  justify-content: flex-end;
+}
+.edit-btn {
+  padding: 4px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  border: none;
+  transition: all 0.15s;
+}
+.edit-btn.cancel {
+  background: rgba(20, 20, 40, 0.60);
+  color: var(--text-secondary);
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.15);
+}
+.edit-btn.confirm {
+  background: var(--primary);
+  color: #fff;
+}
+.edit-btn:hover { filter: brightness(1.1); }
+
+/* 消息操作按钮 */
+.msg-actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.bubble-row:hover .msg-actions { opacity: 1; }
+.action-btn {
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(20, 20, 40, 0.60);
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.10);
+  border: none;
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.15s;
+  opacity: 0;
+}
+.bubble-row:hover .action-btn { opacity: 1; }
+.action-btn:hover {
+  box-shadow: 0 0 0 1px var(--primary);
+  filter: brightness(1.1);
+}
+.retry-btn {
+  position: absolute;
+  right: -30px;
+  top: 0;
 }
 </style>

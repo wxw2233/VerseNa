@@ -9,6 +9,8 @@
           :msg="msg"
           class="msg-item"
           :style="{ animationDelay: Math.min(i * 30, 200) + 'ms' }"
+          @retry="handleRetry(i)"
+          @edit="(newContent) => handleEdit(i, newContent)"
         />
         <div v-if="store.messages.length === 0" class="empty">
           <p>✨ 次元人格 ✨</p>
@@ -215,6 +217,33 @@ function handleSend(content) {
       system_prompt: '',
     })
   }
+}
+
+function handleRetry(msgIndex) {
+  // 删除该消息及之后的所有消息
+  store.deleteFrom(msgIndex)
+  store.isStreaming = true
+  send({
+    type: 'resend',
+    session_id: sessionStore.currentSessionId,
+    persona: personaStore.current,
+  })
+}
+
+function handleEdit(msgIndex, newContent) {
+  const msg = store.messages[msgIndex]
+  // 删除该消息及之后的所有消息
+  store.deleteFrom(msgIndex + 1)
+  // 更新消息内容
+  msg.content = newContent
+  store.isStreaming = true
+  send({
+    type: 'edit',
+    session_id: sessionStore.currentSessionId,
+    persona: personaStore.current,
+    message_id: msg.dbId,
+    content: newContent,
+  })
 }
 
 function stripActions(text) {

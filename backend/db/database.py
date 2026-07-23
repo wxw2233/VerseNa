@@ -127,9 +127,26 @@ class Database:
         )
         await self._db.commit()
 
+    async def delete_messages_from(self, session_id: str, message_id: int):
+        """删除指定 ID 及之后的所有消息（用于编辑/重新生成）"""
+        await self._db.execute(
+            "DELETE FROM conversations WHERE session_id = ? AND id >= ?",
+            (session_id, message_id)
+        )
+        await self._db.commit()
+
+    async def get_last_user_message(self, session_id: str) -> dict | None:
+        """获取最后一条用户消息"""
+        cursor = await self._db.execute(
+            "SELECT id, role, content, metadata FROM conversations WHERE session_id = ? AND role = 'user' ORDER BY id DESC LIMIT 1",
+            (session_id,)
+        )
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+
     async def get_history(self, session_id: str, limit: int = 50):
         cursor = await self._db.execute(
-            "SELECT role, content, persona, metadata, created_at FROM conversations WHERE session_id = ? ORDER BY id DESC LIMIT ?",
+            "SELECT id, role, content, persona, metadata, created_at FROM conversations WHERE session_id = ? ORDER BY id DESC LIMIT ?",
             (session_id, limit)
         )
         rows = await cursor.fetchall()
