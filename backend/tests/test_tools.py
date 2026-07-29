@@ -8,6 +8,7 @@ def test_registry_loads_builtins():
     names = [t["function"]["name"] for t in tools]
     assert "web_search" in names
     assert "code_exec" in names
+    assert "load_skill" in names
 
 def test_tool_format():
     reg = ToolRegistry()

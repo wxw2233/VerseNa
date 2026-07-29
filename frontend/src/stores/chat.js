@@ -4,22 +4,53 @@ import { defineStore } from 'pinia'
 export const useChatStore = defineStore('chat', () => {
   const messages = ref([])
   const isStreaming = ref(false)
+  const isStopping = ref(false)
+  const activeGenerationId = ref(null)
   const currentPersona = ref('default')
   const bgOpacity = ref(0.3)
 
   const statusPriority = { running: 1, done: 2, error: 3 }
 
-  function addUserMessage(content, dbId) {
+  function addUserMessage(content, dbId, clientMessageId) {
     messages.value.push({
       role: 'user',
       content,
       streaming: false,
-      dbId: dbId || null
+      dbId: dbId || null,
+      clientMessageId: clientMessageId || null,
     })
   }
 
-  function appendSegment(segment) {
-    const last = messages.value[messages.value.length - 1]
+  function startStreaming(generationId) {
+    activeGenerationId.value = generationId || null
+    isStreaming.value = true
+    isStopping.value = false
+    messages.value.push({
+      role: 'assistant',
+      version: 2,
+      segments: [],
+      expandedTools: {},
+      streaming: true,
+      emoji: null,
+      generationId: generationId || null,
+    })
+  }
+
+  function generationMatches(generationId) {
+    return !generationId || generationId === activeGenerationId.value
+  }
+
+  function activeAssistantIndex(generationId) {
+    if (!generationId) return messages.value.length - 1
+    return messages.value.findLastIndex(
+      message => message.role === 'assistant' && message.generationId === generationId,
+    )
+  }
+
+  function appendSegment(segment, generationId) {
+    if (!generationMatches(generationId)) return false
+    const targetIndex = activeAssistantIndex(generationId)
+    const last = messages.value[targetIndex]
 
     if (!last || last.role !== 'assistant' || !last.streaming) {
       // 新建 assistant 消息
@@ -30,7 +61,8 @@ export const useChatStore = defineStore('chat', () => {
         segments: [{ ...segment }],
         expandedTools: {},
         streaming: true,
-        emoji: null
+        emoji: null,
+        generationId: generationId || null,
       })
     } else {
       // 追加到现有消息
@@ -77,13 +109,17 @@ export const useChatStore = defineStore('chat', () => {
         sorted.push(...toolGroup)
       }
 
-      messages.value[messages.value.length - 1] = { ...last, segments: sorted }
+      messages.value[targetIndex] = { ...last, segments: sorted }
     }
+    return true
   }
 
-  function finishStreaming(emoji) {
+  function finishStreaming(emoji, generationId) {
+    if (!generationMatches(generationId)) return false
     isStreaming.value = false
-    const last = messages.value[messages.value.length - 1]
+    isStopping.value = false
+    const targetIndex = activeAssistantIndex(generationId)
+    const last = messages.value[targetIndex]
     if (last && last.role === 'assistant') {
       // 兜底：残留 running → error
       const segs = last.segments.map(s => {
@@ -96,11 +132,16 @@ export const useChatStore = defineStore('chat', () => {
       last.streaming = false
       if (emoji) last.emoji = emoji
     }
+    activeGenerationId.value = null
+    return true
   }
 
-  function handleError(message) {
+  function handleError(message, generationId) {
+    if (!generationMatches(generationId)) return false
     isStreaming.value = false
-    const last = messages.value[messages.value.length - 1]
+    isStopping.value = false
+    const targetIndex = activeAssistantIndex(generationId)
+    const last = messages.value[targetIndex]
     if (last && last.role === 'assistant') {
       // 兜底残留 running → error
       const segs = last.segments.map(s => {
@@ -114,54 +155,59 @@ export const useChatStore = defineStore('chat', () => {
       last.segments = segs
       last.streaming = false
     }
+    activeGenerationId.value = null
+    return true
   }
 
   function clearMessages() {
     messages.value = []
     isStreaming.value = false
+    isStopping.value = false
+    activeGenerationId.value = null
+  }
+
+  function requestStop(generationId) {
+    if (!isStreaming.value || generationId !== activeGenerationId.value) return false
+    isStopping.value = true
+    return true
+  }
+
+  function loadHistory(history) {
+    clearMessages()
+    for (const message of history) {
+      if (message.role === 'user') {
+        addUserMessage(message.content, message.id, message.client_message_id)
+        continue
+      }
+      if (message.role !== 'assistant') continue
+
+      const restored = {
+        role: 'assistant',
+        streaming: false,
+        dbId: message.id,
+        generationId: message.generation_id || null,
+      }
+      if (message.segments?.length) {
+        restored.segments = message.content && message.segments.every(segment => segment.type !== 'text')
+          ? [...message.segments, { type: 'text', content: message.content }]
+          : message.segments
+        restored.version = message.version || 2
+        restored.expandedTools = {}
+      } else {
+        restored.content = message.content || ''
+      }
+      if (message.emoji) restored.emoji = message.emoji
+      messages.value.push(restored)
+    }
   }
 
   function deleteFrom(index) {
     messages.value.splice(index)
   }
 
-  function resendFrom(ws, sessionId, persona) {
-    // 找最后一条用户消息
-    for (let i = messages.value.length - 1; i >= 0; i--) {
-      if (messages.value[i].role === 'user') {
-        // 删除该用户消息之后的所有消息（包括之前的助手回复）
-        messages.value.splice(i + 1)
-        break
-      }
-    }
-    isStreaming.value = true
-    ws.send(JSON.stringify({
-      type: 'resend',
-      session_id: sessionId,
-      persona: persona,
-    }))
-  }
-
-  function editAndResend(ws, sessionId, persona, messageIndex, newContent) {
-    // 编辑指定消息并删除之后的所有消息
-    const msg = messages.value[messageIndex]
-    if (msg) {
-      msg.content = newContent
-      messages.value.splice(messageIndex + 1)
-    }
-    isStreaming.value = true
-    ws.send(JSON.stringify({
-      type: 'edit',
-      session_id: sessionId,
-      persona: persona,
-      message_id: msg?.dbId,
-      content: newContent,
-    }))
-  }
-
   return {
-    messages, isStreaming, currentPersona, bgOpacity,
-    addUserMessage, appendSegment, finishStreaming, handleError, clearMessages,
-    deleteFrom, resendFrom, editAndResend
+    messages, isStreaming, isStopping, activeGenerationId, currentPersona, bgOpacity,
+    addUserMessage, startStreaming, appendSegment, finishStreaming, handleError, clearMessages, loadHistory, requestStop,
+    deleteFrom,
   }
 })

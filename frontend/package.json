@@ -1,6 +1,6 @@
 {
-  "name": "ciyuan-persona-frontend",
-  "version": "0.1.0",
+  "name": "versena-frontend",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -8,6 +8,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "lucide-vue-next": "^0.577.0",
     "marked": "^18.0.6",
     "pinia": "^2.2.0",
     "vue": "^3.4.0",

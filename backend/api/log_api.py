@@ -1,18 +1,17 @@
-import os
 import time
-from pathlib import Path
 from fastapi import APIRouter
+from config import settings
 
 router = APIRouter()
 
-LOG_DIR = Path(__file__).parent.parent.parent / "data"
+LOG_DIR = settings.DATA_DIR
 LOG_FILE = LOG_DIR / "runtime.log"
 MAX_LINES = 500  # 日志文件最多保留行数
 
 
 def _log(level: str, tag: str, message: str):
     """写入运行日志"""
-    LOG_DIR.mkdir(exist_ok=True)
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
     ts = time.strftime("%Y-%m-%d %H:%M:%S")
     line = f"[{ts}] [{level}] [{tag}] {message}\n"
     try:

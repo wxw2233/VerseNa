@@ -1,13 +1,13 @@
 <template>
   <div class="bubble-row" :class="msg.role">
-    <div class="bubble" :class="msg.role">
+    <div class="bubble" :class="[msg.role, { 'content-wide': usesWideLayout }]">
       <!-- 旧消息兼容 -->
       <template v-if="!msg.segments">
         <div v-if="msg.image" class="image-msg">
           <img :src="msg.image.dataUrl || msg.image.url" :alt="msg.image.filename" />
         </div>
         <div v-if="msg.file" class="file-msg">
-          <span class="file-icon">📄</span>
+          <FileText class="file-icon" :size="18" aria-hidden="true" />
           <span class="file-name">{{ msg.file.filename }}</span>
         </div>
         <div v-if="msg.content" class="text-seg" v-html="renderText(msg.content)"></div>
@@ -15,42 +15,55 @@
 
       <!-- 新消息 segments 渲染 -->
       <template v-else>
-        <div v-if="hasTools" class="tool-actions-bar">
-          <button class="tool-toggle-all" @click="toggleAll">
-            {{ allExpanded ? '折叠全部工具' : '展开全部工具' }}
-          </button>
-        </div>
-
         <template v-for="(seg, i) in msg.segments" :key="i">
           <!-- 文本段 -->
           <div v-if="seg.type === 'text'" class="text-seg" v-html="renderText(seg.content)"></div>
 
           <!-- 工具段时间线节点 -->
-          <div v-if="seg.type === 'tool'" class="tool-seg" :data-status="seg.status" @click="seg.result_detail ? toggleExpand(seg.tool_call_id) : null">
-            <div class="tool-header">
-              <span class="tool-icon">{{ toolIcon(seg.tool_name) }}</span>
-              <span class="tool-name">{{ seg.tool_name }}</span>
-              <span class="tool-args">{{ summarizeArgs(seg.tool_args) }}</span>
-              <span class="tool-status">
-                <span v-if="seg.status === 'running'" class="spinner">⏳</span>
-                <span v-if="seg.status === 'done'">✅</span>
-                <span v-if="seg.status === 'error'">❌</span>
-              </span>
-              <span v-if="seg.result_detail" class="tool-arrow" :class="{ open: expanded(seg.tool_call_id) }">▼</span>
-              <button v-if="seg.status === 'error'" class="tool-retry" @click.stop="$emit('retry')">重试</button>
+          <template v-if="seg.type === 'tool'">
+            <!-- 输出完成后折叠状态：显示小提示 -->
+            <div v-if="!msg.streaming && toolsCollapsed && i === firstToolIndex" class="tools-collapsed-hint" @click.stop="toggleToolsCollapse">
+              <Wrench :size="14" aria-hidden="true" />
+              <span>调用了 {{ toolCount }} 个工具</span>
+              <ChevronRight :size="14" aria-hidden="true" />
             </div>
-            <div class="tool-summary" v-if="seg.result_summary && !expanded(seg.tool_call_id)">{{ seg.result_summary }}</div>
-            <div class="tool-detail" v-if="expanded(seg.tool_call_id)">
-              <pre v-if="seg.tool_name === 'code_exec'"><code>{{ seg.result_detail }}</code></pre>
-              <div v-else-if="seg.tool_name === 'web_search'" v-html="formatSearchResults(seg.result_detail)"></div>
-              <pre v-else>{{ seg.result_detail }}</pre>
+            <!-- 正常显示工具 -->
+            <div v-if="msg.streaming || !toolsCollapsed" class="tool-seg" :data-status="seg.status" @click="seg.result_detail ? toggleExpand(seg.tool_call_id) : null">
+              <div class="tool-header">
+                <span class="tool-icon">{{ toolIcon(seg.tool_name) }}</span>
+                <span class="tool-name">{{ seg.tool_name }}</span>
+                <span class="tool-args">{{ summarizeArgs(seg.tool_args) }}</span>
+                <span class="tool-status">
+                  <span v-if="seg.status === 'running'" class="spinner">⏳</span>
+                  <span v-if="seg.status === 'done'">✅</span>
+                  <span v-if="seg.status === 'error'">❌</span>
+                </span>
+                <ChevronDown v-if="seg.result_detail" class="tool-arrow" :class="{ open: expanded(seg.tool_call_id) }" :size="14" aria-hidden="true" />
+                <button v-if="seg.status === 'error'" class="tool-retry" @click.stop="$emit('retry')">重试</button>
+              </div>
+              <div class="tool-summary" v-if="seg.result_summary && !expanded(seg.tool_call_id)">{{ seg.result_summary }}</div>
+              <div class="tool-detail" v-if="expanded(seg.tool_call_id)">
+                <pre v-if="seg.tool_name === 'code_exec'"><code>{{ seg.result_detail }}</code></pre>
+                <div v-else-if="seg.tool_name === 'web_search'" v-html="formatSearchResults(seg.result_detail)"></div>
+                <pre v-else>{{ seg.result_detail }}</pre>
+              </div>
             </div>
-          </div>
+
+            <!-- 展开时显示折叠按钮 -->
+            <div v-if="!msg.streaming && !toolsCollapsed && i === lastToolIndex" class="tools-collapse-btn" @click.stop="toggleToolsCollapse">
+              <span>收起工具</span>
+              <ChevronUp :size="14" aria-hidden="true" />
+            </div>
+          </template>
         </template>
       </template>
 
       <span v-if="msg.emoji" class="emoji">{{ msg.emoji }}</span>
-      <span v-if="msg.streaming" class="streaming-indicator">●</span>
+      <div v-if="msg.streaming" class="typing-indicator">
+        <span class="typing-dot"></span>
+        <span class="typing-dot"></span>
+        <span class="typing-dot"></span>
+      </div>
 
       <!-- 用户消息编辑模式 -->
       <div v-if="isEditing" class="edit-area">
@@ -63,7 +76,9 @@
     </div>
     <!-- 用户消息操作按钮 -->
     <div v-if="msg.role === 'user' && !msg.streaming && !isEditing" class="msg-actions">
-      <button class="action-btn" @click="startEdit" title="编辑">✏️</button>
+      <button class="action-btn" @click="startEdit" title="编辑" aria-label="编辑消息">
+        <Pencil :size="14" aria-hidden="true" />
+      </button>
     </div>
     <!-- 助手消息重试按钮 -->
     <button
@@ -71,7 +86,8 @@
       class="action-btn retry-btn"
       @click="$emit('retry')"
       title="重新生成"
-    >🔄</button>
+      aria-label="重新生成"
+    ><RefreshCcw :size="14" aria-hidden="true" /></button>
     <!-- TTS 播放按钮（仅 assistant 消息） -->
     <button
       v-if="msg.role === 'assistant' && !msg.streaming && hasTextContent"
@@ -79,15 +95,21 @@
       :class="{ playing: isPlaying }"
       @click="speakText"
       title="语音播放"
-    >{{ isPlaying ? '🔊' : '🔈' }}</button>
+      aria-label="语音播放"
+    >
+      <Volume2 v-if="isPlaying" :size="14" aria-hidden="true" />
+      <Volume1 v-else :size="14" aria-hidden="true" />
+    </button>
   </div>
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { marked } from 'marked'
+import { ChevronDown, ChevronRight, ChevronUp, FileText, Pencil, RefreshCcw, Volume1, Volume2, Wrench } from 'lucide-vue-next'
 import { useSessionStore } from '../stores/session'
 import { useThemeStore } from '../stores/theme'
+import { prepareTextForSpeech } from '../utils/ttsText'
 
 const sessionStore = useSessionStore()
 const themeStore = useThemeStore()
@@ -127,6 +149,47 @@ function confirmEdit() {
 const hasTools = computed(() =>
   props.msg.segments?.some(s => s.type === 'tool')
 )
+
+const usesWideLayout = computed(() => {
+  if (hasTools.value) return true
+
+  const text = props.msg.segments
+    ? props.msg.segments.filter(s => s.type === 'text').map(s => s.content || '').join('\n')
+    : props.msg.content || ''
+
+  return /```|<pre[\s>]|<table[\s>]|^\s*\|.+\|\s*$/im.test(text)
+})
+
+const toolCount = computed(() => {
+  return props.msg.segments?.filter(s => s.type === 'tool').length || 0
+})
+
+const firstToolIndex = computed(() => {
+  return props.msg.segments?.findIndex(s => s.type === 'tool') ?? -1
+})
+
+const lastToolIndex = computed(() => {
+  if (!props.msg.segments) return -1
+  for (let i = props.msg.segments.length - 1; i >= 0; i--) {
+    if (props.msg.segments[i].type === 'tool') return i
+  }
+  return -1
+})
+
+// 工具调用折叠状态
+const toolsCollapsed = ref(true)
+
+// 切换折叠状态
+function toggleToolsCollapse() {
+  toolsCollapsed.value = !toolsCollapsed.value
+}
+
+// 消息完成时自动折叠
+watch(() => props.msg.streaming, (newVal, oldVal) => {
+  if (oldVal === true && newVal === false) {
+    toolsCollapsed.value = true
+  }
+})
 
 const allExpanded = computed(() => {
   if (!props.msg.segments) return false
@@ -173,33 +236,14 @@ const hasTextContent = computed(() => {
   return props.msg.segments.some(s => s.type === 'text' && s.content?.trim())
 })
 
-function stripActions(text) {
-  return text
-    // 多行动作：*...\n...*（用 [\s\S] 匹配换行）
-    .replace(/\*[\s\S]*?\*/g, '')
-    // 中文括号
-    .replace(/（[\s\S]*?）/g, '')
-    // 英文括号
-    .replace(/\([\s\S]*?\)/g, '')
-    // 中文方括号
-    .replace(/【[\s\S]*?】/g, '')
-    // 斜体：_text_ 和 **bold** 保留内容
-    .replace(/\*\*([^*]+)\*\*/g, '$1')
-    .replace(/_([^_]+)_/g, '$1')
-    // 清理多余空行
-    .replace(/\n{2,}/g, '\n')
-    .trim()
-}
-
 function getPlainText() {
-  if (!props.msg.segments) return props.msg.content || ''
-  return stripActions(
-    props.msg.segments
+  const text = props.msg.segments
+    ? props.msg.segments
       .filter(s => s.type === 'text')
       .map(s => s.content)
       .join('')
-      .replace(/<[^>]+>/g, '')
-  )
+    : props.msg.content || ''
+  return prepareTextForSpeech(text)
 }
 
 async function speakText() {
@@ -256,26 +300,31 @@ async function speakText() {
 
 /* L3: Chat bubbles — 微毛玻璃 + 自适应描边 */
 .bubble {
-  max-width: 80%;
+  max-width: min(78%, 760px);
   padding: var(--bubble-padding);
   position: relative;
   border-radius: var(--radius);
-  background: rgba(10, 10, 24, 0.60);
+  background: rgba(10, 10, 24, 0.70);
   border: none;
   box-shadow: var(--bubble-border);
-  backdrop-filter: blur(1px);
-  -webkit-backdrop-filter: blur(1px);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+}
+
+.bubble.content-wide {
+  width: min(94%, 1040px);
+  max-width: min(94%, 1040px);
 }
 
 /* Asymmetric bottom radius: user bubble bottom-right 8px */
 .bubble.user {
-  background: rgba(20, 20, 40, 0.65);
+  background: rgba(20, 20, 40, 0.74);
   border-bottom-right-radius: 8px;
 }
 
 /* Asymmetric bottom radius: assistant bubble bottom-left 8px */
 .bubble.assistant {
-  background: rgba(20, 20, 40, 0.60);
+  background: rgba(16, 18, 36, 0.70);
   border-bottom-left-radius: 8px;
 }
 
@@ -309,7 +358,7 @@ async function speakText() {
   margin-bottom: 6px;
   max-width: 260px;
 }
-.file-icon { font-size: 20px; flex-shrink: 0; }
+.file-icon { color: var(--text-secondary); flex-shrink: 0; }
 .file-name {
   font-size: 13px;
   color: var(--text-primary);
@@ -367,6 +416,85 @@ async function speakText() {
 .tool-seg[data-status="error"] { border-left-color: #ef4444; background: rgba(239, 68, 68, 0.06); }
 .tool-seg[data-status="error"] + .tool-seg::before { background: #ef4444; }
 
+/* 工具折叠提示（原位） */
+.tools-collapsed-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  margin: 4px 0;
+  background: rgba(124, 92, 252, 0.08);
+  border: 1px solid rgba(124, 92, 252, 0.2);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 180ms ease, border-color 180ms ease, color 180ms ease;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.tools-collapsed-hint:hover {
+  background: rgba(124, 92, 252, 0.15);
+  border-color: rgba(124, 92, 252, 0.3);
+}
+
+/* 工具折叠按钮（展开时显示） */
+.tools-collapse-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  margin: 4px 0;
+  background: rgba(124, 92, 252, 0.06);
+  border: 1px solid rgba(124, 92, 252, 0.15);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 180ms ease, border-color 180ms ease, color 180ms ease;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.tools-collapse-btn:hover {
+  background: rgba(124, 92, 252, 0.12);
+  border-color: rgba(124, 92, 252, 0.25);
+}
+
+/* 打字指示器 */
+.typing-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+}
+
+.typing-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--primary);
+  animation: typing-bounce 1.4s ease-in-out infinite;
+}
+
+.typing-dot:nth-child(1) {
+  animation-delay: 0s;
+}
+
+.typing-dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.typing-dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes typing-bounce {
+  0%, 60%, 100% {
+    transform: translateY(0);
+    opacity: 0.4;
+  }
+  30% {
+    transform: translateY(-8px);
+    opacity: 1;
+  }
+}
+
 .tool-header { display: flex; align-items: center; gap: 4px; flex-wrap: nowrap; }
 .tool-icon { font-size: 12px; flex-shrink: 0; }
 .tool-name { font-weight: 600; color: var(--primary); font-size: 11px; flex-shrink: 0; }
@@ -374,11 +502,9 @@ async function speakText() {
 .tool-status { flex-shrink: 0; font-size: 11px; }
 .tool-arrow {
   flex-shrink: 0;
-  font-size: 9px;
   color: var(--text-secondary);
-  transition: transform 0.2s;
+  transition: transform 180ms ease;
   cursor: pointer;
-  padding: 0 2px;
 }
 .tool-arrow.open { transform: rotate(180deg); }
 .tool-summary { margin-top: 3px; color: var(--text-secondary); font-size: 11px; padding: 2px 6px; background: rgba(0,0,0,0.05); border-radius: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -398,15 +524,19 @@ async function speakText() {
 /* TTS 播放按钮 */
 .tts-btn {
   margin-top: 4px;
-  padding: 3px 8px;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   background: transparent;
   border: none;
   border-radius: 12px;
   cursor: pointer;
-  font-size: 14px;
   color: var(--text-secondary);
   opacity: 0.5;
-  transition: all 0.2s;
+  transition: opacity 180ms ease, color 180ms ease, background 180ms ease;
   align-self: flex-start;
   box-shadow: none;
 }
@@ -479,20 +609,35 @@ async function speakText() {
 }
 .bubble-row:hover .msg-actions { opacity: 1; }
 .action-btn {
-  padding: 2px 6px;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border-radius: 4px;
   background: rgba(20, 20, 40, 0.60);
   box-shadow: 0 0 0 1px rgba(255,255,255,0.10);
   border: none;
   cursor: pointer;
-  font-size: 12px;
-  transition: all 0.15s;
+  transition: box-shadow 180ms ease, filter 180ms ease, opacity 180ms ease;
   opacity: 0;
 }
 .bubble-row:hover .action-btn { opacity: 1; }
 .action-btn:hover {
   box-shadow: 0 0 0 1px var(--primary);
   filter: brightness(1.1);
+}
+
+@media (max-width: 767px) {
+  .bubble {
+    max-width: 88%;
+  }
+
+  .bubble.content-wide {
+    width: 96%;
+    max-width: 96%;
+  }
 }
 .retry-btn {
   position: absolute;

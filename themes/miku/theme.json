@@ -1,0 +1,11 @@
+{
+  "name": "初音未来",
+  "version": "1.0.0",
+  "colors": {
+    "primary": "#39C5BB",
+    "highlight": "#66E0D5",
+    "textPrimary": "#E9FFFD",
+    "textSecondary": "#9ADBD6",
+    "border": "#39C5BB"
+  }
+}

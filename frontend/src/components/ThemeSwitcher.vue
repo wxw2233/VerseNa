@@ -62,10 +62,9 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive } from 'vue'
 import { useThemeStore } from '../stores/theme'
 const themeStore = useThemeStore()
-onMounted(() => themeStore.fetchThemes())
 
 const previewColors = { default: '#7c5cfc', miku: '#39C5BB' }
 function getPreviewColor(id) { return previewColors[id] || '#888' }

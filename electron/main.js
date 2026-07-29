@@ -38,7 +38,7 @@ function getPythonPath() {
 function startBackend() {
   const python = getPythonPath()
   if (!python) {
-    dialog.showErrorBox('Python 未找到', '请安装 Python 3.8+ 并确保已加入 PATH 环境变量。')
+    dialog.showErrorBox('Python 未找到', '请安装 Python 3.10+ 并确保已加入 PATH 环境变量。')
     return false
   }
 
@@ -51,8 +51,13 @@ function startBackend() {
   }
 
   console.log('[Electron] 启动后端...')
+  const backendEnv = { ...process.env, VERSENA_HOST: '127.0.0.1' }
+  if (app.isPackaged) {
+    backendEnv.VERSENA_DATA_DIR = path.join(app.getPath('userData'), 'data')
+  }
   backendProcess = spawn(python, [mainPy], {
     cwd: backendDir,
+    env: backendEnv,
     stdio: ['pipe', 'pipe', 'pipe'],
     windowsHide: true,
   })
@@ -107,7 +112,7 @@ function waitForBackend(maxWait = 15000) {
     const start = Date.now()
     const check = async () => {
       try {
-        const resp = await fetch('http://127.0.0.1:8001/health')
+        const resp = await fetch('http://127.0.0.1:8002/health')
         if (resp.ok) { resolve(true); return }
       } catch {}
       if (Date.now() - start > maxWait) { resolve(false); return }
@@ -125,8 +130,7 @@ function createWindow() {
     height: 860,
     minWidth: 900,
     minHeight: 600,
-    title: '次元人格',
-    icon: path.join(__dirname, 'icon.png'),
+    title: 'VerseNa',
     show: false, // 等后端就绪后再显示
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -180,7 +184,7 @@ function createTray() {
   }
 
   tray = new Tray(icon)
-  tray.setToolTip('次元人格')
+  tray.setToolTip('VerseNa')
 
   const contextMenu = Menu.buildFromTemplate([
     {

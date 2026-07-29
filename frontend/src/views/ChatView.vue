@@ -1,27 +1,89 @@
 <template>
   <div class="chat-view">
-    <SessionList />
+    <!-- 移动端侧边栏切换按钮 -->
+    <button
+      class="mobile-sidebar-toggle"
+      @click="toggleMobileSidebar"
+      :aria-label="mobileSidebarOpen ? '关闭会话列表' : '打开会话列表'"
+    >
+      <PanelLeftClose v-if="mobileSidebarOpen" :size="19" aria-hidden="true" />
+      <PanelLeftOpen v-else :size="19" aria-hidden="true" />
+    </button>
+
+    <SessionList ref="sessionListRef" :class="{ 'mobile-open': mobileSidebarOpen }" />
     <div class="chat-main">
-      <div class="messages" ref="messagesRef">
-        <ChatBubble
-          v-for="(msg, i) in store.messages"
-          :key="sessionStore.currentSessionId + '_' + i"
-          :msg="msg"
-          class="msg-item"
-          :style="{ animationDelay: Math.min(i * 30, 200) + 'ms' }"
-          @retry="handleRetry(i)"
-          @edit="(newContent) => handleEdit(i, newContent)"
-        />
-        <div v-if="store.messages.length === 0" class="empty">
-          <p>✨ VerseNa ✨</p>
-          <p class="sub">点击「+ 新对话」开始聊天</p>
+      <div
+        class="messages"
+        ref="messagesRef"
+        @scroll.passive="handleMessagesScroll"
+        @wheel.passive="cancelAutoScroll"
+        @touchstart.passive="cancelAutoScroll"
+      >
+        <div class="message-rail">
+          <ChatBubble
+            v-for="(msg, i) in store.messages"
+            :key="sessionStore.currentSessionId + '_' + i"
+            :msg="msg"
+            class="msg-item"
+            :style="{ animationDelay: Math.min(i * 30, 200) + 'ms' }"
+            @retry="handleRetry(i)"
+            @edit="(newContent) => handleEdit(i, newContent)"
+          />
+          <EmptyState
+            v-if="store.messages.length === 0"
+            title="VerseNa"
+            action-text="开始对话"
+            @action="handleNewChat"
+          />
         </div>
       </div>
+      <Transition name="scroll-jump">
+        <button
+          v-if="!isAtBottom && store.messages.length"
+          class="scroll-bottom-btn"
+          :class="{ 'has-unread': unreadCount > 0 }"
+          :title="unreadCount ? `${unreadCount} 条新消息` : '回到底部'"
+          :aria-label="unreadCount ? `${unreadCount} 条新消息，回到底部` : '回到底部'"
+          @click="scrollToBottom(true)"
+        >
+          <ArrowDown :size="17" aria-hidden="true" />
+          <span v-if="unreadCount" class="unread-count">{{ unreadCount > 99 ? '99+' : unreadCount }}</span>
+        </button>
+      </Transition>
+      <Transition name="connection-state">
+        <div
+          v-if="connectionStatus !== 'connected' && connectionStatus !== 'idle'"
+          class="connection-status"
+          :class="connectionStatus"
+          role="status"
+          aria-live="polite"
+        >
+          <LoaderCircle
+            v-if="connectionStatus === 'connecting' || connectionStatus === 'reconnecting'"
+            class="connection-spinner"
+            :size="14"
+            aria-hidden="true"
+          />
+          <WifiOff v-else :size="14" aria-hidden="true" />
+          <span>{{ connectionLabel }}</span>
+          <button
+            v-if="connectionStatus === 'disconnected'"
+            class="connection-retry-btn"
+            @click="reconnect"
+            title="重新连接"
+            aria-label="重新连接"
+          >
+            <RefreshCcw :size="13" aria-hidden="true" />
+          </button>
+        </div>
+      </Transition>
       <ChatInput
         @send="handleSend"
         @stop="handleStop"
         :auto-tts="autoTTS"
         :is-streaming="store.isStreaming"
+        :is-stopping="store.isStopping"
+        :connected="connected"
         @toggle-tts="autoTTS = !autoTTS; localStorage.setItem('auto-tts', autoTTS)"
       />
     </div>
@@ -29,7 +91,10 @@
     <!-- Confirm Dialog -->
     <div v-if="confirmDialog.visible" class="confirm-overlay" @click.self="onConfirm(false)">
       <div class="confirm-dialog">
-        <div class="confirm-header">⚠️ 操作确认</div>
+        <div class="confirm-header">
+          <TriangleAlert :size="19" aria-hidden="true" />
+          <span>操作确认</span>
+        </div>
         <div class="confirm-body">
           <p class="confirm-message">{{ confirmDialog.message }}</p>
           <div v-if="confirmDialog.action" class="confirm-meta">
@@ -52,23 +117,89 @@
 
 <script setup>
 import { ref, reactive, computed, nextTick, onMounted, watch } from 'vue'
+import { ArrowDown, LoaderCircle, PanelLeftClose, PanelLeftOpen, RefreshCcw, TriangleAlert, WifiOff } from 'lucide-vue-next'
 import { useToast } from '../composables/useToast'
+import { useKeyboard } from '../composables/useKeyboard'
 import { useChatStore } from '../stores/chat'
 import { useWebSocket } from '../composables/useWebSocket'
 import { usePersonaStore } from '../stores/persona'
 import { useSessionStore } from '../stores/session'
 import { useThemeStore } from '../stores/theme'
+import { prepareTextForSpeech } from '../utils/ttsText'
 import ChatBubble from '../components/ChatBubble.vue'
 import ChatInput from '../components/ChatInput.vue'
 import SessionList from '../components/SessionList.vue'
+import EmptyState from '../components/EmptyState.vue'
 
 const store = useChatStore()
 const personaStore = usePersonaStore()
 const sessionStore = useSessionStore()
 const themeStore = useThemeStore()
 const messagesRef = ref(null)
+const isAtBottom = ref(true)
+const unreadCount = ref(0)
+const currentResponseUnread = ref(false)
+const isAutoScrolling = ref(false)
+let autoScrollTimer = null
 const toast = useToast()
-const { connect, send, onMessage, ws } = useWebSocket()
+const {
+  connected,
+  status: connectionStatus,
+  reconnectAttempts,
+  maxReconnectAttempts,
+  connect,
+  reconnect,
+  send,
+  sendWithAck,
+  onMessage,
+} = useWebSocket()
+
+function createId(prefix) {
+  if (globalThis.crypto?.randomUUID) return `${prefix}_${globalThis.crypto.randomUUID()}`
+  return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2)}`
+}
+
+function createRequestIds() {
+  return {
+    client_message_id: createId('msg'),
+    generation_id: createId('gen'),
+  }
+}
+
+function requestFingerprint(content) {
+  if (typeof content === 'string') return `text:${content}`
+  if (content?.image) return `image:${content.text || ''}:${content.image.dataUrl || content.image.url || ''}`
+  if (content?.file) return `file:${content.text || ''}:${content.file.saved_as || content.file.filename || ''}`
+  return JSON.stringify(content)
+}
+
+let retainedSendRequest = null
+let retainedActionRequest = null
+let actionPending = false
+
+async function refreshCurrentHistory() {
+  const sessionId = sessionStore.currentSessionId
+  const response = await fetch(`/api/sessions/${sessionId}/history`)
+  if (!response.ok) throw new Error(`历史记录同步失败: HTTP ${response.status}`)
+  const history = await response.json()
+  if (sessionStore.currentSessionId === sessionId) store.loadHistory(history)
+}
+
+const connectionLabel = computed(() => {
+  if (connectionStatus.value === 'connecting') return '正在连接'
+  if (connectionStatus.value === 'reconnecting') {
+    const attempt = Math.max(reconnectAttempts.value, 1)
+    return `正在重连 ${attempt}/${maxReconnectAttempts}`
+  }
+  return '连接已断开'
+})
+
+// 移动端侧边栏状态
+const mobileSidebarOpen = ref(false)
+
+const toggleMobileSidebar = () => {
+  mobileSidebarOpen.value = !mobileSidebarOpen.value
+}
 
 const confirmDialog = reactive({
   visible: false,
@@ -89,37 +220,120 @@ let ttsAudio = null
 
 
 
+const BOTTOM_THRESHOLD = 80
+
+function resetUnreadState() {
+  unreadCount.value = 0
+  currentResponseUnread.value = false
+}
+
+function handleMessagesScroll() {
+  const el = messagesRef.value
+  if (!el) return
+
+  const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= BOTTOM_THRESHOLD
+  if (isAutoScrolling.value && !atBottom) return
+
+  isAtBottom.value = atBottom
+  if (atBottom) {
+    isAutoScrolling.value = false
+    resetUnreadState()
+  }
+}
+
+function cancelAutoScroll() {
+  isAutoScrolling.value = false
+  if (autoScrollTimer) clearTimeout(autoScrollTimer)
+}
+
+function markCurrentResponseUnread() {
+  if (currentResponseUnread.value) return
+  unreadCount.value += 1
+  currentResponseUnread.value = true
+}
+
 function scrollToBottom(smooth = false) {
+  isAtBottom.value = true
+  resetUnreadState()
+  if (autoScrollTimer) clearTimeout(autoScrollTimer)
+  isAutoScrolling.value = smooth
   nextTick(() => {
     if (messagesRef.value) {
       messagesRef.value.scrollTo({
         top: messagesRef.value.scrollHeight,
-        behavior: smooth ? 'smooth' : 'instant',
+        behavior: smooth ? 'smooth' : 'auto',
       })
+    }
+
+    if (smooth) {
+      autoScrollTimer = setTimeout(() => {
+        isAutoScrolling.value = false
+        handleMessagesScroll()
+      }, 500)
     }
   })
 }
 
 watch(() => store.messages.length, (newLen, oldLen) => {
-  // 只在消息增加时滚动（不清空时），避免 Transition 期间误触发
-  if (newLen > oldLen) scrollToBottom()
+  if (newLen > oldLen && isAtBottom.value) scrollToBottom()
 })
 
 // 会话切换后滚动到底部
 watch(() => sessionStore.currentSessionId, () => {
+  isAtBottom.value = true
+  resetUnreadState()
   nextTick(() => scrollToBottom())
 })
+
+watch(connectionStatus, (nextStatus, previousStatus) => {
+  if (previousStatus !== 'connected' || nextStatus === 'connected' || !store.isStreaming) return
+  store.handleError('连接中断，请重新生成', store.activeGenerationId)
+  toast.warning('生成因连接中断而停止')
+})
+
+
+// 键盘快捷键
+useKeyboard({
+  'ctrl+n': () => {
+    sessionStore.createSession()
+    toast.info('新建对话')
+  },
+  'ctrl+/': () => {
+    mobileSidebarOpen.value = !mobileSidebarOpen.value
+  },
+  'escape': () => {
+    if (confirmDialog.visible) {
+      onConfirm(false)
+    }
+    if (mobileSidebarOpen.value) {
+      mobileSidebarOpen.value = false
+    }
+  }
+})
+
+// 新建对话 - 触发 SessionList 的主题包选择对话框
+const sessionListRef = ref(null)
+const handleNewChat = () => {
+  if (sessionListRef.value) {
+    sessionListRef.value.handleNew()
+  }
+}
 
 onMounted(() => {
   connect()
   scrollToBottom()
   onMessage.value = (msg) => {
+    const shouldFollowOutput = isAtBottom.value
+    const updatesMessageContent = msg.type === 'segment' || msg.type === 'answer' || msg.type === 'error'
+    let applied = true
+
     if (msg.type === 'segment') {
-      store.appendSegment(msg.segment)
+      applied = store.appendSegment(msg.segment, msg.generation_id)
     } else if (msg.type === 'answer') {
       // 旧格式兼容
-      store.appendSegment({ type: 'text', content: msg.content })
+      applied = store.appendSegment({ type: 'text', content: msg.content }, msg.generation_id)
     } else if (msg.type === 'confirm') {
+      if (msg.generation_id && msg.generation_id !== store.activeGenerationId) return
       // 显示确认对话框
       const data = msg.data || msg
       confirmDialog.requestId = data.request_id || ''
@@ -132,7 +346,8 @@ onMounted(() => {
       confirmDialog.dir_count = data.dir_count
       confirmDialog.visible = true
     } else if (msg.type === 'done') {
-      store.finishStreaming(msg.emoji)
+      applied = store.finishStreaming(msg.emoji, msg.generation_id)
+      if (!applied) return
       // 首条消息自动命名
       autoTitleIfNeeded()
       // 保存展开状态
@@ -142,120 +357,197 @@ onMounted(() => {
         autoSpeakLast()
       }
     } else if (msg.type === 'error') {
-      store.handleError(msg.content || msg.message || '未知错误')
+      applied = store.handleError(msg.content || msg.message || '未知错误', msg.generation_id)
     }
-    scrollToBottom()
+
+    if (!applied) return
+
+    if (shouldFollowOutput) {
+      scrollToBottom()
+    } else if (updatesMessageContent) {
+      markCurrentResponseUnread()
+    }
+
+    if (msg.type === 'done' || msg.type === 'error') {
+      currentResponseUnread.value = false
+    }
   }
 })
 
 function onConfirm(confirmed) {
   const requestId = confirmDialog.requestId
-  confirmDialog.visible = false
-  const msg = JSON.stringify({
+  const sent = send({
     type: 'confirm_response',
     request_id: requestId,
-    confirmed: confirmed
+    confirmed,
   })
-  // 直接通过 WebSocket 发送，不依赖 connected 状态
-  if (ws && ws.value && ws.value.readyState === WebSocket.OPEN) {
-    ws.value.send(msg)
-  } else {
-    send({ type: 'confirm_response', request_id: requestId, confirmed: confirmed })
+  if (!sent) {
+    toast.warning('连接不可用，确认结果尚未发送')
+    reconnect()
+    return
   }
+  confirmDialog.visible = false
 }
 
 function handleStop() {
-  send({ type: 'stop' })
-  store.isStreaming = false
+  if (store.isStopping) return
+  const generationId = store.activeGenerationId
+  if (!send({ type: 'stop', generation_id: generationId })) {
+    toast.warning('连接已中断，生成状态已在本地停止')
+    store.handleError('连接中断，生成已停止', generationId)
+    reconnect()
+    return
+  }
+  store.requestStop(generationId)
 }
 
-function handleSend(content) {
+async function handleSend(content, acknowledge = () => {}) {
+  const fingerprint = requestFingerprint(content)
+  const requestIds = retainedSendRequest?.fingerprint === fingerprint
+    ? retainedSendRequest.ids
+    : createRequestIds()
+  let payload
   if (typeof content === 'object' && content.image) {
-    store.messages.push({
-      role: 'user',
-      content: content.text || '',
-      image: content.image,
-      streaming: false,
-    })
-    store.isStreaming = true
-    scrollToBottom()
     const msgContent = content.text
       ? content.text + '\n[图片已发送]'
       : '[图片已发送]'
-    send({
+    payload = {
       session_id: sessionStore.currentSessionId,
       content: msgContent,
       persona: personaStore.current,
       system_prompt: '',
       image_url: content.image.dataUrl,
-    })
+      ...requestIds,
+    }
   } else if (typeof content === 'object' && content.file) {
-    store.messages.push({
-      role: 'user',
-      content: content.text || '',
-      file: content.file,
-      streaming: false,
-    })
-    store.isStreaming = true
-    scrollToBottom()
     const msgContent = (content.text ? content.text + '\n' : '') +
       `[文件: ${content.file.filename}]\n${content.file.full_text || content.file.text_preview || ''}`
-    send({
+    payload = {
       session_id: sessionStore.currentSessionId,
       content: msgContent,
       persona: personaStore.current,
       system_prompt: '',
-    })
+      ...requestIds,
+    }
   } else {
-    store.addUserMessage(content)
-    store.isStreaming = true
-    scrollToBottom()
-    send({
+    payload = {
       session_id: sessionStore.currentSessionId,
       content,
       persona: personaStore.current,
       system_prompt: '',
-    })
+      ...requestIds,
+    }
+  }
+
+  try {
+    const accepted = await sendWithAck(payload)
+    const generationId = accepted.generation_id || requestIds.generation_id
+    const clientMessageId = accepted.client_message_id || requestIds.client_message_id
+
+    retainedSendRequest = null
+    if (accepted.duplicate && accepted.status !== 'running') {
+      await refreshCurrentHistory()
+      acknowledge(true)
+      toast.info('消息已由服务端处理，会话已同步')
+      return
+    }
+
+    if (typeof content === 'object' && content.image) {
+      store.messages.push({
+        role: 'user',
+        content: content.text || '',
+        image: content.image,
+        streaming: false,
+        clientMessageId,
+      })
+    } else if (typeof content === 'object' && content.file) {
+      store.messages.push({
+        role: 'user',
+        content: content.text || '',
+        file: content.file,
+        streaming: false,
+        clientMessageId,
+      })
+    } else {
+      store.addUserMessage(content, null, clientMessageId)
+    }
+
+    store.startStreaming(generationId)
+    scrollToBottom()
+    acknowledge(true)
+  } catch (error) {
+    retainedSendRequest = { fingerprint, ids: requestIds }
+    acknowledge(false)
+    toast.warning(error.message || '发送失败，消息已保留')
+    if (!connected.value) reconnect()
   }
 }
 
-function handleRetry(msgIndex) {
-  // 删除该消息及之后的所有消息
-  store.deleteFrom(msgIndex)
-  store.isStreaming = true
-  send({
-    type: 'resend',
-    session_id: sessionStore.currentSessionId,
-    persona: personaStore.current,
-  })
+async function handleRetry(msgIndex) {
+  if (actionPending) return
+  actionPending = true
+  const requestKey = `resend:${sessionStore.currentSessionId}:${store.messages[msgIndex]?.generationId || msgIndex}`
+  const requestIds = retainedActionRequest?.key === requestKey
+    ? retainedActionRequest.ids
+    : createRequestIds()
+  try {
+    const accepted = await sendWithAck({
+      type: 'resend',
+      session_id: sessionStore.currentSessionId,
+      persona: personaStore.current,
+      ...requestIds,
+    })
+    retainedActionRequest = null
+    if (accepted.duplicate && accepted.status !== 'running') {
+      await refreshCurrentHistory()
+      toast.info('重新生成请求已由服务端处理，会话已同步')
+      return
+    }
+    store.deleteFrom(msgIndex)
+    store.startStreaming(accepted.generation_id || requestIds.generation_id)
+  } catch (error) {
+    retainedActionRequest = { key: requestKey, ids: requestIds }
+    toast.warning(error.message || '重新生成请求未发送')
+    if (!connected.value) reconnect()
+  } finally {
+    actionPending = false
+  }
 }
 
-function handleEdit(msgIndex, newContent) {
+async function handleEdit(msgIndex, newContent) {
+  if (actionPending) return
+  actionPending = true
   const msg = store.messages[msgIndex]
-  // 删除该消息及之后的所有消息
-  store.deleteFrom(msgIndex + 1)
-  // 更新消息内容
-  msg.content = newContent
-  store.isStreaming = true
-  send({
-    type: 'edit',
-    session_id: sessionStore.currentSessionId,
-    persona: personaStore.current,
-    message_id: msg.dbId,
-    content: newContent,
-  })
-}
-
-function stripActions(text) {
-  // 过滤掉动作描述，只保留对话内容
-  return text
-    .replace(/\*[^*]+\*/g, '')           // *动作*
-    .replace(/（[^）]+）/g, '')            // （动作）
-    .replace(/\([^)]+\)/g, '')           // (动作)
-    .replace(/【[^】]+】/g, '')            // 【动作】
-    .replace(/「[^」]*?(?:笑|叹|摇头|点头|眨眼|耸肩|轻声|低声|小声|大喊|尖叫|哭|叹气|沉默|沉默了|顿了顿|想了想|歪头|托腮|摊手|耸肩|鞠躬|行礼|跪|坐|站|走|跑|跳|飞|转|看|望|盯|瞪|闭|睁|摸|碰|推|拉|打|踢|拍|挥|举|放|拿|递|接|抱|握|靠|躺|蹲|趴)[^」]*?」/g, '')
-    .replace(/\n{2,}/g, '\n')
-    .trim()
+  const requestKey = `edit:${sessionStore.currentSessionId}:${msg?.dbId || msgIndex}:${newContent}`
+  const requestIds = retainedActionRequest?.key === requestKey
+    ? retainedActionRequest.ids
+    : createRequestIds()
+  try {
+    const accepted = await sendWithAck({
+      type: 'edit',
+      session_id: sessionStore.currentSessionId,
+      persona: personaStore.current,
+      message_id: msg.dbId,
+      content: newContent,
+      ...requestIds,
+    })
+    retainedActionRequest = null
+    if (accepted.duplicate && accepted.status !== 'running') {
+      await refreshCurrentHistory()
+      toast.info('编辑请求已由服务端处理，会话已同步')
+      return
+    }
+    store.deleteFrom(msgIndex + 1)
+    msg.content = newContent
+    msg.clientMessageId = accepted.client_message_id || requestIds.client_message_id
+    store.startStreaming(accepted.generation_id || requestIds.generation_id)
+  } catch (error) {
+    retainedActionRequest = { key: requestKey, ids: requestIds }
+    toast.warning(error.message || '编辑请求未发送，原消息保持不变')
+    if (!connected.value) reconnect()
+  } finally {
+    actionPending = false
+  }
 }
 
 async function autoSpeakLast() {
@@ -268,8 +560,7 @@ async function autoSpeakLast() {
   } else {
     text = last.content || ''
   }
-  text = text.replace(/<[^>]+>/g, '')
-  text = stripActions(text)
+  text = prepareTextForSpeech(text)
   if (!text || text.length < 2) return
 
   try {
@@ -375,7 +666,7 @@ setTimeout(loadToolExpanded, 100)
 /* L2: Chat view — 8px blur, 0.62 opacity */
 .chat-view {
   display: flex;
-  height: calc(100vh - 52px);
+  height: 100vh;
   /* transparent - bg shows through */
 }
 .chat-main {
@@ -390,21 +681,139 @@ setTimeout(loadToolExpanded, 100)
 .messages {
   flex: 1;
   overflow-y: auto;
-  padding: 16px 20px;
-  display: flex;
-  flex-direction: column;
+  overflow-x: hidden;
+  width: 100%;
+  padding: 16px 0;
   position: relative;
   z-index: 1;
+}
+.message-rail {
+  width: min(100%, var(--chat-content-width));
+  margin-inline: auto;
+  min-height: 100%;
+  padding: 0 var(--chat-gutter);
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+}
+
+.scroll-bottom-btn {
+  position: absolute;
+  right: max(var(--chat-gutter), calc((100% - var(--chat-content-width)) / 2 + var(--chat-gutter)));
+  bottom: 86px;
+  z-index: 10;
+  width: 38px;
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0;
+  color: var(--text-primary);
+  background: var(--surface-modal);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 50%;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.30);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  cursor: pointer;
+  transition: transform var(--motion-fast) var(--ease-standard), background var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard);
+}
+.scroll-bottom-btn.has-unread {
+  width: auto;
+  min-width: 38px;
+  padding: 0 11px;
+  border-radius: 19px;
+  border-color: color-mix(in srgb, var(--primary) 55%, transparent);
+}
+.scroll-bottom-btn:hover {
+  transform: translateY(-2px);
+  background: color-mix(in srgb, var(--surface-modal) 88%, var(--primary));
+  border-color: var(--primary);
+}
+.unread-count {
+  min-width: 12px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+.scroll-jump-enter-active,
+.scroll-jump-leave-active {
+  transition: opacity var(--motion-fast) var(--ease-standard), transform var(--motion-fast) var(--ease-emphasized);
+}
+.scroll-jump-enter-from,
+.scroll-jump-leave-to {
+  opacity: 0;
+  transform: translateY(8px);
+}
+
+.connection-status {
+  position: absolute;
+  left: max(var(--chat-gutter), calc((100% - var(--chat-content-width)) / 2 + var(--chat-gutter)));
+  bottom: 86px;
+  z-index: 10;
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 10px;
+  color: var(--text-secondary);
+  background: var(--surface-modal);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 16px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.26);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  font-size: 12px;
+}
+.connection-status.disconnected {
+  color: #fca5a5;
+  border-color: rgba(248, 113, 113, 0.28);
+}
+.connection-retry-btn {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: -6px;
+  padding: 0;
+  color: currentColor;
+  background: transparent;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: color var(--motion-fast) var(--ease-standard), background var(--motion-fast) var(--ease-standard), transform var(--motion-fast) var(--ease-standard);
+}
+.connection-retry-btn:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.08);
+  transform: rotate(30deg);
+}
+.connection-spinner {
+  animation: connection-spin 800ms linear infinite;
+}
+.connection-state-enter-active,
+.connection-state-leave-active {
+  transition: opacity var(--motion-fast) var(--ease-standard), transform var(--motion-fast) var(--ease-emphasized);
+}
+.connection-state-enter-from,
+.connection-state-leave-to {
+  opacity: 0;
+  transform: translateY(6px);
+}
+@keyframes connection-spin {
+  to { transform: rotate(360deg); }
 }
 
 /* 消息淡入动画 */
 .msg-item {
-  animation: msg-appear 0.25s ease both;
+  animation: msg-appear var(--motion-base) var(--ease-emphasized) backwards;
 }
 @keyframes msg-appear {
   from {
     opacity: 0;
-    transform: translateY(8px);
+    transform: translateY(6px);
   }
   to {
     opacity: 1;
@@ -425,7 +834,7 @@ setTimeout(loadToolExpanded, 100)
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
   background: rgba(0, 0, 0, 0.5);
-   
+
 
   display: flex;
   align-items: center;
@@ -434,7 +843,7 @@ setTimeout(loadToolExpanded, 100)
 }
 .confirm-dialog {
   background: var(--panel-l3);
-   
+
 
   box-shadow: var(--border-subtle), var(--glow-inner), 0 8px 32px rgba(0, 0, 0, 0.4);
   border-radius: var(--radius);
@@ -443,6 +852,9 @@ setTimeout(loadToolExpanded, 100)
   max-width: 520px;
 }
 .confirm-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-size: 18px;
   font-weight: 600;
   margin-bottom: 16px;
@@ -518,4 +930,73 @@ setTimeout(loadToolExpanded, 100)
   transform: translateY(-1px);
 }
 
+
+/* 移动端侧边栏切换按钮 */
+.mobile-sidebar-toggle {
+  display: none;
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  z-index: 200;
+  width: var(--control-height);
+  height: var(--control-height);
+  border-radius: 10px;
+  background: var(--primary);
+  color: white;
+  border: none;
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 12px rgba(124, 92, 252, 0.4);
+  transition: transform var(--motion-fast) var(--ease-standard), box-shadow var(--motion-fast) var(--ease-standard), filter var(--motion-fast) var(--ease-standard);
+}
+
+.mobile-sidebar-toggle:hover {
+  transform: scale(1.05);
+  box-shadow: 0 6px 16px rgba(124, 92, 252, 0.5);
+}
+
+/* 移动端响应式 */
+@media (max-width: 767px) {
+  .chat-view {
+    flex-direction: column;
+    position: relative;
+  }
+
+  .mobile-sidebar-toggle {
+    display: flex;
+  }
+
+  .chat-main {
+    width: 100%;
+    flex: 1;
+    min-height: 0;
+  }
+
+  .messages {
+    padding: 12px 0;
+    padding-bottom: 100px;
+  }
+
+  .message-rail {
+    padding: 0 12px;
+  }
+
+  .scroll-bottom-btn {
+    right: 16px;
+    bottom: 92px;
+  }
+
+  .connection-status {
+    left: 16px;
+    bottom: 92px;
+  }
+
+  .confirm-dialog {
+    min-width: auto;
+    max-width: none;
+    width: calc(100% - 32px);
+    margin: 16px;
+  }
+}
 </style>

@@ -1,0 +1,337 @@
+/* ============================================================
+   可访问性增强样式
+   WCAG 2.1 AA 标准
+   ============================================================ */
+
+/* 焦点管理 */
+:focus-visible {
+  outline: 2px solid var(--primary, #7c5cfc);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* 高对比度模式 */
+@media (prefers-contrast: high) {
+  :root {
+    --text-primary: #ffffff;
+    --text-secondary: #cccccc;
+    --border-subtle: 0 0 0 2px rgba(255, 255, 255, 0.3);
+    --bubble-border: 0 0 0 2px rgba(255, 255, 255, 0.2);
+  }
+
+  button, input, textarea, select {
+    border: 2px solid rgba(255, 255, 255, 0.3);
+  }
+
+  a {
+    text-decoration: underline;
+  }
+}
+
+/* 减少动画偏好 */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .animate-spin,
+  .animate-pulse,
+  .animate-bounce {
+    animation: none;
+  }
+}
+
+/* 屏幕阅读器专用 */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+.sr-only-focusable:focus,
+.sr-only-focusable:active {
+  position: static;
+  width: auto;
+  height: auto;
+  padding: inherit;
+  margin: inherit;
+  overflow: visible;
+  clip: auto;
+  white-space: inherit;
+}
+
+/* 跳过链接 */
+.skip-link {
+  position: absolute;
+  top: -40px;
+  left: 0;
+  background: var(--primary, #7c5cfc);
+  color: white;
+  padding: 8px 16px;
+  z-index: 10000;
+  transition: top 0.3s;
+  font-weight: 600;
+  text-decoration: none;
+  border-radius: 0 0 8px 0;
+}
+
+.skip-link:focus {
+  top: 0;
+}
+
+/* 触摸目标大小 */
+@media (hover: none) and (pointer: coarse) {
+  button,
+  [role="button"],
+  input[type="checkbox"],
+  input[type="radio"],
+  .action-btn,
+  .menu-item,
+  .nav-link {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}
+
+/* 焦点陷阱（模态框用） */
+.focus-trap {
+  position: relative;
+}
+
+.focus-trap::before,
+.focus-trap::after {
+  content: '';
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+}
+
+/* 状态指示器颜色对比度 */
+.status-success {
+  color: #4ade80;
+  text-shadow: 0 0 4px rgba(74, 222, 128, 0.5);
+}
+
+.status-warning {
+  color: #fbbf24;
+  text-shadow: 0 0 4px rgba(251, 191, 36, 0.5);
+}
+
+.status-error {
+  color: #f87171;
+  text-shadow: 0 0 4px rgba(248, 113, 113, 0.5);
+}
+
+.status-info {
+  color: #60a5fa;
+  text-shadow: 0 0 4px rgba(96, 165, 250, 0.5);
+}
+
+/* 表单可访问性 */
+label {
+  display: block;
+  margin-bottom: 4px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+input:invalid,
+textarea:invalid,
+select:invalid {
+  border-color: #f87171;
+  box-shadow: 0 0 0 2px rgba(248, 113, 113, 0.2);
+}
+
+input:valid,
+textarea:valid,
+select:valid {
+  border-color: #4ade80;
+}
+
+input:disabled,
+textarea:disabled,
+select:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* 错误消息 */
+.error-message {
+  color: #f87171;
+  font-size: 12px;
+  margin-top: 4px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.error-message::before {
+  content: '?';
+  font-size: 14px;
+}
+
+/* 成功消息 */
+.success-message {
+  color: #4ade80;
+  font-size: 12px;
+  margin-top: 4px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.success-message::before {
+  content: '?';
+  font-size: 14px;
+}
+
+/* 加载状态 */
+[aria-busy="true"] {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+[aria-busy="true"]::after {
+  content: '';
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* 工具提示 */
+[title] {
+  position: relative;
+}
+
+[title]::after {
+  content: attr(title);
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.9);
+  color: white;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  white-space: nowrap;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.2s, visibility 0.2s;
+  pointer-events: none;
+  z-index: 1000;
+}
+
+[title]:hover::after,
+[title]:focus::after {
+  opacity: 1;
+  visibility: visible;
+}
+
+/* 模态框背景遮罩 */
+.modal-backdrop {
+  background: rgba(0, 0, 0, 0.7);
+}
+
+/* 焦点指示器增强 */
+.focus-ring:focus {
+  box-shadow: 0 0 0 3px rgba(124, 92, 252, 0.5);
+}
+
+/* 键盘导航指示器 */
+.keyboard-nav *:focus {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.mouse-nav *:focus {
+  outline: none;
+}
+
+/* 实时区域 */
+[aria-live] {
+  /* 确保屏幕阅读器能感知变化 */
+}
+
+/* 禁用状态 */
+[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+/* 选中状态 */
+[aria-selected="true"] {
+  background: rgba(124, 92, 252, 0.2);
+  border-left: 3px solid var(--primary);
+}
+
+/* 展开状态 */
+[aria-expanded="true"] .expand-icon {
+  transform: rotate(90deg);
+}
+
+/* 当前页面指示 */
+[aria-current="page"] {
+  font-weight: 600;
+  color: var(--primary);
+}
+
+/* 隐藏但保持可访问性 */
+.visual-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* 打印样式 */
+@media print {
+  .no-print {
+    display: none !important;
+  }
+
+  * {
+    color: black !important;
+    background: white !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
+  }
+
+  a[href]::after {
+    content: " (" attr(href) ")";
+    font-size: 12px;
+    color: #666;
+  }
+}

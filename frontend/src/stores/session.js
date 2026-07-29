@@ -1,18 +1,38 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import { fetchJsonWithRetry } from '../utils/api'
 
 export const useSessionStore = defineStore('session', () => {
   const sessions = ref([])
   const currentSessionId = ref('default')
   const loading = ref(false)
+  const error = ref('')
+  let fetchPromise = null
 
-  async function fetchSessions() {
+  async function fetchSessions({ retries = 2, retryDelay = 250 } = {}) {
+    if (fetchPromise) return fetchPromise
+
     loading.value = true
+    error.value = ''
+    fetchPromise = (async () => {
+      const data = await fetchJsonWithRetry('/api/sessions', {
+        retries,
+        retryDelay,
+        cache: 'no-store',
+        validate: Array.isArray,
+      })
+      sessions.value = data
+      return data
+    })()
+
     try {
-      const resp = await fetch('/api/sessions')
-      sessions.value = await resp.json()
+      return await fetchPromise
+    } catch (err) {
+      error.value = '会话列表加载失败'
+      throw err
     } finally {
       loading.value = false
+      fetchPromise = null
     }
   }
 
@@ -25,7 +45,8 @@ export const useSessionStore = defineStore('session', () => {
   }
 
   async function deleteSession(id) {
-    await fetch(`/api/sessions/${id}`, { method: 'DELETE' })
+    const resp = await fetch(`/api/sessions/${id}`, { method: 'DELETE' })
+    if (!resp.ok) throw new Error(`删除会话失败: HTTP ${resp.status}`)
     if (currentSessionId.value === id) {
       currentSessionId.value = 'default'
     }
@@ -36,5 +57,5 @@ export const useSessionStore = defineStore('session', () => {
     currentSessionId.value = id
   }
 
-  return { sessions, currentSessionId, loading, fetchSessions, createSession, deleteSession, switchSession }
+  return { sessions, currentSessionId, loading, error, fetchSessions, createSession, deleteSession, switchSession }
 })

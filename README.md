@@ -20,6 +20,7 @@
 - 👁️ **图片理解** — 上传图片，视觉模型识别内容
 - 📎 **文件附件** — 图片/文档/代码文件上传
 - 🔧 **工具调用** — 联网搜索 / 代码执行 / 文件管理 / 长期记忆
+- 🧩 **Skill 系统** — 内置 / 自定义 / GitHub 安装，按需加载技能说明和知识文档
 - 🧠 **记忆系统** — 自动提取 + 手动管理，支持分类和搜索
 - 📡 **QQ 机器人** — WebSocket 模式，支持私聊和群聊
 - 🎨 **主题定制** — 4 色配置 + 背景图 + 自适应亮度
@@ -38,7 +39,7 @@
 
 ### 环境要求
 
-- Python 3.8+
+- Python 3.10+
 - Node.js 18+
 - npm 或 pnpm
 
@@ -74,6 +75,8 @@ npm run dev
 
 浏览器访问 `http://localhost:5173`
 
+后端默认只监听 `127.0.0.1:8002`。如确需修改监听地址、端口或前端来源，可设置 `VERSENA_HOST`、`VERSENA_PORT` 和 `VERSENA_ALLOWED_ORIGINS`；开放到局域网前应自行增加访问认证。
+
 ### 配置模型
 
 1. 打开 **设置 → 模型配置**
@@ -89,6 +92,8 @@ npm run dev
 │   ├── agent/            # ReAct Agent 核心
 │   ├── tts/              # TTS 语音合成
 │   ├── tools/            # 内置工具
+│   ├── skills/           # Skill 管理与内容
+│   ├── scripts/          # 维护脚本
 │   ├── persona/          # 角色系统
 │   └── db/               # 数据库
 ├── frontend/             # Vue 3 前端
@@ -111,6 +116,24 @@ npm run dev
 - `assets/` — 图标/背景/参考音频
 
 支持导入/导出 ZIP 格式。
+
+## ✅ 测试
+
+```bash
+cd backend
+python -m pytest -q
+
+cd ../frontend
+npm run build
+```
+
+## 💾 数据备份
+
+```bash
+python backend/scripts/backup_user_data.py
+```
+
+备份默认保存在 `backups/`，详细恢复步骤见 [docs/BACKUP.md](docs/BACKUP.md)。备份包含私人对话和 API Key，请妥善保管。
 
 ## 🤝 贡献
 

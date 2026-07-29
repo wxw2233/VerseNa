@@ -26,6 +26,30 @@
   --radius-sm: 8px;
   --radius-btn: 10px;
 
+  /* 控件与图标 */
+  --control-icon-size: 28px;
+  --control-height: 40px;
+  --touch-target-size: 44px;
+  --icon-size-sm: 14px;
+  --icon-size-md: 17px;
+
+  /* 动效 */
+  --motion-fast: 180ms;
+  --motion-base: 220ms;
+  --motion-slow: 320ms;
+  --ease-standard: ease;
+  --ease-emphasized: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  /* 玻璃层 */
+  --surface-floating: rgba(8, 18, 34, 0.22);
+  --surface-control: rgba(20, 20, 40, 0.60);
+  --surface-modal: rgba(15, 15, 30, 0.90);
+  --glass-blur: 8px;
+
+  /* 聊天内容轨道 */
+  --chat-content-width: 1180px;
+  --chat-gutter: 20px;
+
   /* 气泡 */
   --bubble-user: rgba(124, 92, 252, 0.05);
   --bubble-agent: rgba(20, 20, 40, 0.10);

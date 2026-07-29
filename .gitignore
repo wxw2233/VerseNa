@@ -49,6 +49,7 @@ backend/data/uploads/
 
 # Electron 构建产物
 Build_test/
+backups/
 
 # .superpowers
 .superpowers/

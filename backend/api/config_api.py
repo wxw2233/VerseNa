@@ -1,7 +1,7 @@
 import json
 import httpx
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from config import settings
 from db.database import db
 from models.providers import get_all_providers, get_provider, PROVIDER_PRESETS
@@ -12,6 +12,8 @@ router = APIRouter()
 # ========== 旧版单模型配置（保持向后兼容） ==========
 
 class ModelConfig(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
     api_key: str
     base_url: str
     model_name: str

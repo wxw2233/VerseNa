@@ -1,13 +1,20 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import { fetchJsonWithRetry } from '../utils/api'
 
 export const usePersonaStore = defineStore('persona', () => {
   const personas = ref([])
   const current = ref('default')
 
-  async function fetchPersonas() {
-    const resp = await fetch('/api/personas')
-    personas.value = await resp.json()
+  async function fetchPersonas({ retries = 2, retryDelay = 250 } = {}) {
+    const data = await fetchJsonWithRetry('/api/personas', {
+      retries,
+      retryDelay,
+      cache: 'no-store',
+      validate: Array.isArray,
+    })
+    personas.value = data
+    return data
   }
 
   function switchPersona(name) {

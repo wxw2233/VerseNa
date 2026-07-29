@@ -20,7 +20,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed } from 'vue'
 import { usePersonaStore } from '../stores/persona'
 import { useSessionStore } from '../stores/session'
 import { useChatStore } from '../stores/chat'
@@ -55,7 +55,6 @@ async function selectPersona(id) {
   }
 }
 
-onMounted(() => personaStore.fetchPersonas())
 </script>
 
 <style scoped>

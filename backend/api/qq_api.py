@@ -24,6 +24,10 @@ async def handle_qq_message(msg):
         system_prompt = persona_manager.get_system_prompt("default")
         tool_desc = "\n".join(f"- {t['function']['name']}: {t['function']['description']}" for t in tool_registry.get_tools())
         system_prompt += f"\n\n## 可用工具\n{tool_desc}\n\n使用工具时请通过 function calling 调用。"
+        from skills.manager import skill_manager
+        skill_prompt = skill_manager.get_skill_prompt()
+        if skill_prompt:
+            system_prompt += f"\n\n{skill_prompt}"
         system_prompt += "\n\n## 重要：你必须始终使用中文回复，不要使用英文。"
 
         adapter = OpenAIAdapter(api_key=settings.DEFAULT_API_KEY, base_url=settings.DEFAULT_API_BASE, model_name=settings.DEFAULT_MODEL_NAME)

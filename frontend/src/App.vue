@@ -1,13 +1,10 @@
 <template>
   <div id="app-root">
-    <nav class="top-bar">
-      <router-link to="/" class="nav-title">VerseNa</router-link>
-      <a class="nav-link" :class="{ active: isSettings }" @click="toggleSettings">{{ isSettings ? '返回' : '设置' }}</a>
-    </nav>
+    <ParticleBg color="#7c5cfc" :count="40" :speed="0.3" />
     <div class="bg-layer" :style="bgStyle" :class="{ 'bg-visible': bgReady }"></div>
     <main class="main-content">
       <router-view v-slot="{ Component, route }">
-        <Transition name="page-fade" mode="out-in">
+        <Transition :name="transitionName" mode="out-in">
           <component :is="Component" :key="route.path" />
         </Transition>
       </router-view>
@@ -17,14 +14,19 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { usePersonaStore } from './stores/persona'
+import { useSessionStore } from './stores/session'
 import { useThemeStore } from './stores/theme'
 import { useBrightness } from './composables/useBrightness'
 import Toast from './components/Toast.vue'
+import ParticleBg from './components/ParticleBg.vue'
 
 const route = useRoute()
 const router = useRouter()
+const personaStore = usePersonaStore()
+const sessionStore = useSessionStore()
 const themeStore = useThemeStore()
 const { update: updateBrightness } = useBrightness()
 
@@ -57,14 +59,52 @@ watch(bgStyle, (val) => {
   }
 }, { immediate: true })
 
+// 页面切换动画方向
+const transitionName = ref('slide-right')
+const prevPath = ref('/')
+
+watch(() => route.path, (newPath) => {
+  if (newPath === '/settings') {
+    transitionName.value = 'slide-left'
+  } else if (prevPath.value === '/settings') {
+    transitionName.value = 'slide-right'
+  } else {
+    transitionName.value = 'slide-left'
+  }
+  prevPath.value = newPath
+})
+
 const isSettings = computed(() => route.path === '/settings')
 function toggleSettings() {
   if (isSettings.value) { router.push('/') }
   else { router.push('/settings') }
 }
 
-onMounted(() => { themeStore.restoreTheme() })
+async function initializeCoreData() {
+  const results = await Promise.allSettled([
+    sessionStore.fetchSessions({ retries: 4, retryDelay: 250 }),
+    personaStore.fetchPersonas({ retries: 4, retryDelay: 250 }),
+    themeStore.fetchThemes({ retries: 4, retryDelay: 250 }),
+  ])
+
+  results.forEach((result, index) => {
+    if (result.status === 'rejected') {
+      const resource = ['sessions', 'personas', 'themes'][index]
+      console.error(`Failed to initialize ${resource}:`, result.reason)
+    }
+  })
+
+  try {
+    await themeStore.restoreTheme()
+  } catch (err) {
+    console.error('Failed to restore theme:', err)
+  }
+}
+
+initializeCoreData()
 </script>
+
+
 
 <style scoped>
 .bg-layer {
@@ -79,44 +119,50 @@ onMounted(() => { themeStore.restoreTheme() })
 }
 .bg-layer.bg-visible {
   opacity: var(--target-opacity, 0.3);
-  transition: opacity 0.4s ease;
+  transition: opacity var(--motion-slow) ease-out;
 }
-.top-bar, .main-content { position: relative; z-index: 1; }
-
-.top-bar {
-  display: flex; align-items: center; padding: 12px 20px;
-  background: transparent; box-shadow: none;
-}
-.nav-title {
-  text-shadow: 0 0 8px rgba(0,0,0,0.5);
-  font-size: 18px; font-weight: bold; color: var(--primary);
-  text-decoration: none; margin-right: auto; letter-spacing: 1px;
-}
-.nav-link {
-  color: var(--text-secondary); font-size: 14px; cursor: pointer;
-  padding: 4px 12px; border-radius: 8px;
-  transition: background 0.15s, color 0.15s;
-  text-shadow: 0 0 4px rgba(0,0,0,0.3);
-}
-.nav-link:hover { color: var(--primary); background: rgba(124, 92, 252, 0.15); }
-.nav-link.active { color: var(--primary); }
+.main-content { position: relative; z-index: 1; }
 .main-content {
   flex: 1;
   overflow: hidden;
   position: relative;
 }
 
-/* 路由切换动画 */
-.page-fade-enter-active,
-.page-fade-leave-active {
-  transition: opacity 0.2s ease, transform 0.2s ease;
+/* 路由切换动画 - 双向滑动 */
+.slide-left-enter-active,
+.slide-left-leave-active,
+.slide-right-enter-active,
+.slide-right-leave-active {
+  transition: opacity var(--motion-base) var(--ease-standard), transform var(--motion-base) var(--ease-emphasized);
 }
-.page-fade-enter-from {
+
+.slide-left-enter-from {
+  transform: translateX(18px);
   opacity: 0;
-  transform: translateY(6px);
 }
-.page-fade-leave-to {
+
+.slide-left-leave-to {
+  transform: translateX(-12px);
   opacity: 0;
-  transform: translateY(-6px);
+}
+
+.slide-right-enter-from {
+  transform: translateX(-18px);
+  opacity: 0;
+}
+
+.slide-right-leave-to {
+  transform: translateX(12px);
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .slide-left-enter-active,
+  .slide-left-leave-active,
+  .slide-right-enter-active,
+  .slide-right-leave-active,
+  .bg-layer.bg-visible {
+    transition: none;
+  }
 }
 </style>

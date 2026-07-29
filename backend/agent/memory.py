@@ -15,6 +15,8 @@ class MemoryManager:
         """估算 token 数：中文约 1.5 token/字，英文约 0.25 token/word"""
         if not text:
             return 0
+        if isinstance(text, list):
+            return MemoryManager._estimate_msgs_tokens(text)
         cn_chars = sum(1 for ch in text if '一' <= ch <= '鿿' or '　' <= ch <= '〿')
         other = len(text) - cn_chars
         return int(cn_chars * 1.5 + other * 0.25)
@@ -153,8 +155,16 @@ class MemoryManager:
         except Exception:
             return None
 
-    async def add_message(self, session_id, role, content, persona='default', segments=None):
-        await db.save_message(session_id, role, content, persona, segments=segments)
+    async def add_message(self, session_id, role, content, persona='default', segments=None, metadata=None, client_message_id=None):
+        await db.save_message(
+            session_id,
+            role,
+            content,
+            persona,
+            metadata=metadata or {},
+            segments=segments,
+            client_message_id=client_message_id,
+        )
 
     async def post_conversation(self, session_id, user_message, assistant_response):
         """对话结束后调用：自动提取记忆 + 生成摘要"""

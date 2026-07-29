@@ -44,14 +44,6 @@ class OpenAIAdapter(BaseModelAdapter):
         if max_tokens is not None:
             payload["max_tokens"] = max_tokens
 
-        # 日志：记录请求大小
-        from api.log_api import log_info
-        try:
-            _size = len(json.dumps(payload).encode('utf-8'))
-        except Exception:
-            _size = -1
-
-        # 调试日志
         from api.log_api import log_info
         try:
             _size = len(json.dumps(payload).encode('utf-8'))
@@ -70,87 +62,111 @@ class OpenAIAdapter(BaseModelAdapter):
             try:
                 async with httpx.AsyncClient(timeout=120) as client:
                     if stream:
-                        resp = await client.post(f"{self.base_url}/chat/completions", json=payload, headers=headers)
+                        async with client.stream(
+                            "POST",
+                            f"{self.base_url}/chat/completions",
+                            json=payload,
+                            headers=headers,
+                        ) as resp:
+                            if resp.status_code != 200:
+                                body = (await resp.aread()).decode("utf-8", errors="replace")
+                                last_error = f"[API错误 {resp.status_code}] {body[:200]}"
+                            else:
+                                accumulated_tool_calls = {}
+                                fallback_lines = []
+                                saw_sse = False
+
+                                async for raw_line in resp.aiter_lines():
+                                    line = raw_line.strip()
+                                    if not line:
+                                        continue
+                                    if not line.startswith("data:"):
+                                        fallback_lines.append(raw_line)
+                                        continue
+
+                                    data_text = line[5:].strip()
+                                    if data_text == "[DONE]":
+                                        break
+                                    saw_sse = True
+                                    try:
+                                        chunk = json.loads(data_text)
+                                    except json.JSONDecodeError:
+                                        continue
+                                    if not chunk.get("choices"):
+                                        continue
+
+                                    delta = chunk["choices"][0].get("delta", {})
+                                    if delta.get("content"):
+                                        yield ModelResponse(content=delta["content"])
+                                    self._merge_tool_call_deltas(
+                                        accumulated_tool_calls,
+                                        delta.get("tool_calls") or [],
+                                    )
+
+                                if accumulated_tool_calls:
+                                    yield ModelResponse(
+                                        content="",
+                                        tool_calls=[
+                                            accumulated_tool_calls[index]
+                                            for index in sorted(accumulated_tool_calls)
+                                        ],
+                                    )
+                                elif not saw_sse and fallback_lines:
+                                    fallback = json.loads("\n".join(fallback_lines))
+                                    choice = fallback["choices"][0]
+                                    message = choice.get("message", {})
+                                    yield ModelResponse(
+                                        content=message.get("content", ""),
+                                        tool_calls=message.get("tool_calls") or [],
+                                        finish_reason=choice.get("finish_reason", "stop"),
+                                    )
+                                return
                     else:
-                        resp = await client.post(f"{self.base_url}/chat/completions", json=payload, headers=headers)
-
-                if resp.status_code == 200:
-                    break  # 成功
-
-                last_error = f"[API错误 {resp.status_code}] {resp.text[:200]}"
-                if attempt < 2:
-                    from api.log_api import log_info
-                    log_info("LLM", f"请求失败({resp.status_code})，重试 {attempt+1}/2")
-                    # 保存失败请求用于调试
-                    try:
-                        with open("data/debug_request.json", "w", encoding="utf-8") as f:
-                            json.dump(payload, f, ensure_ascii=False)
-                    except Exception:
-                        pass
-                    import asyncio
-                    await asyncio.sleep(1)
-                else:
-                    yield ModelResponse(content=last_error)
-                    return
+                        resp = await client.post(
+                            f"{self.base_url}/chat/completions",
+                            json=payload,
+                            headers=headers,
+                        )
+                        if resp.status_code == 200:
+                            data = resp.json()
+                            choice = data["choices"][0]
+                            yield ModelResponse(
+                                content=choice["message"].get("content", ""),
+                                tool_calls=choice["message"].get("tool_calls") or [],
+                                finish_reason=choice.get("finish_reason", "stop"),
+                            )
+                            return
+                        last_error = f"[API错误 {resp.status_code}] {resp.text[:200]}"
             except Exception as e:
                 last_error = f"[连接失败] {e}"
-                if attempt < 2:
-                    import asyncio
-                    await asyncio.sleep(1)
-                else:
-                    yield ModelResponse(content=last_error)
-                    return
 
-        # 解析响应
-        if stream:
-            accumulated_tool_calls = {}
-            content = ""
+            if attempt < 2:
+                log_info("LLM", f"请求失败，重试 {attempt + 1}/2: {last_error[:120]}")
+                import asyncio
+                await asyncio.sleep(1)
+                continue
 
-            for line in resp.text.split("\n"):
-                line = line.strip()
-                if not line.startswith("data: ") or line == "data: [DONE]":
-                    continue
-                try:
-                    chunk = json.loads(line[6:])
-                except json.JSONDecodeError:
-                    continue
-                if not chunk.get("choices"):
-                    continue
-                delta = chunk["choices"][0].get("delta", {})
+            yield ModelResponse(content=last_error or "[连接失败]")
+            return
 
-                if delta.get("content"):
-                    content += delta["content"]
-                    yield ModelResponse(content=delta["content"])
-
-                if delta.get("tool_calls"):
-                    for tc_delta in delta["tool_calls"]:
-                        idx = tc_delta.get("index", 0)
-                        if idx not in accumulated_tool_calls:
-                            accumulated_tool_calls[idx] = {
-                                "id": tc_delta.get("id", ""),
-                                "type": tc_delta.get("type", "function"),
-                                "function": {"name": "", "arguments": ""}
-                            }
-                        tc = accumulated_tool_calls[idx]
-                        if tc_delta.get("id"):
-                            tc["id"] = tc_delta["id"]
-                        func = tc_delta.get("function", {})
-                        if func.get("name"):
-                            tc["function"]["name"] += func["name"]
-                        if func.get("arguments"):
-                            tc["function"]["arguments"] += func["arguments"]
-
-            if accumulated_tool_calls:
-                complete = [accumulated_tool_calls[i] for i in sorted(accumulated_tool_calls.keys())]
-                yield ModelResponse(content="", tool_calls=complete)
-        else:
-            data = resp.json()
-            choice = data["choices"][0]
-            yield ModelResponse(
-                content=choice["message"].get("content", ""),
-                tool_calls=choice["message"].get("tool_calls") or [],
-                finish_reason=choice.get("finish_reason", "stop")
-            )
+    @staticmethod
+    def _merge_tool_call_deltas(accumulated: dict, deltas: list):
+        for delta in deltas:
+            index = delta.get("index", 0)
+            if index not in accumulated:
+                accumulated[index] = {
+                    "id": delta.get("id", ""),
+                    "type": delta.get("type", "function"),
+                    "function": {"name": "", "arguments": ""},
+                }
+            tool_call = accumulated[index]
+            if delta.get("id"):
+                tool_call["id"] = delta["id"]
+            function = delta.get("function", {})
+            if function.get("name"):
+                tool_call["function"]["name"] += function["name"]
+            if function.get("arguments"):
+                tool_call["function"]["arguments"] += function["arguments"]
 
     async def list_models(self) -> list[str]:
         async with httpx.AsyncClient() as client:

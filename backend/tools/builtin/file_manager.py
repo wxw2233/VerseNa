@@ -4,6 +4,7 @@ import time
 import uuid
 import glob as glob_mod
 from pathlib import Path
+from config import settings
 from tools.base import BaseTool
 
 # 硬禁止路径（所有操作均拦截）
@@ -78,8 +79,8 @@ def _is_binary(path, op_path):
 def _audit_log(request_id, action, path, result, error='', trust_mode=False):
     """审计日志"""
     try:
-        log_dir = Path(__file__).parent.parent.parent.parent / 'data'
-        log_dir.mkdir(exist_ok=True)
+        log_dir = settings.DATA_DIR
+        log_dir.mkdir(parents=True, exist_ok=True)
         log_file = log_dir / 'audit.log'
         ts = time.strftime('%Y-%m-%d %H:%M:%S')
         line = f"[{ts}] request_id={request_id} action={action} path={path} result={result}"

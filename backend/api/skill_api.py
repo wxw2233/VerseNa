@@ -1,3 +1,5 @@
+import asyncio
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from skills.manager import skill_manager
@@ -14,6 +16,11 @@ async def list_skills():
     return skill_manager.list_skills()
 
 
+@router.get("/api/skills/status")
+async def skill_status():
+    return skill_manager.diagnostics()
+
+
 @router.get("/api/skills/{skill_id}")
 async def get_skill(skill_id: str):
     skill = skill_manager.get_skill(skill_id)
@@ -24,7 +31,7 @@ async def get_skill(skill_id: str):
 
 @router.post("/api/skills/install")
 async def install_skill(req: SkillInstallReq):
-    data, error = skill_manager.install_from_github(req.url)
+    data, error = await asyncio.to_thread(skill_manager.install_from_github, req.url)
     if error:
         raise HTTPException(400, error)
     return {"status": "ok", "skill": data}
@@ -33,7 +40,7 @@ async def install_skill(req: SkillInstallReq):
 @router.delete("/api/skills/{skill_id}")
 async def delete_skill(skill_id: str):
     try:
-        skill_manager.delete_skill(skill_id)
+        await asyncio.to_thread(skill_manager.delete_skill, skill_id)
         return {"status": "ok"}
     except ValueError as e:
         raise HTTPException(400, str(e))

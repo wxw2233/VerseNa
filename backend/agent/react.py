@@ -1,5 +1,7 @@
 import json
 import time
+import inspect
+import asyncio
 from typing import AsyncGenerator
 from agent.models.base import BaseModelAdapter
 from agent.memory import MemoryManager
@@ -13,7 +15,24 @@ class ReActAgent:
         self.tool_registry = tool_registry
         self.max_steps = max_steps or settings.MAX_REACT_LOOPS
 
-    async def run(self, session_id: str, user_message: str, system_prompt: str = "", tools: list = None, persona: str = "default", confirm_callback=None, image_url: str = None, stop_event=None, agent_config: dict = None) -> AsyncGenerator[dict, None]:
+    def _chat_kwargs(self, tools, stream, temperature, top_p, max_tokens):
+        """Only pass optional generation args supported by the adapter."""
+        kwargs = {
+            "tools": tools,
+            "stream": stream,
+            "temperature": temperature,
+            "top_p": top_p,
+            "max_tokens": max_tokens,
+        }
+        try:
+            params = inspect.signature(self.model.chat).parameters
+        except (TypeError, ValueError):
+            return kwargs
+        if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()):
+            return kwargs
+        return {k: v for k, v in kwargs.items() if k in params}
+
+    async def run(self, session_id: str, user_message: str, system_prompt: str = "", tools: list = None, persona: str = "default", confirm_callback=None, image_url: str = None, stop_event=None, agent_config: dict = None, persist_user: bool = True, client_message_id: str = None, generation_id: str = None) -> AsyncGenerator[dict, None]:
         cfg = agent_config or {}
         max_steps = cfg.get("max_steps", self.max_steps)
         temperature = cfg.get("temperature", 0.8)
@@ -26,7 +45,16 @@ class ReActAgent:
         if custom_instructions and system_prompt:
             system_prompt += f"\n\n## 自定义指令\n{custom_instructions}"
 
-        await self.memory.add_message(session_id, "user", user_message, persona=persona)
+        message_metadata = {"generation_id": generation_id} if generation_id else {}
+        if persist_user:
+            await self.memory.add_message(
+                session_id,
+                "user",
+                user_message,
+                persona=persona,
+                metadata=message_metadata,
+                client_message_id=client_message_id,
+            )
         messages = await self.memory.get_context(session_id, system_prompt, max_history=max_history, max_context=max_context)
 
         # 如果有图片，将最后一条用户消息替换为视觉格式
@@ -42,6 +70,7 @@ class ReActAgent:
         full_response = ""
         loops = 0
         tool_seq = 0  # 工具调用序号
+        generation_stopped = False
 
         try:
             while loops < max_steps:
@@ -64,12 +93,39 @@ class ReActAgent:
                 last_error = None
                 for attempt in range(3):
                     try:
-                        async for chunk in self.model.chat(messages, tools=tools, stream=True, temperature=temperature, top_p=top_p, max_tokens=max_tokens):
+                        chat_kwargs = self._chat_kwargs(tools, True, temperature, top_p, max_tokens)
+                        model_stream = self.model.chat(messages, **chat_kwargs).__aiter__()
+                        while True:
+                            next_chunk = asyncio.create_task(anext(model_stream))
+                            stop_wait = asyncio.create_task(stop_event.wait()) if stop_event else None
+                            wait_for = {next_chunk, stop_wait} if stop_wait else {next_chunk}
+                            completed, _ = await asyncio.wait(wait_for, return_when=asyncio.FIRST_COMPLETED)
+
+                            if stop_wait and stop_wait in completed and stop_event.is_set():
+                                next_chunk.cancel()
+                                await asyncio.gather(next_chunk, return_exceptions=True)
+                                close_stream = getattr(model_stream, "aclose", None)
+                                if close_stream:
+                                    await close_stream()
+                                generation_stopped = True
+                                break
+
+                            if stop_wait:
+                                stop_wait.cancel()
+                                await asyncio.gather(stop_wait, return_exceptions=True)
+
+                            try:
+                                chunk = next_chunk.result()
+                            except StopAsyncIteration:
+                                break
                             if chunk.content:
                                 chunk_content += chunk.content
                                 yield {"type": "segment", "segment": {"type": "text", "content": chunk.content}}
                             if chunk.tool_calls:
                                 tool_calls.extend(chunk.tool_calls)
+
+                        if generation_stopped:
+                            yield {"type": "segment", "segment": {"type": "text", "content": "\n\n[已停止]"}}
                         llm_success = True
                         break
                     except Exception as e:
@@ -77,7 +133,6 @@ class ReActAgent:
                         if attempt < 2:
                             wait = 2 ** attempt  # 1s, 2s
                             yield {"type": "segment", "segment": {"type": "text", "content": f"\n[重试中 {attempt+1}/3，等待 {wait}s...]"}}
-                            import asyncio
                             await asyncio.sleep(wait)
 
                 if not llm_success:
@@ -85,6 +140,9 @@ class ReActAgent:
                     break
 
                 full_response += chunk_content
+
+                if generation_stopped:
+                    break
 
                 if not tool_calls:
                     break
@@ -171,12 +229,18 @@ class ReActAgent:
             yield {"type": "error", "message": str(e)}
 
         # done 事件
+        await self.memory.add_message(
+            session_id,
+            "assistant",
+            full_response,
+            persona=persona,
+            metadata=message_metadata,
+        )
+        await self.memory.post_conversation(session_id, user_message, full_response)
+
         emotion = persona_manager.get_emotion_engine(persona) if hasattr(self, '_persona_manager') else None
         emoji = ""
         yield {"type": "done", "emoji": emoji}
-
-        await self.memory.add_message(session_id, "assistant", full_response, persona=persona)
-        await self.memory.post_conversation(session_id, user_message, full_response)
 
     def _make_summary(self, tool_name, result_data, result):
         """生成工具结果摘要"""

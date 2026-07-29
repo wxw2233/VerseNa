@@ -3,12 +3,20 @@ from pathlib import Path
 
 class Settings:
     PROJECT_NAME = "VerseNa"
-    VERSION = "0.1.0"
-    HOST = "0.0.0.0"
-    PORT = 8001
-    DEBUG = True
+    VERSION = "1.0.0"
+    HOST = os.getenv("VERSENA_HOST", "127.0.0.1")
+    PORT = int(os.getenv("VERSENA_PORT", "8002"))
+    DEBUG = os.getenv("VERSENA_DEBUG", "false").lower() == "true"
+    ALLOWED_ORIGINS = tuple(
+        origin.strip()
+        for origin in os.getenv(
+            "VERSENA_ALLOWED_ORIGINS",
+            "http://localhost:5173,http://127.0.0.1:5173,null",
+        ).split(",")
+        if origin.strip()
+    )
     BASE_DIR = Path(__file__).parent
-    DATA_DIR = BASE_DIR / "data"
+    DATA_DIR = Path(os.getenv("VERSENA_DATA_DIR", str(BASE_DIR / "data"))).expanduser().resolve()
     DB_PATH = DATA_DIR / "ciyuan.db"
     DEFAULT_MODEL = "deepseek"
     DEFAULT_API_KEY = ""

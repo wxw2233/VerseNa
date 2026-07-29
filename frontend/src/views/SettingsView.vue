@@ -2,6 +2,11 @@
   <div class="settings-layout">
     <!-- Sidebar Menu -->
     <aside class="sidebar">
+      <router-link to="/" class="menu-item back-btn">
+        <span class="menu-icon">←</span>
+        <span class="menu-label">返回聊天</span>
+      </router-link>
+      <div class="menu-divider"></div>
       <div
         v-for="item in menuItems"
         :key="item.id"
@@ -127,7 +132,7 @@ onMounted(async () => {
 <style scoped>
 .settings-layout {
   display: flex;
-  height: calc(100vh - 49px);
+  height: 100vh;
   overflow: hidden;
 }
 
@@ -172,6 +177,26 @@ onMounted(async () => {
   color: var(--primary);
   font-weight: 600;
   border-color: var(--highlight) !important;
+}
+
+/* 返回按钮 */
+.back-btn {
+  text-decoration: none;
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.15) !important;
+}
+
+.back-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--primary);
+  border-color: var(--primary) !important;
+}
+
+.menu-divider {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.1);
+  margin: 8px 16px;
 }
 
 .menu-icon {

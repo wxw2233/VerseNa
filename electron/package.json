@@ -1,7 +1,7 @@
 {
-  "name": "ciyuan-persona",
+  "name": "versena",
   "version": "1.0.0",
-  "description": "次元人格 - AI 角色扮演聊天桌面客户端",
+  "description": "VerseNa - AI 角色扮演聊天桌面客户端",
   "main": "main.js",
   "author": "wxw",
   "license": "MIT",
@@ -12,22 +12,14 @@
     "build:dir": "electron-builder --win --dir"
   },
   "build": {
-    "appId": "com.ciyuan.persona",
-    "productName": "次元人格",
+    "appId": "com.versena.app",
+    "productName": "VerseNa",
     "directories": {
-      "output": "C:\\Users\\wxw\\Desktop\\Build_test"
+      "output": "../dist-electron"
     },
     "files": [
       "main.js",
-      "preload.js",
-      "icon.png",
-      "../frontend/dist/**/*",
-      "../backend/**/*.py",
-      "!../backend/data/**",
-      "!../backend/.venv/**",
-      "!../backend/__pycache__/**",
-      "!../backend/**/__pycache__/**",
-      "!../backend/tests/**"
+      "preload.js"
     ],
     "extraResources": [
       {
@@ -37,7 +29,11 @@
           "**/*.py",
           "**/*.json",
           "**/*.txt",
-          "**/*.md"
+          "**/*.md",
+          "!data/**",
+          "!tests/**",
+          "!**/.pytest_cache/**",
+          "!**/__pycache__/**"
         ]
       },
       {
@@ -77,15 +73,14 @@
             "x64"
           ]
         }
-      ],
-      "icon": "icon.png"
+      ]
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "次元人格"
+      "shortcutName": "VerseNa"
     }
   },
   "devDependencies": {

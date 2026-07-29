@@ -1,6 +1,6 @@
 # 次元人格（CiYuan Persona）— 项目进度总结
 
-> 最后更新：2026-07-17
+> 最后更新：2026-07-29
 > 技术栈：FastAPI + Vue 3 + SQLite + WebSocket
 > 定位：**单用户**个人 AI Agent 平台（不做多用户/登录系统）
 
@@ -11,7 +11,7 @@
 面向二次元用户的 AI Agent 平台，核心卖点是高度可自定义的图形化界面（换肤系统）和完整的 Agent 能力。
 
 **运行环境：**
-- 后端：FastAPI，端口 8001
+- 后端：FastAPI，端口 8002
 - 前端：Vue 3 + Vite，端口 5173
 - 数据库：SQLite（aiosqlite）
 - 模型：OpenAI 兼容接口（当前使用 mimo-v2.5）
@@ -98,6 +98,16 @@
 | 确认对话框 | ✅ | file_manager 高风险操作确认 |
 | 运行监控面板 | ✅ | 深色终端风格日志查看器，自动刷新（3s），日志按级别着色 |
 
+### 2.7 Skill 系统 ✅
+
+| 功能 | 状态 | 说明 |
+|------|------|------|
+| Skill 发现 | ✅ | 加载内置、自定义和 GitHub 安装的 Skill |
+| 按需加载 | ✅ | Agent 通过 `load_skill` 获取完整说明和知识文档 |
+| 生命周期管理 | ✅ | 安装、更新、卸载、刷新和状态诊断 |
+| 安全边界 | ✅ | ID/URL 校验、目录限制、原子更新，不执行仓库代码 |
+| QQ 接入 | ✅ | QQ 通道可发现并调用 Skill |
+
 ---
 
 ## 三、设计文档索引
@@ -120,7 +130,7 @@
 | 文件 | 说明 |
 |------|------|
 | `backend/main.py` | FastAPI 入口，路由注册 |
-| `backend/config.py` | 配置（端口 8001，MAX_REACT_LOOPS=15） |
+| `backend/config.py` | 配置（端口 8002，MAX_REACT_LOOPS=15） |
 | `backend/agent/react.py` | ReActAgent（segment yield + tool_call_id + LLM 重试） |
 | `backend/agent/memory.py` | MemoryManager（长期记忆 + 分层摘要 + 自动提取） |
 | `backend/api/chat.py` | WebSocket /ws/chat |
@@ -135,6 +145,9 @@
 | `backend/tools/builtin/code_exec.py` | 代码执行工具（base64 支持） |
 | `backend/tools/builtin/save_memory.py` | 记忆保存工具 |
 | `backend/tools/builtin/web_search.py` | 搜索工具 |
+| `backend/tools/builtin/load_skill.py` | 按需加载 Skill 内容 |
+| `backend/skills/manager.py` | Skill 发现、安装、校验和诊断 |
+| `backend/scripts/backup_user_data.py` | 一致性数据备份脚本 |
 
 ### 前端
 
@@ -152,8 +165,10 @@
 
 ## 五、测试状态
 
-- **后端测试：** 28 passed, 2 warnings
+- **后端测试：** 65 passed
 - **前端构建：** Vite build 成功
+- **测试退出：** pytest 正常退出，无残留数据库或 QQ 后台任务
+- **安全边界：** 默认仅监听 `127.0.0.1`，CORS 限制为本地前端
 
 ---
 
@@ -161,19 +176,22 @@
 
 | 功能 | 优先级 | 说明 |
 |------|--------|------|
-| 知识库/RAG | 中 | 向量检索，导入文档 |
-| 插件系统完善 | 中 | 已有 loader，需实际插件 |
-| 摘要精度优化 | 中 | 用 tokenizer 替代 len/2 估算 |
-| 文件操作单独重试 | 低 | file_manager 单工具重试（v3） |
-| 图片生成/理解 | 低 | 多模态能力 |
-| Electron 打包 | 低 | 桌面应用分发 |
-| 语音 TTS | 低 | 文字转语音 |
+| Electron 独立运行时 | 中 | 对外分发时打包 Python 与后端依赖 |
+| 知识库/RAG | 低 | 需要大型文档检索时再引入向量索引 |
+| 摘要精度优化 | 低 | 用 tokenizer 替代 len/2 估算 |
 
 **不做：** 多用户/登录系统（单用户使用）
 
 ---
 
 ## 七、开发日志
+
+### 2026-07-29
+
+- 完成界面、流式协议、停止反馈、QQ 通道和 TTS 文本清洗优化。
+- 完成 Skill 系统发现、按需加载、安装、卸载、诊断与 QQ 接入。
+- 后端收紧为本地监听和 CORS 白名单，补齐 QQ 与数据库生命周期清理。
+- 新增一致性数据备份，后端测试达到 65 项并可正常退出。
 
 ### 2026-07-17（今日）
 

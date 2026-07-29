@@ -9,17 +9,20 @@ async def lifespan(app: FastAPI):
     await db.connect()
     from api.config_api import load_saved_config
     await load_saved_config()
-    from api.qq_api import load_qq_config
+    from api.qq_api import load_qq_config, qq_adapter
     await load_qq_config()
-    yield
-    await db.close()
+    try:
+        yield
+    finally:
+        await qq_adapter.stop()
+        await db.close()
 
 app = FastAPI(title=settings.PROJECT_NAME, version=settings.VERSION, lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=list(settings.ALLOWED_ORIGINS),
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )

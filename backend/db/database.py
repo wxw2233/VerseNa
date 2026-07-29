@@ -8,6 +8,8 @@ class Database:
         self._db = None
 
     async def connect(self):
+        if self._db is not None:
+            return
         settings.ensure_dirs()
         self._db = await aiosqlite.connect(str(self.db_path))
         self._db.row_factory = aiosqlite.Row
@@ -33,9 +35,35 @@ class Database:
             )
             await self._db.commit()
 
+    async def update_message_metadata_by_generation(self, session_id: str, role: str, generation_id: str, metadata: dict):
+        """更新指定生成对应的消息 metadata。"""
+        cursor = await self._db.execute(
+            "SELECT id, metadata FROM conversations "
+            "WHERE session_id = ? AND role = ? ORDER BY id DESC",
+            (session_id, role),
+        )
+        rows = await cursor.fetchall()
+        for row in rows:
+            try:
+                old_meta = json.loads(row[1] or "{}")
+            except (json.JSONDecodeError, TypeError):
+                old_meta = {}
+            if old_meta.get("generation_id") != generation_id:
+                continue
+            old_meta.update(metadata)
+            await self._db.execute(
+                "UPDATE conversations SET metadata = ? WHERE id = ?",
+                (json.dumps(old_meta, ensure_ascii=False), row[0]),
+            )
+            await self._db.commit()
+            return True
+        return False
+
     async def close(self):
         if self._db:
-            await self._db.close()
+            connection = self._db
+            self._db = None
+            await connection.close()
 
     async def _init_tables(self):
         await self._db.executescript("""
@@ -46,6 +74,7 @@ class Database:
                 content TEXT NOT NULL,
                 persona TEXT DEFAULT 'default',
                 metadata TEXT DEFAULT '{}',
+                client_message_id TEXT DEFAULT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
             CREATE INDEX IF NOT EXISTS idx_session ON conversations(session_id);
@@ -55,6 +84,33 @@ class Database:
                 value TEXT NOT NULL
             );
         """)
+        await self._db.commit()
+
+        columns = await self._db.execute("PRAGMA table_info(conversations)")
+        column_names = {row[1] for row in await columns.fetchall()}
+        if "client_message_id" not in column_names:
+            await self._db.execute(
+                "ALTER TABLE conversations ADD COLUMN client_message_id TEXT DEFAULT NULL"
+            )
+        await self._db.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_conversations_client_message "
+            "ON conversations(client_message_id) WHERE client_message_id IS NOT NULL"
+        )
+        await self._db.execute("""
+            CREATE TABLE IF NOT EXISTS chat_requests (
+                client_message_id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                generation_id TEXT NOT NULL,
+                request_type TEXT NOT NULL DEFAULT 'message',
+                status TEXT NOT NULL DEFAULT 'accepted',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        await self._db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_chat_requests_generation "
+            "ON chat_requests(generation_id)"
+        )
         await self._db.commit()
 
         # session_metadata table
@@ -116,14 +172,57 @@ class Database:
         )
         await self._db.commit()
 
-    async def save_message(self, session_id: str, role: str, content: str, persona: str = "default", metadata: str = "{}", segments: list = None):
+    async def save_message(self, session_id: str, role: str, content: str, persona: str = "default", metadata: str = "{}", segments: list = None, client_message_id: str = None):
         meta = json.loads(metadata) if isinstance(metadata, str) else (metadata or {})
         if segments:
             meta["segments"] = segments
         metadata_str = json.dumps(meta, ensure_ascii=False)
+        cursor = await self._db.execute(
+            "INSERT OR IGNORE INTO conversations "
+            "(session_id, role, content, persona, metadata, client_message_id) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (session_id, role, content, persona, metadata_str, client_message_id)
+        )
+        await self._db.commit()
+        return cursor.rowcount > 0
+
+    async def get_message_by_client_id(self, client_message_id: str):
+        if not client_message_id:
+            return None
+        cursor = await self._db.execute(
+            "SELECT id, session_id, role, content, persona, metadata, client_message_id "
+            "FROM conversations WHERE client_message_id = ?",
+            (client_message_id,)
+        )
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+
+    async def record_chat_request(self, client_message_id: str, session_id: str, generation_id: str, request_type: str):
+        cursor = await self._db.execute(
+            "INSERT OR IGNORE INTO chat_requests "
+            "(client_message_id, session_id, generation_id, request_type, status) "
+            "VALUES (?, ?, ?, ?, 'accepted')",
+            (client_message_id, session_id, generation_id, request_type)
+        )
+        await self._db.commit()
+        return cursor.rowcount > 0
+
+    async def get_chat_request(self, client_message_id: str):
+        if not client_message_id:
+            return None
+        cursor = await self._db.execute(
+            "SELECT client_message_id, session_id, generation_id, request_type, status "
+            "FROM chat_requests WHERE client_message_id = ?",
+            (client_message_id,)
+        )
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+
+    async def update_chat_request_status(self, generation_id: str, status: str):
         await self._db.execute(
-            "INSERT INTO conversations (session_id, role, content, persona, metadata) VALUES (?, ?, ?, ?, ?)",
-            (session_id, role, content, persona, metadata_str)
+            "UPDATE chat_requests SET status = ?, updated_at = CURRENT_TIMESTAMP "
+            "WHERE generation_id = ?",
+            (status, generation_id)
         )
         await self._db.commit()
 
@@ -146,7 +245,8 @@ class Database:
 
     async def get_history(self, session_id: str, limit: int = 50):
         cursor = await self._db.execute(
-            "SELECT id, role, content, persona, metadata, created_at FROM conversations WHERE session_id = ? ORDER BY id DESC LIMIT ?",
+            "SELECT id, role, content, persona, metadata, client_message_id, created_at "
+            "FROM conversations WHERE session_id = ? ORDER BY id DESC LIMIT ?",
             (session_id, limit)
         )
         rows = await cursor.fetchall()
@@ -157,6 +257,8 @@ class Database:
                 meta = json.loads(d.get("metadata", "{}"))
                 if "segments" in meta:
                     d["segments"] = meta["segments"]
+                if "generation_id" in meta:
+                    d["generation_id"] = meta["generation_id"]
             except (json.JSONDecodeError, TypeError):
                 pass
             result.append(d)

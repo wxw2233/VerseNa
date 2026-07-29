@@ -1,5 +1,6 @@
 import json
 import asyncio
+import uuid
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from agent.react import ReActAgent
 from agent.models.openai_adapter import OpenAIAdapter
@@ -77,6 +78,35 @@ async def websocket_chat(ws: WebSocket):
     # 停止信号（每个连接独立）
     stop_event = asyncio.Event()
     msg_queue = asyncio.Queue()
+    active_generation_id = None
+
+    async def send_event(event, generation_id):
+        payload = dict(event)
+        payload["generation_id"] = generation_id
+        await ws.send_text(json.dumps(payload, ensure_ascii=False))
+
+    async def send_accepted(client_message_id, generation_id, request_type, duplicate=False, status="accepted", accepted=True, error=None):
+        payload = {
+            "type": "accepted",
+            "accepted": accepted,
+            "duplicate": duplicate,
+            "status": status,
+            "client_message_id": client_message_id,
+            "generation_id": generation_id,
+            "request_type": request_type,
+        }
+        if error:
+            payload["error"] = error
+        await ws.send_text(json.dumps(payload, ensure_ascii=False))
+
+    def message_generation(message, fallback):
+        if not message:
+            return fallback
+        try:
+            metadata = json.loads(message.get("metadata") or "{}")
+            return metadata.get("generation_id") or fallback
+        except (json.JSONDecodeError, TypeError):
+            return fallback
     reader_done = False  # ws_reader 是否已退出
 
     # 后台持续读取 WebSocket 消息
@@ -87,7 +117,9 @@ async def websocket_chat(ws: WebSocket):
                 raw = await ws.receive_text()
                 m = json.loads(raw)
                 if m.get('type') == 'stop':
-                    stop_event.set()
+                    target_generation = m.get("generation_id")
+                    if not target_generation or target_generation == active_generation_id:
+                        stop_event.set()
                 elif m.get('type') == 'confirm_response':
                     rid = m.get('request_id', '')
                     fut = pending_confirms.get(rid)
@@ -111,16 +143,48 @@ async def websocket_chat(ws: WebSocket):
                 # ws_reader 已退出（连接断开），结束主循环
                 break
 
+            request_type = msg.get("type") or "message"
+            if request_type not in {"message", "edit", "resend"}:
+                request_type = "message"
+            client_message_id = msg.get("client_message_id") or f"legacy_{uuid.uuid4().hex}"
+            generation_id = msg.get("generation_id") or f"gen_{uuid.uuid4().hex}"
             session_id = msg.get("session_id", "default")
             content = msg.get("content", "")
             image_url = msg.get("image_url", "")
             log_info("Chat", f"WS消息: session={session_id} content={content[:80]} image={'yes' if image_url else 'no'}")
             persona_name = msg.get("persona", "default")
 
+            existing_request = await db.get_chat_request(client_message_id)
+            existing_message = await db.get_message_by_client_id(client_message_id)
+            if existing_request or existing_message:
+                existing_generation = (
+                    existing_request.get("generation_id")
+                    if existing_request
+                    else message_generation(existing_message, generation_id)
+                )
+                await send_accepted(
+                    client_message_id,
+                    existing_generation,
+                    existing_request.get("request_type", request_type) if existing_request else request_type,
+                    duplicate=True,
+                    status=existing_request.get("status", "accepted") if existing_request else "accepted",
+                )
+                continue
+
             # 处理 edit 消息：编辑消息内容并重新生成
-            if msg.get("type") == "edit":
+            if request_type == "edit":
                 edit_id = msg.get("message_id")
                 new_content = msg.get("content", "")
+                if not edit_id:
+                    await send_accepted(
+                        client_message_id,
+                        generation_id,
+                        request_type,
+                        status="rejected",
+                        accepted=False,
+                        error="缺少待编辑消息 ID",
+                    )
+                    continue
                 if edit_id:
                     # 删除该消息及之后的所有消息
                     await db.delete_messages_from(session_id, edit_id)
@@ -130,7 +194,7 @@ async def websocket_chat(ws: WebSocket):
                     # 继续走正常的 Agent 处理流程
 
             # 处理 resend 消息：重新生成最后一条回复
-            if msg.get("type") == "resend":
+            if request_type == "resend":
                 # 删除最后一条助手消息及之后的内容
                 last_msgs = await db.get_history(session_id, limit=2)
                 if last_msgs and last_msgs[-1]["role"] == "assistant":
@@ -148,24 +212,75 @@ async def websocket_chat(ws: WebSocket):
                     content = last_user["content"]
                     image_url = ""
                 else:
-                    await ws.send_text(json.dumps({"type": "done"}))
+                    await send_accepted(
+                        client_message_id,
+                        generation_id,
+                        request_type,
+                        status="rejected",
+                        accepted=False,
+                        error="没有可重新生成的用户消息",
+                    )
                     continue
 
             # 处理 /skill install 命令
+            if request_type in {"message", "edit"}:
+                saved = await db.save_message(
+                    session_id,
+                    "user",
+                    content,
+                    persona_name,
+                    metadata={"generation_id": generation_id},
+                    client_message_id=client_message_id,
+                )
+                if not saved:
+                    duplicate_message = await db.get_message_by_client_id(client_message_id)
+                    await send_accepted(
+                        client_message_id,
+                        message_generation(duplicate_message, generation_id),
+                        request_type,
+                        duplicate=True,
+                    )
+                    continue
+
+            recorded = await db.record_chat_request(
+                client_message_id,
+                session_id,
+                generation_id,
+                request_type,
+            )
+            if not recorded:
+                duplicate_request = await db.get_chat_request(client_message_id)
+                await send_accepted(
+                    client_message_id,
+                    duplicate_request.get("generation_id", generation_id) if duplicate_request else generation_id,
+                    duplicate_request.get("request_type", request_type) if duplicate_request else request_type,
+                    duplicate=True,
+                    status=duplicate_request.get("status", "accepted") if duplicate_request else "accepted",
+                )
+                continue
+
+            await send_accepted(client_message_id, generation_id, request_type)
+            active_generation_id = generation_id
+            await db.update_chat_request_status(generation_id, "running")
+
             if content.strip().startswith("/skill install"):
                 url = content.strip().replace("/skill install", "").strip()
                 if url:
                     from skills.manager import skill_manager
-                    data, error = skill_manager.install_from_github(url)
+                    data, error = await asyncio.to_thread(skill_manager.install_from_github, url)
                     if error:
-                        await ws.send_text(json.dumps({"type": "segment", "segment": {"type": "text", "content": f"❌ 技能安装失败: {error}"}}, ensure_ascii=False))
+                        await send_event({"type": "segment", "segment": {"type": "text", "content": f"❌ 技能安装失败: {error}"}}, generation_id)
                     else:
-                        await ws.send_text(json.dumps({"type": "segment", "segment": {"type": "text", "content": f"✅ 技能「{data['name']}」安装成功！\n\n{data['description']}"}}, ensure_ascii=False))
-                    await ws.send_text(json.dumps({"type": "done"}))
+                        await send_event({"type": "segment", "segment": {"type": "text", "content": f"✅ 技能「{data['name']}」安装成功！\n\n{data['description']}"}}, generation_id)
+                    await send_event({"type": "done"}, generation_id)
+                    await db.update_chat_request_status(generation_id, "completed")
+                    active_generation_id = None
                     continue
                 else:
-                    await ws.send_text(json.dumps({"type": "segment", "segment": {"type": "text", "content": "用法: /skill install <github-repo-url>"}}, ensure_ascii=False))
-                    await ws.send_text(json.dumps({"type": "done"}))
+                    await send_event({"type": "segment", "segment": {"type": "text", "content": "用法: /skill install <github-repo-url>"}}, generation_id)
+                    await send_event({"type": "done"}, generation_id)
+                    await db.update_chat_request_status(generation_id, "completed")
+                    active_generation_id = None
                     continue
 
             system_prompt = persona_manager.get_system_prompt(persona_name)
@@ -224,40 +339,67 @@ async def websocket_chat(ws: WebSocket):
                 pass
 
             tool_segments = []
+            generation_failed = False
             stop_event.clear()  # 新消息开始前清除停止信号
             try:
-                async for event in agent.run(session_id, content, system_prompt=system_prompt, tools=available_tools, persona=persona_name, confirm_callback=confirm_callback, image_url=image_url if image_url else None, stop_event=stop_event, agent_config=agent_config):
-                    await ws.send_text(json.dumps(event, ensure_ascii=False))
+                async for event in agent.run(
+                    session_id,
+                    content,
+                    system_prompt=system_prompt,
+                    tools=available_tools,
+                    persona=persona_name,
+                    confirm_callback=confirm_callback,
+                    image_url=image_url if image_url else None,
+                    stop_event=stop_event,
+                    agent_config=agent_config,
+                    persist_user=False,
+                    generation_id=generation_id,
+                ):
+                    if event.get("type") == "done":
+                        event = {
+                            **event,
+                            "emotion": emotion_state.primary,
+                            "emoji": event.get("emoji") or emotion_state.emoji,
+                        }
+                    await send_event(event, generation_id)
                     if event.get("type") == "segment" and event.get("segment", {}).get("type") == "tool":
                         tool_segments.append(event["segment"])
             except Exception as e:
+                generation_failed = True
                 try:
-                    await ws.send_text(json.dumps({"type": "error", "content": str(e)}, ensure_ascii=False))
+                    await send_event({"type": "error", "content": str(e)}, generation_id)
                 except Exception:
                     pass
+            finally:
+                log_info("Chat", f"会话结束: session={session_id} generation={generation_id}")
+                if tool_segments:
+                    try:
+                        # 去重：同 tool_call_id 只保留最后出现的状态
+                        deduped = {}
+                        for segment in tool_segments:
+                            deduped[segment.get("tool_call_id", "")] = segment
+                        segments = list(deduped.values())
+                        log_info("Chat", f"保存 {len(segments)} 个 tool segments")
+                        await db.update_message_metadata_by_generation(
+                            session_id,
+                            "assistant",
+                            generation_id,
+                            {"segments": segments},
+                        )
+                    except Exception as seg_e:
+                        log_error("Chat", f"保存 segments 失败: {seg_e}")
 
-            log_info("Chat", f"会话结束: session={session_id}")
-            # 保存 tool segments
-            if tool_segments:
-                try:
-                    # 去重：同 tool_call_id 只保留最后出现的状态
-                    deduped = {}
-                    for s in tool_segments:
-                        deduped[s.get("tool_call_id", "")] = s
-                    segments = list(deduped.values())
-                    log_info("Chat", f"保存 {len(segments)} 个 tool segments")
-                    await db.update_last_message_metadata(
-                        session_id, "assistant",
-                        {"segments": segments}
-                    )
-                except Exception as seg_e:
-                    log_error("Chat", f"保存 segments 失败: {seg_e}")
-            # 确保 done 消息总是发送
-            try:
-                done_msg = {"type": "done", "emotion": emotion_state.primary, "emoji": emotion_state.emoji}
-                await ws.send_text(json.dumps(done_msg))
-            except Exception:
-                pass
+                if reader_done:
+                    final_status = "interrupted"
+                elif stop_event.is_set():
+                    final_status = "stopped"
+                elif generation_failed:
+                    final_status = "error"
+                else:
+                    final_status = "completed"
+                await db.update_chat_request_status(generation_id, final_status)
+                if active_generation_id == generation_id:
+                    active_generation_id = None
 
     except WebSocketDisconnect:
         reader_task.cancel()

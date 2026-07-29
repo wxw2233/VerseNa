@@ -1,23 +1,29 @@
 import json
+import os
+import re
 import shutil
-import subprocess
 import stat
+import subprocess
+import uuid
 from pathlib import Path
+from urllib.parse import urlparse
 
 
 def _rmtree_readonly(path):
-    """删除目录，处理 Windows 只读文件"""
-    def on_rm_error(func, fpath, exc_info):
-        os.chmod(fpath, stat.S_IWRITE)
-        func(fpath)
-    import os
+    """删除目录，处理 Windows 只读文件。"""
+    def on_rm_error(func, file_path, exc_info):
+        os.chmod(file_path, stat.S_IWRITE)
+        func(file_path)
+
     shutil.rmtree(path, onerror=on_rm_error)
+
 
 SKILLS_DIR = Path(__file__).parent
 BUILTIN_DIR = SKILLS_DIR / "builtin"
+CUSTOM_DIR = SKILLS_DIR / "custom"
 INSTALLED_DIR = SKILLS_DIR / "installed"
+SKILL_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
-# 内置技能
 BUILTIN_SKILLS = [
     {
         "id": "translator",
@@ -63,170 +69,255 @@ BUILTIN_SKILLS = [
 
 
 class SkillManager:
-    def __init__(self):
-        INSTALLED_DIR.mkdir(parents=True, exist_ok=True)
+    def __init__(self, installed_dir=None, custom_dir=None):
+        self.installed_dir = Path(installed_dir or INSTALLED_DIR)
+        self.custom_dir = Path(custom_dir or CUSTOM_DIR)
+        self.installed_dir.mkdir(parents=True, exist_ok=True)
+        self.custom_dir.mkdir(parents=True, exist_ok=True)
         self._cache = {}
+        self._skill_dirs = {}
+        self._load_errors = []
         self._load_all()
 
     def _load_all(self):
-        self._cache = {}
-        for skill in BUILTIN_SKILLS:
-            self._cache[skill["id"]] = skill
-        for d in INSTALLED_DIR.iterdir():
-            if d.is_dir():
-                skill_json = d / "skill.json"
-                if skill_json.exists():
-                    try:
-                        data = json.loads(skill_json.read_text(encoding="utf-8"))
-                        data["source"] = "installed"
-                        self._cache[data.get("id", d.name)] = data
-                    except Exception:
-                        pass
+        self._cache = {skill["id"]: dict(skill) for skill in BUILTIN_SKILLS}
+        self._skill_dirs = {}
+        self._load_errors = []
+        self._load_directory(self.custom_dir, "custom")
+        self._load_directory(self.installed_dir, "installed")
+
+    def _load_directory(self, root, source):
+        for directory in sorted(root.iterdir()):
+            if not directory.is_dir() or directory.name.startswith("."):
+                continue
+            skill_json = directory / "skill.json"
+            if not skill_json.exists():
+                self._load_errors.append(f"{source}/{directory.name}: 缺少 skill.json")
+                continue
+            try:
+                raw = json.loads(skill_json.read_text(encoding="utf-8"))
+                skill = self._normalize_skill(raw, directory.name, source)
+                if skill["id"] in self._cache:
+                    raise ValueError(f"技能 ID '{skill['id']}' 与现有技能冲突")
+                self._cache[skill["id"]] = skill
+                self._skill_dirs[skill["id"]] = directory
+            except Exception as exc:
+                self._load_errors.append(f"{source}/{directory.name}: {exc}")
+
+    def _normalize_skill(self, data, default_id, source):
+        if not isinstance(data, dict):
+            raise ValueError("skill.json 必须是对象")
+        skill_id = str(data.get("id") or default_id).strip()
+        if not SKILL_ID_PATTERN.fullmatch(skill_id):
+            raise ValueError("技能 ID 只能包含字母、数字、点、下划线和连字符，且最长 64 字符")
+
+        knowledge = data.get("knowledge") if isinstance(data.get("knowledge"), dict) else {}
+        normalized_knowledge = {}
+        for name, content in list(knowledge.items())[:10]:
+            if isinstance(name, str) and isinstance(content, str):
+                normalized_knowledge[name[:160]] = content[:5000]
+
+        return {
+            "id": skill_id,
+            "name": str(data.get("name") or skill_id)[:120],
+            "icon": str(data.get("icon") or "⚡")[:8],
+            "description": str(data.get("description") or "")[:500],
+            "system_prompt": str(data.get("system_prompt") or "")[:12000],
+            "source": source,
+            "github_url": str(data.get("github_url") or "")[:500],
+            "knowledge": normalized_knowledge,
+        }
 
     def list_skills(self):
-        return list(self._cache.values())
+        fields = ("id", "name", "icon", "description", "source", "github_url")
+        return [{field: skill.get(field, "") for field in fields} for skill in self._cache.values()]
 
     def get_skill(self, skill_id):
         return self._cache.get(skill_id)
 
     def get_skill_prompt(self):
-        """生成技能列表提示词（注入 system prompt）"""
-        skills = self.list_skills()
-        if not skills:
+        if not self._cache:
             return ""
         lines = [
             "## 可用技能",
-            "根据用户的消息内容，自动判断是否需要使用某个技能。",
-            "如果使用了某个技能，在回复中简要说明。",
+            "根据用户需求判断是否需要技能。需要时必须先调用 load_skill(skill_id) 读取完整技能指令，再按返回内容执行。",
+            "不要声称已使用尚未加载的技能。",
             "",
         ]
-        for s in skills:
-            lines.append(f"- **{s['name']}** ({s['icon']}): {s['description']}")
-            # 如果有知识库，注入摘要
-            knowledge = s.get("knowledge", {})
-            if knowledge:
-                # 只取第一个文件的前500字作为摘要
-                first_content = list(knowledge.values())[0][:500]
-                lines.append(f"  知识库摘要: {first_content[:200]}...")
-            if s.get("system_prompt"):
-                lines.append(f"  技能指令: {s['system_prompt'][:300]}")
-            lines.append("")
+        for skill in self._cache.values():
+            lines.append(
+                f"- `{skill['id']}`：{skill['name']} - {skill['description']}"
+            )
         return "\n".join(lines)
 
+    def get_skill_context(self, skill_id, max_chars=12000):
+        skill = self.get_skill(skill_id)
+        if not skill:
+            raise ValueError(f"技能 '{skill_id}' 不存在")
+
+        sections = [
+            f"# {skill['name']}",
+            skill.get("description", ""),
+            "## 技能指令",
+            skill.get("system_prompt", ""),
+        ]
+        knowledge = skill.get("knowledge") or {}
+        if knowledge:
+            sections.append("## 知识库")
+            for name, content in knowledge.items():
+                sections.append(f"### {name}\n{content}")
+        return "\n\n".join(part for part in sections if part).strip()[:max_chars]
+
+    def diagnostics(self):
+        counts = {"builtin": 0, "custom": 0, "installed": 0}
+        for skill in self._cache.values():
+            source = skill.get("source")
+            if source in counts:
+                counts[source] += 1
+        return {
+            "status": "ok" if not self._load_errors else "degraded",
+            "total": len(self._cache),
+            "counts": counts,
+            "load_errors": list(self._load_errors),
+        }
+
     def install_from_github(self, url):
-        """从 GitHub 仓库安装技能"""
-        repo_name = url.rstrip("/").split("/")[-1].replace(".git", "")
-        skill_dir = INSTALLED_DIR / repo_name
+        try:
+            repo_name = self._github_repo_name(url)
+        except ValueError as exc:
+            return None, str(exc)
 
-        if skill_dir.exists():
-            _rmtree_readonly(skill_dir)
+        target_dir = self.installed_dir / repo_name
+        temp_dir = self.installed_dir / f".{repo_name}-{uuid.uuid4().hex}.tmp"
+        backup_dir = self.installed_dir / f".{repo_name}-{uuid.uuid4().hex}.bak"
 
-        # 克隆仓库
         try:
             result = subprocess.run(
-                ["git", "clone", "--depth=1", url, str(skill_dir)],
-                capture_output=True, text=True, timeout=60,
+                ["git", "clone", "--depth=1", url, str(temp_dir)],
+                capture_output=True,
+                text=True,
+                timeout=60,
             )
             if result.returncode != 0:
                 return None, f"克隆失败: {result.stderr[:200]}"
+
+            git_dir = temp_dir / ".git"
+            if git_dir.exists():
+                _rmtree_readonly(git_dir)
+
+            data = self._prepare_skill(temp_dir, repo_name, url)
+            normalized = self._normalize_skill(data, repo_name, "installed")
+            existing_dir = self._skill_dirs.get(normalized["id"])
+            if normalized["id"] in {skill["id"] for skill in BUILTIN_SKILLS}:
+                return None, f"技能 ID '{normalized['id']}' 与内置技能冲突"
+            if existing_dir and existing_dir.resolve() != target_dir.resolve():
+                return None, f"技能 ID '{normalized['id']}' 已被其他技能使用"
+
+            (temp_dir / "skill.json").write_text(
+                json.dumps(normalized, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+
+            if target_dir.exists():
+                target_dir.rename(backup_dir)
+            try:
+                temp_dir.rename(target_dir)
+            except Exception:
+                if backup_dir.exists() and not target_dir.exists():
+                    backup_dir.rename(target_dir)
+                raise
+            if backup_dir.exists():
+                _rmtree_readonly(backup_dir)
+
+            self._load_all()
+            return self.get_skill(normalized["id"]), None
         except subprocess.TimeoutExpired:
             return None, "克隆超时"
         except FileNotFoundError:
             return None, "git 未安装"
+        except Exception as exc:
+            return None, f"安装失败: {exc}"
+        finally:
+            if temp_dir.exists():
+                _rmtree_readonly(temp_dir)
 
-        # 删除 .git 目录
-        git_dir = skill_dir / ".git"
-        if git_dir.exists():
-            _rmtree_readonly(git_dir)
+    def _github_repo_name(self, url):
+        parsed = urlparse(str(url).strip())
+        parts = [part for part in parsed.path.strip("/").split("/") if part]
+        if (
+            parsed.scheme != "https"
+            or parsed.hostname not in {"github.com", "www.github.com"}
+            or parsed.username
+            or parsed.password
+            or parsed.port
+            or parsed.query
+            or parsed.fragment
+            or len(parts) != 2
+            or not SKILL_ID_PATTERN.fullmatch(parts[0])
+        ):
+            raise ValueError("仅支持 https://github.com/<owner>/<repo> 格式的仓库地址")
+        repo_name = parts[1][:-4] if parts[1].endswith(".git") else parts[1]
+        if not SKILL_ID_PATTERN.fullmatch(repo_name):
+            raise ValueError("GitHub 仓库名称不适合作为安装目录")
+        return repo_name
 
-        # 方式1: 有 skill.json → 用结构化定义
+    def _prepare_skill(self, skill_dir, repo_name, url):
         skill_json = skill_dir / "skill.json"
         if skill_json.exists():
-            try:
-                data = json.loads(skill_json.read_text(encoding="utf-8"))
-                data.setdefault("id", repo_name)
-                data.setdefault("icon", "⚡")
-                data["source"] = "installed"
-                data["github_url"] = url
-                # 扫描知识库文件
-                data["knowledge"] = self._scan_knowledge(skill_dir)
-                skill_json.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-                self._cache[data["id"]] = data
-                return data, None
-            except Exception as e:
-                pass  # skill.json 解析失败，尝试方式2
-
-        # 方式2: 没有 skill.json → 读 README 自动生成
-        readme = self._find_readme(skill_dir)
-        if not readme:
-            _rmtree_readonly(skill_dir)
-            return None, "仓库中找不到 skill.json 或 README"
-
-        readme_content = self._read_text(readme)
-        if not readme_content:
-            _rmtree_readonly(skill_dir)
-            return None, "无法读取 README 内容"
-
-        # 从 README 提取信息
-        name = self._extract_title(readme_content) or repo_name.replace("-", " ").replace("_", " ").title()
-        description = self._extract_description(readme_content)
-        knowledge = self._scan_knowledge(skill_dir)
-
-        # 生成 system_prompt
-        system_prompt = f"你正在使用一个来自 GitHub 的技能：{name}。\n\n"
-        system_prompt += f"项目说明：{description}\n\n"
-        if knowledge:
-            system_prompt += "以下是该项目的关键文档内容，在回答相关问题时请参考：\n\n"
-            for fname, content in knowledge.items():
-                system_prompt += f"### {fname}\n{content[:2000]}\n\n"
-
-        data = {
-            "id": repo_name,
-            "name": name,
-            "icon": "📦",
-            "description": description[:200],
-            "system_prompt": system_prompt,
-            "source": "installed",
-            "github_url": url,
-            "knowledge": knowledge,
-        }
-
-        # 写入 skill.json 以便后续加载
-        (skill_dir / "skill.json").write_text(
-            json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
-        self._cache[data["id"]] = data
-        return data, None
+            data = json.loads(skill_json.read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                raise ValueError("skill.json 必须是对象")
+            data.setdefault("id", repo_name)
+            data.setdefault("icon", "⚡")
+            declared = data.get("knowledge") if isinstance(data.get("knowledge"), dict) else {}
+            data["knowledge"] = {**declared, **self._scan_knowledge(skill_dir)}
+        else:
+            readme = self._find_readme(skill_dir)
+            if not readme:
+                raise ValueError("仓库中找不到 skill.json 或 README")
+            readme_content = self._read_text(readme)
+            if not readme_content:
+                raise ValueError("无法读取 README 内容")
+            name = self._extract_title(readme_content) or repo_name.replace("-", " ").replace("_", " ").title()
+            description = self._extract_description(readme_content)
+            data = {
+                "id": repo_name,
+                "name": name,
+                "icon": "📦",
+                "description": description,
+                "system_prompt": f"你正在使用技能：{name}。请严格参考技能知识库完成相关任务。",
+                "knowledge": self._scan_knowledge(skill_dir),
+            }
+        data["github_url"] = url
+        return data
 
     def _find_readme(self, directory):
-        """查找 README 文件"""
-        for name in ["README.md", "readme.md", "README.rst", "README.txt", "README"]:
-            p = directory / name
-            if p.exists():
-                return p
+        for name in ("README.md", "readme.md", "README.rst", "README.txt", "README"):
+            path = directory / name
+            if path.is_file():
+                return path
         return None
 
     def _read_text(self, path, max_len=5000):
-        """安全读取文本文件"""
         try:
-            text = path.read_text(encoding="utf-8", errors="replace")
-            return text[:max_len]
+            resolved = path.resolve()
+            allowed_roots = (self.installed_dir.resolve(), self.custom_dir.resolve())
+            if not any(resolved.is_relative_to(root) for root in allowed_roots):
+                return ""
+            return path.read_text(encoding="utf-8", errors="replace")[:max_len]
         except Exception:
             return ""
 
     def _extract_title(self, content):
-        """从 README 提取标题"""
-        for line in content.split("\n"):
+        for line in content.splitlines():
             line = line.strip()
             if line.startswith("# "):
                 return line[2:].strip()
         return ""
 
     def _extract_description(self, content):
-        """从 README 提取描述（第一个非标题非空行）"""
-        lines = content.split("\n")
         found_title = False
-        for line in lines:
+        for line in content.splitlines():
             line = line.strip()
             if not line:
                 continue
@@ -235,47 +326,48 @@ class SkillManager:
                 continue
             if found_title and not line.startswith(("!", "-", "*", ">", "```", "|")):
                 return line[:300]
-        # 回退：取前200字符
         return content[:200].replace("\n", " ")
 
     def _scan_knowledge(self, skill_dir):
-        """扫描仓库中的关键文档文件"""
         knowledge = {}
-        # 优先读取的文件
-        priority_files = [
-            "README.md", "readme.md", "USAGE.md", "usage.md",
-            "GUIDE.md", "guide.md", "DOCS.md", "docs.md",
-            "INSTRUCTIONS.md", "instructions.md",
-            "prompt.md", "system.md", "context.md",
-        ]
-        for fname in priority_files:
-            p = skill_dir / fname
-            if p.exists():
-                content = self._read_text(p)
+        priority_files = (
+            "README.md", "readme.md", "USAGE.md", "usage.md", "GUIDE.md", "guide.md",
+            "DOCS.md", "docs.md", "INSTRUCTIONS.md", "instructions.md", "prompt.md",
+            "system.md", "context.md",
+        )
+        for name in priority_files:
+            path = skill_dir / name
+            if path.is_file():
+                content = self._read_text(path)
                 if content:
-                    knowledge[fname] = content
+                    knowledge[name] = content
 
-        # 扫描 docs/ 目录
         docs_dir = skill_dir / "docs"
-        if docs_dir.exists():
-            for f in docs_dir.glob("*.md"):
-                if len(knowledge) < 10:  # 最多10个文件
-                    content = self._read_text(f)
-                    if content:
-                        knowledge[f"docs/{f.name}"] = content
-
+        if docs_dir.is_dir():
+            for path in sorted(docs_dir.glob("*.md")):
+                if len(knowledge) >= 10:
+                    break
+                content = self._read_text(path)
+                if content:
+                    knowledge[f"docs/{path.name}"] = content
         return knowledge
 
     def delete_skill(self, skill_id):
-        if skill_id not in self._cache:
+        skill = self._cache.get(skill_id)
+        if not skill:
             raise ValueError(f"技能 '{skill_id}' 不存在")
-        if self._cache[skill_id].get("source") == "builtin":
+        if skill.get("source") == "builtin":
             raise ValueError("不能删除内置技能")
 
-        skill_dir = INSTALLED_DIR / skill_id
-        if skill_dir.exists():
-            _rmtree_readonly(skill_dir)
-        del self._cache[skill_id]
+        skill_dir = self._skill_dirs.get(skill_id)
+        if not skill_dir:
+            raise ValueError("找不到技能安装目录")
+        allowed_roots = (self.installed_dir.resolve(), self.custom_dir.resolve())
+        resolved = skill_dir.resolve()
+        if not any(resolved.parent == root for root in allowed_roots):
+            raise ValueError("技能目录不安全")
+        _rmtree_readonly(skill_dir)
+        self._load_all()
 
     def reload(self):
         self._load_all()

@@ -14,7 +14,7 @@
     </div>
 
     <!-- 搜索 -->
-    <input type="text" v-model="memorySearch" placeholder="搜索记忆..." class="memory-search" />
+    <input type="text" @input="e => debouncedSearch(e.target.value)" placeholder="搜索记忆..." class="memory-search" />
 
     <!-- 添加记忆 -->
     <div class="memory-add">
@@ -61,6 +61,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
+import { useDebounce } from '../../composables/usePerformance'
 
 const memories = ref([])
 const memoryFilter = ref('all')
@@ -70,6 +71,11 @@ const newMemoryCategory = ref('preference')
 const editingMemoryId = ref(null)
 const editingMemoryContent = ref('')
 const loading = ref(false)
+
+// 防抖搜索
+const { debouncedFn: debouncedSearch } = useDebounce((val) => {
+  memorySearch.value = val
+}, 300)
 
 const filteredMemories = computed(() => {
   let list = memories.value

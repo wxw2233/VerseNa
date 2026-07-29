@@ -1,13 +1,20 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import { fetchJsonWithRetry } from '../utils/api'
 
 export const useThemeStore = defineStore('theme', () => {
   const themes = ref([])
   const current = ref('default')
 
-  async function fetchThemes() {
-    const resp = await fetch('/api/themes')
-    themes.value = await resp.json()
+  async function fetchThemes({ retries = 2, retryDelay = 250 } = {}) {
+    const data = await fetchJsonWithRetry('/api/themes', {
+      retries,
+      retryDelay,
+      cache: 'no-store',
+      validate: Array.isArray,
+    })
+    themes.value = data
+    return data
   }
 
   /**

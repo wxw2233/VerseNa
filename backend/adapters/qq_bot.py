@@ -15,6 +15,8 @@ class QQBotAdapter(BaseAdapter):
         self.ws = None
         self.heartbeat_interval = 41.25
         self._heartbeat_task = None
+        self._connection_task = None
+        self._message_tasks = set()
         self._running = False
         self._seq = None
         self._on_message = None  # 回调：收到消息时调用
@@ -33,14 +35,15 @@ class QQBotAdapter(BaseAdapter):
                 if resp.status_code != 200:
                     print(f"QQ Bot token error: {resp.status_code}")
                     return False
-                self.token = resp.json().get("access_token", "")
-                if not self.token:
+                token_data = resp.json()
+                token = token_data.get("access_token", "")
+                if not token:
                     return False
 
             # 2. 获取网关地址
             async with httpx.AsyncClient(timeout=10) as client:
                 resp = await client.get("https://api.sgroup.qq.com/gateway/bot", headers={
-                    "Authorization": f"QQBot {self.token}"
+                    "Authorization": f"QQBot {token}"
                 })
                 if resp.status_code != 200:
                     print(f"QQ Bot gateway error: {resp.status_code}")
@@ -48,8 +51,11 @@ class QQBotAdapter(BaseAdapter):
                 gateway_url = resp.json().get("url", "wss://api.sgroup.qq.com/websocket")
 
             # 3. 连接 WebSocket
+            await self._stop_connection()
+            self.token = token
+            self._token_expires_at = time.time() + int(token_data.get("expires_in", 7200)) - 300
             self._running = True
-            asyncio.create_task(self._connect(gateway_url))
+            self._connection_task = asyncio.create_task(self._connect(gateway_url))
             return True
 
         except Exception as e:
@@ -57,12 +63,38 @@ class QQBotAdapter(BaseAdapter):
             return False
 
     async def stop(self):
+        await self._stop_connection()
         self._running = False
         self.token = ""
+        self._token_expires_at = 0
+        current = asyncio.current_task()
+        tasks = [task for task in self._message_tasks if task is not current]
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        self._message_tasks.clear()
+
+    async def _stop_connection(self):
+        self._running = False
         if self._heartbeat_task:
             self._heartbeat_task.cancel()
         if self.ws:
             await self.ws.close()
+
+        current = asyncio.current_task()
+        tasks = [
+            task for task in (self._heartbeat_task, self._connection_task)
+            if task and task is not current
+        ]
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+        self._heartbeat_task = None
+        self._connection_task = None
+        self.ws = None
 
     async def _connect(self, gateway_url):
         """连接 WebSocket 网关"""
@@ -76,6 +108,8 @@ class QQBotAdapter(BaseAdapter):
                         data = json.loads(message)
                         await self._handle_message(data)
 
+            except asyncio.CancelledError:
+                raise
             except Exception as e:
                 print(f"QQ Bot WebSocket 断开: {e}")
                 if self._running:
@@ -88,7 +122,11 @@ class QQBotAdapter(BaseAdapter):
                                 "clientSecret": self.app_secret,
                             })
                             if resp.status_code == 200:
-                                self.token = resp.json().get("access_token", "")
+                                token_data = resp.json()
+                                self.token = token_data.get("access_token", "")
+                                self._token_expires_at = (
+                                    time.time() + int(token_data.get("expires_in", 7200)) - 300
+                                )
                     except Exception:
                         pass
 
@@ -207,7 +245,9 @@ class QQBotAdapter(BaseAdapter):
 
         if msg and msg.content and self._on_message:
             print(f"QQ 收到消息: type={msg.msg_type}, user={msg.user_id}, content={msg.content[:50]}")
-            asyncio.create_task(self._on_message(msg))
+            task = asyncio.create_task(self._on_message(msg))
+            self._message_tasks.add(task)
+            task.add_done_callback(self._message_tasks.discard)
 
     def on_message(self, callback):
         """注册消息回调"""

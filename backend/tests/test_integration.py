@@ -71,6 +71,20 @@ async def setup_db():
     await db.close()
 
 
+@pytest.mark.asyncio
+async def test_database_connect_is_idempotent(tmp_path):
+    from db.database import Database
+
+    database = Database(tmp_path / "idempotent.db")
+    await database.connect()
+    first_connection = database._db
+    await database.connect()
+
+    assert database._db is first_connection
+    await database.close()
+    assert database._db is None
+
+
 # ============================================================
 # 1. 消息 segments 完整链路
 # ============================================================
