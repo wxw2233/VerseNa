@@ -57,6 +57,7 @@ backups/
 
 # .superpowers
 .superpowers/
+docs/superpowers/
 
 # 调试文件
 data/debug_request.json
