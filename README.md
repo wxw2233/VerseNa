@@ -3,9 +3,9 @@
 > 一个支持多模型、多角色、多主题的 AI 聊天桌面应用。
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Python-3.8+-blue?logo=python" />
+  <img src="https://img.shields.io/badge/Python-3.10+-blue?logo=python" />
   <img src="https://img.shields.io/badge/Vue-3.4-green?logo=vuedotjs" />
-  <img src="https://img.shields.io/badge/FastAPI-0.110+-teal?logo=fastapi" />
+  <img src="https://img.shields.io/badge/FastAPI-0.115-teal?logo=fastapi" />
   <img src="https://img.shields.io/badge/License-CC--BY--NC--4.0-orange" />
 </p>
 
@@ -47,8 +47,8 @@
 
 ```bash
 # 克隆项目
-git clone https://github.com/wxw2233/ciyuan-persona.git
-cd ciyuan-persona
+git clone https://github.com/wxw2233/VerseNa.git
+cd VerseNa
 
 # 安装后端依赖
 cd backend
@@ -75,7 +75,17 @@ npm run dev
 
 浏览器访问 `http://localhost:5173`
 
-后端默认只监听 `127.0.0.1:8002`。如确需修改监听地址、端口或前端来源，可设置 `VERSENA_HOST`、`VERSENA_PORT` 和 `VERSENA_ALLOWED_ORIGINS`；开放到局域网前应自行增加访问认证。
+后端默认只监听 `127.0.0.1:8002`。生产构建完成后也可直接访问 `http://127.0.0.1:8002`，由 FastAPI 托管前端。
+
+局域网模式使用访问令牌保护 REST、资源文件和 WebSocket：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/start-lan.ps1
+```
+
+Windows、Termux 和安全注意事项见 [局域网访问文档](docs/LAN_ACCESS.md)。打包发布流程见 [打包文档](docs/PACKAGING.md)。
+
+首次 LAN 启动会在终端面板打印并持久化随机访问令牌；登录后可在 **设置 → 访问安全** 中生成或修改令牌。
 
 ### 配置模型
 

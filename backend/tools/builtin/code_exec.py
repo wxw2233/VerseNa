@@ -1,5 +1,6 @@
 import os
 import subprocess
+import sys
 import threading
 import time
 from tools.base import BaseTool
@@ -196,7 +197,7 @@ class CodeExecTool(BaseTool):
                 result = await loop.run_in_executor(
                     None,
                     lambda: subprocess.run(
-                        ["python", "-c", code],
+                        [sys.executable, "-c", code],
                         capture_output=True, text=True, timeout=30,
                         encoding="utf-8", errors="replace",
                         cwd=cwd or _get_shell().cwd

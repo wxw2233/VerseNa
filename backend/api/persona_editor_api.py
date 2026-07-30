@@ -2,9 +2,10 @@ import json
 from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+from config import settings
 
 router = APIRouter()
-PERSONAS_DIR = Path(__file__).parent.parent.parent / "personas"
+PERSONAS_DIR = settings.CONTENT_DIR / "personas"
 
 
 class PersonaCreate(BaseModel):

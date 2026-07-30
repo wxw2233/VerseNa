@@ -2,9 +2,10 @@ import json
 from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+from config import settings
 
 router = APIRouter()
-THEMES_DIR = Path(__file__).parent.parent.parent / "themes"
+THEMES_DIR = settings.CONTENT_DIR / "themes"
 
 class ThemeCreate(BaseModel):
     id: str

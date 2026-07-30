@@ -281,7 +281,7 @@ class Database:
         """获取长期记忆，按权重+时间综合排序，排除已过期的"""
         # 权重：instruction=3 > fact=2 > preference=1 > general=0
         weight_case = "CASE category WHEN 'instruction' THEN 3 WHEN 'fact' THEN 2 WHEN 'preference' THEN 1 ELSE 0 END"
-        query = f"SELECT id, content, category, source, expired_at, created_at FROM memories WHERE (expired_at IS NULL OR expired_at > datetime('now'))"
+        query = f"SELECT id, content, category, source, expired_at, created_at FROM memories WHERE (expired_at IS NULL OR datetime(expired_at) > datetime('now'))"
         params = []
         if category:
             query += " AND category = ?"
@@ -310,7 +310,7 @@ class Database:
         await self._db.commit()
 
     async def delete_expired_memories(self):
-        await self._db.execute("DELETE FROM memories WHERE expired_at IS NOT NULL AND expired_at <= datetime('now')")
+        await self._db.execute("DELETE FROM memories WHERE expired_at IS NOT NULL AND datetime(expired_at) <= datetime('now')")
         await self._db.commit()
 
     async def check_duplicate_memory(self, content):

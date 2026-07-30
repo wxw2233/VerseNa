@@ -2,7 +2,7 @@
   <div class="settings-layout">
     <!-- Sidebar Menu -->
     <aside class="sidebar">
-      <router-link to="/" class="menu-item back-btn">
+      <router-link to="/" class="menu-item back-btn" title="返回聊天">
         <span class="menu-icon">←</span>
         <span class="menu-label">返回聊天</span>
       </router-link>
@@ -12,11 +12,17 @@
         :key="item.id"
         class="menu-item"
         :class="{ active: activeTab === item.id }"
+        :title="item.label"
         @click="activeTab = item.id"
       >
         <span class="menu-icon">{{ item.icon }}</span>
         <span class="menu-label">{{ item.label }}</span>
       </div>
+      <div class="sidebar-spacer"></div>
+      <button v-if="authRequired" class="menu-item logout-btn" type="button" title="退出登录" @click="logout">
+        <LogOut class="menu-icon" :size="16" />
+        <span class="menu-label">退出登录</span>
+      </button>
     </aside>
 
     <!-- Content Area -->
@@ -54,6 +60,7 @@
 
       <SkillTab v-if="activeTab === 'skill'" />
 
+      <SecurityTab v-if="activeTab === 'security'" />
       <ToolTab v-if="activeTab === 'tool'" />
       <MemoryTab v-if="activeTab === 'memory'" />
       <AdvancedTab v-if="activeTab === 'advanced'" />
@@ -63,7 +70,8 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
+import { LogOut } from 'lucide-vue-next'
 import { useThemeStore } from '../stores/theme'
 import PersonaTab from '../components/settings/PersonaTab.vue'
 import ThemePackTab from '../components/settings/ThemePackTab.vue'
@@ -73,24 +81,33 @@ import MemoryTab from '../components/settings/MemoryTab.vue'
 import MonitorTab from '../components/settings/MonitorTab.vue'
 import SkillTab from '../components/settings/SkillTab.vue'
 import AdvancedTab from '../components/settings/AdvancedTab.vue'
+import SecurityTab from '../components/settings/SecurityTab.vue'
 import QQBotConfig from '../components/QQBotConfig.vue'
+import { getAuthStatus, logoutSession } from '../utils/auth'
 
 const activeTab = ref('persona')
 const themeStore = useThemeStore()
 const personaTabRef = ref(null)
+const authRequired = ref(false)
 
-const menuItems = [
+const allMenuItems = [
   { id: 'persona', icon: '🎭', label: '次元设置' },
   { id: 'themepack', icon: '📦', label: '主题包' },
   { id: 'model', icon: '🤖', label: '模型配置' },
   { id: 'channel', icon: '📡', label: '通道管理' },
   { id: 'plugin', icon: '🔌', label: '插件管理' },
   { id: 'skill', icon: '⚡', label: '技能' },
+  { id: 'security', icon: '🔐', label: '访问安全' },
   { id: 'tool', icon: '🔧', label: '工具' },
   { id: 'memory', icon: '🧠', label: '记忆' },
   { id: 'advanced', icon: '⚙️', label: '高级' },
   { id: 'monitor', icon: '📊', label: '监控' },
 ]
+const menuItems = computed(() => (
+  authRequired.value
+    ? allMenuItems
+    : allMenuItems.filter(item => item.id !== 'security')
+))
 
 // --- Shared theme pack data ---
 const themePacks = ref([])
@@ -124,9 +141,16 @@ async function onPackChanged() {
 }
 
 onMounted(async () => {
+  try {
+    authRequired.value = Boolean((await getAuthStatus()).required)
+  } catch {}
   await loadThemePacks()
   await themeStore.applyTheme()
 })
+
+async function logout() {
+  await logoutSession()
+}
 </script>
 
 <style scoped>
@@ -199,6 +223,16 @@ onMounted(async () => {
   margin: 8px 16px;
 }
 
+.sidebar-spacer {
+  flex: 1;
+}
+
+.logout-btn {
+  width: calc(100% - 16px);
+  margin-bottom: 12px;
+  font-family: inherit;
+}
+
 .menu-icon {
   font-size: 16px;
   width: 20px;
@@ -224,4 +258,36 @@ onMounted(async () => {
 .empty-title { font-size: 18px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px; }
 .empty-desc { color: var(--text-secondary); font-size: 14px; }
 .empty-desc code { background: rgba(124,92,252,0.15); padding: 2px 6px; border-radius: 4px; font-size: 13px; }
+
+@media (max-width: 700px) {
+  .sidebar {
+    width: 56px;
+    min-width: 56px;
+    padding-top: 6px;
+  }
+
+  .menu-item {
+    justify-content: center;
+    gap: 0;
+    margin: 2px 6px;
+    padding: 8px 6px;
+  }
+
+  .menu-label {
+    display: none;
+  }
+
+  .menu-divider {
+    margin: 6px 10px;
+  }
+
+  .logout-btn {
+    width: calc(100% - 12px);
+    margin-bottom: 8px;
+  }
+
+  .content {
+    padding: 20px 14px;
+  }
+}
 </style>

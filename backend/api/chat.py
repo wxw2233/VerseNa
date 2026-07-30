@@ -11,6 +11,7 @@ from tools.registry import tool_registry
 from api.log_api import log_info, log_error
 from db.database import db
 from models.providers import get_provider
+from auth import SESSION_COOKIE_NAME, auth_manager, is_allowed_origin
 
 router = APIRouter()
 
@@ -60,6 +61,27 @@ async def create_agent(api_key: str = None, base_url: str = None, model_name: st
 @router.websocket("/ws/chat")
 async def websocket_chat(ws: WebSocket):
     await ws.accept()
+    authorization = ws.headers.get("authorization", "")
+    bearer_authenticated = auth_manager.authenticate_bearer(authorization)
+    session_authenticated = auth_manager.validate_session(
+        ws.cookies.get(SESSION_COOKIE_NAME, "")
+    )
+    if auth_manager.required and authorization and not bearer_authenticated:
+        await ws.send_json({"type": "auth_required"})
+        await ws.close(code=4401, reason="Authentication required")
+        return
+    if auth_manager.required and not bearer_authenticated and not session_authenticated:
+        await ws.send_json({"type": "auth_required"})
+        await ws.close(code=4401, reason="Authentication required")
+        return
+    if auth_manager.required and session_authenticated and not is_allowed_origin(
+        ws.headers.get("origin", ""),
+        ws.headers.get("host", ""),
+        settings.ALLOWED_ORIGINS,
+    ):
+        await ws.send_json({"type": "origin_rejected"})
+        await ws.close(code=4403, reason="Origin rejected")
+        return
     agent = await create_agent()
 
     async def confirm_callback(confirm_data):

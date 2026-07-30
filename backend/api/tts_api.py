@@ -47,7 +47,7 @@ async def tts_clone(pack_id: str):
         raise HTTPException(400, "未配置 TTS 模型")
 
     # 查找参考音频文件
-    audio_dir = settings.BASE_DIR / "data" / "themes" / pack_id / "assets"
+    audio_dir = settings.DATA_DIR / "themes" / pack_id / "assets"
     audio_file = None
     for ext in ("wav", "mp3", "m4a", "ogg", "flac"):
         candidates = list(audio_dir.glob(f"ref_audio.*"))
@@ -76,9 +76,9 @@ async def tts_status(pack_id: str):
     # 检查是否有参考音频
     has_ref_audio = False
     search_dirs = [
-        settings.BASE_DIR.parent / "themepacks" / pack_id / "assets",
-        settings.BASE_DIR.parent / "themes" / pack_id / "assets",
-        settings.BASE_DIR / "data" / "themes" / pack_id / "assets",
+        settings.CONTENT_DIR / "themepacks" / pack_id / "assets",
+        settings.CONTENT_DIR / "themes" / pack_id / "assets",
+        settings.DATA_DIR / "themes" / pack_id / "assets",
     ]
     for audio_dir in search_dirs:
         if audio_dir.exists():

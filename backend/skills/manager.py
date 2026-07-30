@@ -7,6 +7,7 @@ import subprocess
 import uuid
 from pathlib import Path
 from urllib.parse import urlparse
+from config import settings
 
 
 def _rmtree_readonly(path):
@@ -20,8 +21,8 @@ def _rmtree_readonly(path):
 
 SKILLS_DIR = Path(__file__).parent
 BUILTIN_DIR = SKILLS_DIR / "builtin"
-CUSTOM_DIR = SKILLS_DIR / "custom"
-INSTALLED_DIR = SKILLS_DIR / "installed"
+CUSTOM_DIR = settings.SKILLS_DATA_DIR / "custom"
+INSTALLED_DIR = settings.SKILLS_DATA_DIR / "installed"
 SKILL_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
 BUILTIN_SKILLS = [

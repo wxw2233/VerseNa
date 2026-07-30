@@ -1,7 +1,8 @@
 import json
 from pathlib import Path
+from config import settings
 
-PERSONAS_DIR = Path(__file__).parent.parent.parent / "personas"
+PERSONAS_DIR = settings.CONTENT_DIR / "personas"
 
 class PersonaData:
     def __init__(self, name: str, config: dict, prompt: str):

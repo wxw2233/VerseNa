@@ -7,6 +7,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Any, Optional
 from themepacks.manager import pack_manager
+from config import settings
 
 router = APIRouter()
 
@@ -87,7 +88,7 @@ async def update_pack(pack_id: str, req: PackUpdate):
             json.dumps(char, ensure_ascii=False, indent=2), encoding="utf-8"
         )
         # 同步到 personas/{pack_id}/
-        persona_dest = Path(__file__).parent.parent.parent / "personas" / pack_id
+        persona_dest = settings.CONTENT_DIR / "personas" / pack_id
         persona_dest.mkdir(parents=True, exist_ok=True)
         for f in ["persona.json", "prompt.md"]:
             src = pack_dir / f
@@ -155,8 +156,7 @@ async def update_pack(pack_id: str, req: PackUpdate):
 
     # 同步到 themes/ 目录
     import shutil as _st2
-    from pathlib import Path as _Path
-    theme_dest = _Path(__file__).parent.parent.parent / "themes" / pack_id
+    theme_dest = settings.CONTENT_DIR / "themes" / pack_id
     theme_dest.mkdir(parents=True, exist_ok=True)
     src = pack_dir / "variables.css"
     if src.exists():
@@ -295,7 +295,7 @@ async def apply_pack_to_sessions(pack_id: str):
     theme_ref = pack_data.get("theme_ref", "")
     # 更新 persona
     if persona_ref:
-        persona_dest = Path(__file__).parent.parent.parent / "personas" / persona_ref
+        persona_dest = settings.CONTENT_DIR / "personas" / persona_ref
         persona_dest.mkdir(parents=True, exist_ok=True)
         for f in ["persona.json", "prompt.md"]:
             src = pack_dir / f
@@ -309,7 +309,7 @@ async def apply_pack_to_sessions(pack_id: str):
             pass
     # 更新 theme
     if theme_ref:
-        theme_dest = Path(__file__).parent.parent.parent / "themes" / theme_ref
+        theme_dest = settings.CONTENT_DIR / "themes" / theme_ref
         theme_dest.mkdir(parents=True, exist_ok=True)
         for f in ["theme.json", "variables.css"]:
             src = pack_dir / f

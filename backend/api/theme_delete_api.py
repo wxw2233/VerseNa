@@ -1,9 +1,10 @@
 from pathlib import Path
 from fastapi import APIRouter, HTTPException
 import shutil
+from config import settings
 
 router = APIRouter()
-THEMES_DIR = Path(__file__).parent.parent.parent / "themes"
+THEMES_DIR = settings.CONTENT_DIR / "themes"
 
 @router.delete("/api/themes/{theme_id}")
 async def delete_theme(theme_id: str):

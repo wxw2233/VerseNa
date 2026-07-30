@@ -2,6 +2,7 @@ from pathlib import Path
 from api.log_api import log_info, log_error
 from fastapi import APIRouter, UploadFile, File, HTTPException
 from fastapi.responses import FileResponse
+from config import settings
 
 router = APIRouter()
 
@@ -20,7 +21,7 @@ async def rename_asset(theme_id: str, filename: str, to: str = ""):
             tm_src.rename(tm_dir / to)
         return {"status": "ok"}
     return {"status": "not_found"}
-THEMES_DIR = Path(__file__).parent.parent.parent / "themes"
+THEMES_DIR = settings.CONTENT_DIR / "themes"
 
 @router.post("/api/themes/{theme_id}/upload")
 async def upload_asset(theme_id: str, file: UploadFile = File(...)):

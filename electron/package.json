@@ -1,6 +1,6 @@
 {
   "name": "versena",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "VerseNa - AI 角色扮演聊天桌面客户端",
   "main": "main.js",
   "author": "wxw",
@@ -23,6 +23,13 @@
     ],
     "extraResources": [
       {
+        "from": "../build/windows/python",
+        "to": "python",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
         "from": "../backend",
         "to": "backend",
         "filter": [
@@ -30,6 +37,8 @@
           "**/*.json",
           "**/*.txt",
           "**/*.md",
+          "**/*.yaml",
+          "**/*.yml",
           "!data/**",
           "!tests/**",
           "!**/.pytest_cache/**",
@@ -66,6 +75,9 @@
       }
     ],
     "win": {
+      "artifactName": "VerseNa-${version}-Setup-${arch}.${ext}",
+      "signAndEditExecutable": false,
+      "signDlls": false,
       "target": [
         {
           "target": "nsis",
@@ -77,10 +89,12 @@
     },
     "nsis": {
       "oneClick": false,
+      "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "VerseNa"
+      "shortcutName": "VerseNa",
+      "deleteAppDataOnUninstall": false
     }
   },
   "devDependencies": {

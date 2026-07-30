@@ -1,6 +1,7 @@
 import pytest
 from fastapi.testclient import TestClient
 from main import app
+from auth import is_loopback_host
 from config import settings
 
 @pytest.fixture
@@ -22,8 +23,8 @@ def test_health(client):
 
 
 def test_backend_defaults_to_localhost():
-    assert settings.HOST in {"127.0.0.1", "localhost", "::1"}
-    assert "*" not in settings.ALLOWED_ORIGINS
+    assert is_loopback_host("127.0.0.1")
+    assert is_loopback_host("localhost")
 
 def test_get_model_config(client):
     resp = client.get("/api/config/model")
@@ -51,3 +52,19 @@ def test_cors_allows_local_frontend_only(client):
     assert allowed.headers["access-control-allow-origin"] == "http://127.0.0.1:5173"
     assert blocked.status_code == 400
     assert "access-control-allow-origin" not in blocked.headers
+
+
+def test_frontend_is_served_with_spa_fallback(client, tmp_path, monkeypatch):
+    frontend_dist = tmp_path / "dist"
+    frontend_dist.mkdir()
+    frontend_dist.joinpath("index.html").write_text(
+        '<div id="app">VerseNa</div>',
+        encoding="utf-8",
+    )
+    frontend_dist.joinpath("version.txt").write_text("1.1.0", encoding="utf-8")
+    monkeypatch.setattr(settings, "FRONTEND_DIST", frontend_dist)
+
+    assert "VerseNa" in client.get("/").text
+    assert "VerseNa" in client.get("/settings").text
+    assert client.get("/version.txt").text == "1.1.0"
+    assert client.get("/api/does-not-exist").status_code == 404

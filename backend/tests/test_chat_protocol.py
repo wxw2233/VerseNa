@@ -48,6 +48,8 @@ def test_websocket_acknowledges_and_deduplicates(tmp_path, monkeypatch):
     import api.session_api as session_api
     import main
 
+    chat_api.auth_manager.configure("")
+
     database = Database(tmp_path / "protocol.db")
 
     class FakeAgent:

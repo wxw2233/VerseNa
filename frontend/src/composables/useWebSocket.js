@@ -1,5 +1,6 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useToast } from './useToast.js'
+import { notifyAuthenticationRequired } from '../utils/auth.js'
 
 const MAX_RECONNECT_ATTEMPTS = 5
 const ACK_TIMEOUT_MS = 10000
@@ -73,11 +74,18 @@ export function useWebSocket(url = defaultWebSocketUrl()) {
       if (recovered) toast.success('连接已恢复')
     }
 
-    socket.onclose = () => {
+    socket.onclose = (event) => {
       if (myId !== connectionId) return
       connected.value = false
       ws.value = null
       rejectPendingAcknowledgements('连接已中断，服务端未确认消息')
+
+      if (event.code === 4401) {
+        manualClose = true
+        status.value = 'unauthorized'
+        notifyAuthenticationRequired()
+        return
+      }
 
       if (manualClose) {
         status.value = 'disconnected'
@@ -96,6 +104,13 @@ export function useWebSocket(url = defaultWebSocketUrl()) {
       if (myId !== connectionId) return
       try {
         const message = JSON.parse(event.data)
+        if (message.type === 'auth_required') {
+          manualClose = true
+          status.value = 'unauthorized'
+          notifyAuthenticationRequired()
+          socket.close(4401)
+          return
+        }
         if (message.type === 'accepted' && message.client_message_id) {
           const pending = pendingAcknowledgements.get(message.client_message_id)
           if (!pending) return

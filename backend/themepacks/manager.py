@@ -1,8 +1,9 @@
 import json
 import shutil
 from pathlib import Path
+from config import settings
 
-PACKS_DIR = Path(__file__).parent.parent.parent / "themepacks"
+PACKS_DIR = settings.CONTENT_DIR / "themepacks"
 
 class ThemePackManager:
     def __init__(self):
@@ -39,7 +40,7 @@ class ThemePackManager:
         (pack_dir / "pack.json").write_text(json.dumps(pack_data, ensure_ascii=False, indent=2), encoding="utf-8")
         # 复制 persona 文件（如果指定了）
         if persona_ref:
-            persona_src = Path(__file__).parent.parent.parent / "personas" / persona_ref
+            persona_src = settings.CONTENT_DIR / "personas" / persona_ref
             if persona_src.exists():
                 for f in persona_src.iterdir():
                     if f.is_file():
@@ -50,7 +51,7 @@ class ThemePackManager:
                 (pack_dir / "persona.json").write_text(json.dumps(default_persona, ensure_ascii=False, indent=2), encoding="utf-8")
                 (pack_dir / "prompt.md").write_text(f"你是{name}。", encoding="utf-8")
                 # 复制到 personas 目录
-                persona_dest = Path(__file__).parent.parent.parent / "personas" / persona_ref
+                persona_dest = settings.CONTENT_DIR / "personas" / persona_ref
                 persona_dest.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(pack_dir / "persona.json", persona_dest / "persona.json")
                 shutil.copy2(pack_dir / "prompt.md", persona_dest / "prompt.md")
@@ -62,7 +63,7 @@ class ThemePackManager:
                     pass
         # 复制 theme 文件（如果指定了）
         if theme_ref:
-            theme_src = Path(__file__).parent.parent.parent / "themes" / theme_ref
+            theme_src = settings.CONTENT_DIR / "themes" / theme_ref
             if theme_src.exists():
                 for f in theme_src.iterdir():
                     if f.is_file():

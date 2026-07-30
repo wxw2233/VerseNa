@@ -209,9 +209,9 @@ async def _mimo_tts(api_key: str, base_url: str, model: str, text: str, pack_id:
     mime_type = "audio/mpeg"
 
     search_dirs = [
-        settings.BASE_DIR.parent / "themepacks" / pack_id / "assets",
-        settings.BASE_DIR.parent / "themes" / pack_id / "assets",
-        settings.BASE_DIR / "data" / "themes" / pack_id / "assets",
+        settings.CONTENT_DIR / "themepacks" / pack_id / "assets",
+        settings.CONTENT_DIR / "themes" / pack_id / "assets",
+        settings.DATA_DIR / "themes" / pack_id / "assets",
     ]
 
     for audio_dir in search_dirs:

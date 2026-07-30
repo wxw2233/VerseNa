@@ -2,7 +2,14 @@
   <div id="app-root">
     <ParticleBg color="#7c5cfc" :count="40" :speed="0.3" />
     <div class="bg-layer" :style="bgStyle" :class="{ 'bg-visible': bgReady }"></div>
-    <main class="main-content">
+    <div v-if="authChecking" class="auth-loading" aria-label="正在验证访问状态">
+      <LoaderCircle :size="24" />
+    </div>
+    <LoginScreen
+      v-else-if="authRequired && !authenticated"
+      @authenticated="handleAuthenticated"
+    />
+    <main v-else class="main-content">
       <router-view v-slot="{ Component, route }">
         <Transition :name="transitionName" mode="out-in">
           <component :is="Component" :key="route.path" />
@@ -14,14 +21,17 @@
 </template>
 
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { LoaderCircle } from 'lucide-vue-next'
 import { usePersonaStore } from './stores/persona'
 import { useSessionStore } from './stores/session'
 import { useThemeStore } from './stores/theme'
 import { useBrightness } from './composables/useBrightness'
 import Toast from './components/Toast.vue'
 import ParticleBg from './components/ParticleBg.vue'
+import LoginScreen from './components/LoginScreen.vue'
+import { getAuthStatus, onAuthenticationRequired } from './utils/auth'
 
 const route = useRoute()
 const router = useRouter()
@@ -31,7 +41,12 @@ const themeStore = useThemeStore()
 const { update: updateBrightness } = useBrightness()
 
 const bgReady = ref(true)
+const authChecking = ref(true)
+const authRequired = ref(false)
+const authenticated = ref(false)
 let currentBgUrl = ''
+let coreInitialized = false
+let removeAuthListener = null
 
 const bgStyle = computed(() => {
   const themeId = themeStore.current
@@ -81,6 +96,8 @@ function toggleSettings() {
 }
 
 async function initializeCoreData() {
+  if (coreInitialized) return
+  coreInitialized = true
   const results = await Promise.allSettled([
     sessionStore.fetchSessions({ retries: 4, retryDelay: 250 }),
     personaStore.fetchPersonas({ retries: 4, retryDelay: 250 }),
@@ -101,7 +118,38 @@ async function initializeCoreData() {
   }
 }
 
-initializeCoreData()
+async function handleAuthenticated() {
+  authenticated.value = true
+  authChecking.value = false
+  await initializeCoreData()
+}
+
+async function checkAuthentication() {
+  authChecking.value = true
+  try {
+    const status = await getAuthStatus()
+    authRequired.value = Boolean(status.required)
+    authenticated.value = Boolean(status.authenticated)
+    if (authenticated.value) await initializeCoreData()
+  } catch (err) {
+    console.error('Failed to check authentication:', err)
+    authRequired.value = true
+    authenticated.value = false
+  } finally {
+    authChecking.value = false
+  }
+}
+
+onMounted(() => {
+  removeAuthListener = onAuthenticationRequired(() => {
+    authRequired.value = true
+    authenticated.value = false
+    coreInitialized = false
+  })
+  checkAuthentication()
+})
+
+onUnmounted(() => removeAuthListener?.())
 </script>
 
 
@@ -126,6 +174,23 @@ initializeCoreData()
   flex: 1;
   overflow: hidden;
   position: relative;
+}
+
+.auth-loading {
+  position: relative;
+  z-index: 2;
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  color: var(--primary);
+}
+
+.auth-loading :deep(svg) {
+  animation: auth-spin 0.8s linear infinite;
+}
+
+@keyframes auth-spin {
+  to { transform: rotate(360deg); }
 }
 
 /* 路由切换动画 - 双向滑动 */

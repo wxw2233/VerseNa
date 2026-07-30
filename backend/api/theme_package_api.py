@@ -4,9 +4,10 @@ import zipfile
 from pathlib import Path
 from fastapi import APIRouter, UploadFile, File, HTTPException
 from fastapi.responses import StreamingResponse
+from config import settings
 
 router = APIRouter()
-THEMES_DIR = Path(__file__).parent.parent.parent / "themes"
+THEMES_DIR = settings.CONTENT_DIR / "themes"
 
 @router.get("/api/themes/{theme_id}/export")
 async def export_theme(theme_id: str):

@@ -1,7 +1,8 @@
 import json, importlib.util
 from pathlib import Path
+from config import settings
 
-PLUGINS_DIR = Path(__file__).parent.parent.parent / "plugins"
+PLUGINS_DIR = settings.CONTENT_DIR / "plugins"
 
 class PluginInfo:
     def __init__(self, name, manifest, module=None):

@@ -8,6 +8,9 @@ import './styles/default.css'
 import './assets/theme-base.css'
 import './styles/design-system.css'
 import './styles/accessibility.css'
+import { installAuthFetchInterceptor } from './utils/auth'
+
+installAuthFetchInterceptor()
 
 const router = createRouter({
   history: createWebHistory(),

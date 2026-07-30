@@ -1,7 +1,8 @@
 import json
 from pathlib import Path
+from config import settings
 
-THEMES_DIR = Path(__file__).parent.parent.parent / "themes"
+THEMES_DIR = settings.CONTENT_DIR / "themes"
 
 class ThemeManager:
     @staticmethod

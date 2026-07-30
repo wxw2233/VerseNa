@@ -1,11 +1,14 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse
 from config import settings
 from db.database import db
+from auth import SESSION_COOKIE_NAME, auth_manager, is_allowed_origin, validate_network_configuration
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    validate_network_configuration(settings.HOST, settings.ACCESS_TOKEN)
     await db.connect()
     from api.config_api import load_saved_config
     await load_saved_config()
@@ -26,6 +29,44 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def require_api_authentication(request: Request, call_next):
+    path = request.url.path
+    public_api_paths = {"/api/auth/status", "/api/auth/login"}
+    protected_path = path.startswith("/api/") or path in {"/docs", "/redoc", "/openapi.json"}
+    if (
+        request.method == "OPTIONS"
+        or not protected_path
+        or path in public_api_paths
+        or not auth_manager.required
+    ):
+        return await call_next(request)
+
+    authorization = request.headers.get("authorization", "")
+    session_id = request.cookies.get(SESSION_COOKIE_NAME, "")
+    if authorization:
+        if auth_manager.authenticate_bearer(authorization):
+            return await call_next(request)
+        return JSONResponse(
+            status_code=401,
+            content={"detail": "访问令牌无效"},
+            headers={"Cache-Control": "no-store"},
+        )
+    if auth_manager.validate_session(session_id):
+        if request.method in {"GET", "HEAD"} or is_allowed_origin(
+            request.headers.get("origin", ""),
+            request.headers.get("host", ""),
+            settings.ALLOWED_ORIGINS,
+        ):
+            return await call_next(request)
+        return JSONResponse(status_code=403, content={"detail": "请求来源无效"})
+    return JSONResponse(
+        status_code=401,
+        content={"detail": "需要有效的 VerseNa 访问令牌"},
+        headers={"Cache-Control": "no-store"},
+    )
 
 @app.get("/health")
 async def health():
@@ -80,6 +121,25 @@ app.include_router(tts_router)
 
 from api.skill_api import router as skill_router
 app.include_router(skill_router)
+
+from api.auth_api import router as auth_router
+app.include_router(auth_router)
+
+
+@app.get("/{full_path:path}", include_in_schema=False)
+async def serve_frontend(full_path: str):
+    if full_path.startswith(("api/", "ws/")):
+        raise HTTPException(status_code=404)
+
+    frontend_dist = settings.FRONTEND_DIST
+    index_path = frontend_dist / "index.html"
+    if not index_path.is_file():
+        raise HTTPException(status_code=404, detail="Frontend build not found")
+
+    requested_path = (frontend_dist / full_path).resolve()
+    if requested_path.is_relative_to(frontend_dist) and requested_path.is_file():
+        return FileResponse(requested_path)
+    return FileResponse(index_path)
 
 if __name__ == "__main__":
     import uvicorn

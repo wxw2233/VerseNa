@@ -8,6 +8,11 @@ let tray = null
 let backendProcess = null
 let isQuitting = false
 
+const hasSingleInstanceLock = app.requestSingleInstanceLock()
+if (!hasSingleInstanceLock) {
+  app.quit()
+}
+
 // ========== 后端管理 ==========
 
 function getBackendDir() {
@@ -19,6 +24,11 @@ function getBackendDir() {
 }
 
 function getPythonPath() {
+  if (app.isPackaged) {
+    const embeddedPython = path.join(process.resourcesPath, 'python', 'python.exe')
+    return fs.existsSync(embeddedPython) ? embeddedPython : null
+  }
+
   // 优先使用虚拟环境
   const venvPython = path.join(__dirname, '..', 'backend', '.venv', 'Scripts', 'python.exe')
   if (fs.existsSync(venvPython)) return venvPython
@@ -35,10 +45,41 @@ function getPythonPath() {
   return null
 }
 
+function copyMissingContent(source, target) {
+  if (!fs.existsSync(source)) return
+  const stat = fs.statSync(source)
+  if (stat.isDirectory()) {
+    fs.mkdirSync(target, { recursive: true })
+    for (const entry of fs.readdirSync(source)) {
+      copyMissingContent(path.join(source, entry), path.join(target, entry))
+    }
+    return
+  }
+  if (!fs.existsSync(target)) {
+    fs.mkdirSync(path.dirname(target), { recursive: true })
+    fs.copyFileSync(source, target)
+  }
+}
+
+function initializePackagedContent() {
+  if (!app.isPackaged) return
+  const contentDir = path.join(app.getPath('userData'), 'content')
+  for (const directory of ['personas', 'themes', 'themepacks']) {
+    copyMissingContent(
+      path.join(process.resourcesPath, directory),
+      path.join(contentDir, directory),
+    )
+  }
+  fs.mkdirSync(path.join(contentDir, 'plugins'), { recursive: true })
+}
+
 function startBackend() {
   const python = getPythonPath()
   if (!python) {
-    dialog.showErrorBox('Python 未找到', '请安装 Python 3.10+ 并确保已加入 PATH 环境变量。')
+    const message = app.isPackaged
+      ? '安装包中的 Python 运行时缺失，请重新安装 VerseNa。'
+      : '请安装 Python 3.10+ 并确保已加入 PATH 环境变量。'
+    dialog.showErrorBox('Python 未找到', message)
     return false
   }
 
@@ -53,7 +94,20 @@ function startBackend() {
   console.log('[Electron] 启动后端...')
   const backendEnv = { ...process.env, VERSENA_HOST: '127.0.0.1' }
   if (app.isPackaged) {
-    backendEnv.VERSENA_DATA_DIR = path.join(app.getPath('userData'), 'data')
+    const userDataDir = app.getPath('userData')
+    const pythonDir = path.dirname(python)
+    const existingPath = backendEnv.PATH || backendEnv.Path || ''
+    backendEnv.VERSENA_DATA_DIR = path.join(userDataDir, 'data')
+    backendEnv.VERSENA_CONTENT_DIR = path.join(userDataDir, 'content')
+    backendEnv.VERSENA_SKILLS_DATA_DIR = path.join(userDataDir, 'skills')
+    backendEnv.VERSENA_FRONTEND_DIST = path.join(process.resourcesPath, 'frontend', 'dist')
+    backendEnv.PYTHONUTF8 = '1'
+    backendEnv.PYTHONIOENCODING = 'utf-8'
+    delete backendEnv.PATH
+    delete backendEnv.Path
+    backendEnv.Path = [pythonDir, path.join(pythonDir, 'Scripts'), existingPath]
+      .filter(Boolean)
+      .join(path.delimiter)
   }
   backendProcess = spawn(python, [mainPy], {
     cwd: backendDir,
@@ -125,12 +179,14 @@ function waitForBackend(maxWait = 15000) {
 // ========== 窗口管理 ==========
 
 function createWindow() {
+  const iconPath = path.join(__dirname, 'icon.png')
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 860,
     minWidth: 900,
     minHeight: 600,
     title: 'VerseNa',
+    icon: fs.existsSync(iconPath) ? iconPath : undefined,
     show: false, // 等后端就绪后再显示
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -146,10 +202,7 @@ function createWindow() {
     mainWindow.loadURL('http://localhost:5173')
     mainWindow.webContents.openDevTools()
   } else {
-    const indexPath = app.isPackaged
-      ? path.join(process.resourcesPath, 'frontend', 'dist', 'index.html')
-      : path.join(__dirname, '..', 'frontend', 'dist', 'index.html')
-    mainWindow.loadFile(indexPath)
+    mainWindow.loadURL('http://127.0.0.1:8002')
   }
 
   // 窗口准备好后显示
@@ -237,6 +290,8 @@ ipcMain.handle('get-version', () => app.getVersion())
 // ========== 应用生命周期 ==========
 
 app.whenReady().then(async () => {
+  initializePackagedContent()
+
   // 启动后端
   const started = startBackend()
   if (!started) {
@@ -271,5 +326,13 @@ app.on('activate', () => {
   // macOS: 点击 dock 图标重新打开窗口
   if (mainWindow) {
     mainWindow.show()
+  }
+})
+
+app.on('second-instance', () => {
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore()
+    mainWindow.show()
+    mainWindow.focus()
   }
 })
