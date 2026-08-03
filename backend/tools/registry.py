@@ -1,7 +1,9 @@
 import importlib
 import pkgutil
 from pathlib import Path
-from .base import BaseTool
+from config import settings
+from .base import BaseTool, ToolContext
+from .results import tool_error
 
 class ToolRegistry:
     def __init__(self):
@@ -16,14 +18,41 @@ class ToolRegistry:
     def get_tools(self) -> list[dict]:
         return [t.to_openai_tool() for t in self._tools.values()]
 
-    async def execute(self, name: str, arguments: dict) -> str:
+    def create_context(self, session_id: str, *, stop_event=None) -> ToolContext:
+        workspace = settings.TOOL_WORKSPACE
+        workspace.mkdir(parents=True, exist_ok=True)
+        return ToolContext(
+            session_id=session_id,
+            workspace=workspace,
+            trust_mode_getter=lambda: bool(getattr(settings, "TRUST_MODE", False)),
+            stop_event=stop_event,
+        )
+
+    async def execute(
+        self,
+        name: str,
+        arguments: dict,
+        *,
+        context: ToolContext | None = None,
+        confirmed: bool = False,
+    ) -> str:
         tool = self._tools.get(name)
         if not tool:
-            return f"Error: tool '{name}' not found"
+            return tool_error("TOOL_NOT_FOUND", f"工具不存在: {name}")
         try:
-            return await tool.execute(**arguments)
+            safe_arguments = {
+                key: value
+                for key, value in (arguments or {}).items()
+                if key not in {"confirmed", "_confirmed", "_context", "context"}
+            }
+            context = context or self.create_context("default")
+            return await tool.execute(
+                **safe_arguments,
+                _context=context,
+                _confirmed=confirmed,
+            )
         except Exception as e:
-            return f"Error executing {name}: {e}"
+            return tool_error("TOOL_EXECUTION_FAILED", f"{name}: {type(e).__name__}: {e}")
 
     def load_builtins(self):
         builtin_dir = Path(__file__).parent / "builtin"

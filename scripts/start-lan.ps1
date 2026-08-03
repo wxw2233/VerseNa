@@ -4,6 +4,8 @@ $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $BackendDir = Join-Path $ProjectRoot "backend"
 $EnvFile = Join-Path $BackendDir ".env"
 $FrontendIndex = Join-Path $ProjectRoot "frontend\dist\index.html"
+$DataDir = if ($env:VERSENA_DATA_DIR) { $env:VERSENA_DATA_DIR } else { Join-Path $BackendDir "data" }
+$ToolWorkspace = if ($env:VERSENA_TOOL_WORKSPACE) { $env:VERSENA_TOOL_WORKSPACE } else { Join-Path $DataDir "workspace" }
 
 if (-not (Test-Path $EnvFile)) {
     $Lines = @(
@@ -35,6 +37,7 @@ Write-Host "VerseNa LAN access" -ForegroundColor Cyan
 foreach ($Address in $Addresses) {
     Write-Host "  http://${Address}:8002"
 }
+Write-Host "  Tool workspace: $ToolWorkspace"
 Write-Host ""
 
 Push-Location $BackendDir

@@ -1,443 +1,332 @@
 import os
 import shutil
+import tempfile
 import time
 import uuid
-import glob as glob_mod
 from pathlib import Path
+
 from config import settings
-from tools.base import BaseTool
-
-# 硬禁止路径（所有操作均拦截）
-FORBIDDEN_PATHS_LINUX = ['/proc', '/sys', '/dev', '/etc/shadow', '/etc/passwd']
-FORBIDDEN_PATHS_WIN = ['c:\\windows\\system32', 'c:\\program files', 'c:\\programdata']
+from tools.base import BaseTool, ToolContext
+from tools.paths import ToolPath, ToolPathError, resolve_tool_path
+from tools.results import tool_confirm, tool_error, tool_result
 
 
-def _get_home():
-    return Path.home()
+MAX_READ_BYTES = 100_000
+MAX_LIST_ITEMS = 500
+MAX_SEARCH_RESULTS = 500
+MAX_REPLACE_BYTES = 500 * 1024
+MUTATING_ACTIONS = {"write", "find_replace", "copy", "move", "delete"}
 
 
-def _get_forbidden_paths():
-    home = str(_get_home())
-    paths = [home + '/.ssh', home + '/.gnupg']
-    if os.name == 'nt':
-        paths.extend(FORBIDDEN_PATHS_WIN)
-    else:
-        paths.extend(FORBIDDEN_PATHS_LINUX)
-    return paths
-
-
-def _normalize_for_check(path):
-    """安全校验用：expanduser → abspath → realpath"""
-    p = os.path.expanduser(path)
-    p = os.path.abspath(p)
-    p = os.path.realpath(p)
-    return p
-
-
-def _normalize_for_op(path):
-    """实际操作用：expanduser → abspath（不解析符号链接）"""
-    p = os.path.expanduser(path)
-    p = os.path.abspath(p)
-    return p
-
-
-def _is_forbidden(check_path):
-    """检查路径是否命中硬禁止"""
-    cp = check_path.lower() if os.name == 'nt' else check_path
-    for fp in _get_forbidden_paths():
-        fp_norm = fp.lower() if os.name == 'nt' else fp
-        if cp == fp_norm or cp.startswith(fp_norm + '/') or cp.startswith(fp_norm + '\\'):
-            return True
-    return False
-
-
-def _is_sensitive(check_path):
-    """检查路径是否为敏感路径（主目录下隐藏文件）"""
-    home = str(_get_home())
-    cp = check_path
-    if cp.startswith(home):
-        rel = cp[len(home):].lstrip('/\\')
-        if rel.startswith('.'):
-            return True
-    if cp.startswith('/etc/'):
-        return True
-    if os.name == 'nt' and cp.lower().startswith('c:\\windows\\'):
-        return True
-    return False
-
-
-def _is_binary(path, op_path):
-    """检测文件是否为二进制"""
+def _audit_log(context: ToolContext, action: str, path: str, result: str, error: str = "") -> None:
     try:
-        with open(op_path, 'rb') as f:
-            chunk = f.read(8192)
-            return b'\x00' in chunk
-    except Exception:
-        return False
-
-
-def _audit_log(request_id, action, path, result, error='', trust_mode=False):
-    """审计日志"""
-    try:
-        log_dir = settings.DATA_DIR
-        log_dir.mkdir(parents=True, exist_ok=True)
-        log_file = log_dir / 'audit.log'
-        ts = time.strftime('%Y-%m-%d %H:%M:%S')
-        line = f"[{ts}] request_id={request_id} action={action} path={path} result={result}"
+        settings.DATA_DIR.mkdir(parents=True, exist_ok=True)
+        clean = lambda value: str(value).replace("\r", " ").replace("\n", " ")
+        line = (
+            f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] "
+            f"session_id={clean(context.session_id)} action={clean(action)} "
+            f"path={clean(path)} result={clean(result)} trust_mode={context.trust_mode}"
+        )
         if error:
-            line += f" error={error}"
-        line += f" trust_mode={trust_mode}\n"
-        with open(log_file, 'a', encoding='utf-8') as f:
-            f.write(line)
-    except Exception:
+            line += f" error={clean(error)}"
+        with (settings.DATA_DIR / "audit.log").open("a", encoding="utf-8") as file:
+            file.write(line + "\n")
+    except OSError:
         pass
+
+
+def _atomic_write(path: Path, content: str, encoding: str) -> int:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    encoded = content.encode(encoding)
+    handle, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    temporary_path = Path(temporary_name)
+    try:
+        with os.fdopen(handle, "wb") as file:
+            file.write(encoded)
+            file.flush()
+            os.fsync(file.fileno())
+        os.replace(temporary_path, path)
+    finally:
+        temporary_path.unlink(missing_ok=True)
+    return len(encoded)
 
 
 class FileManagerTool(BaseTool):
     name = "file_manager"
-    description = "文件管理器：读取(read)、写入(write)、列出目录(list)、搜索文件名(search)、查找替换(find_replace)、复制(copy)、移动(move)、删除(delete)、获取信息(info)"
+    description = "在工具工作区内读取、列出、搜索和管理文件；所有写入类操作均需要用户确认，信任模式除外。"
     parameters = {
         "type": "object",
         "properties": {
             "action": {
                 "type": "string",
                 "enum": ["read", "write", "list", "search", "find_replace", "copy", "move", "delete", "info"],
-                "description": "操作类型"
+                "description": "操作类型",
             },
-            "path": {"type": "string", "description": "目标文件/目录路径"},
-            "content": {"type": "string", "description": "写入内容（write专用）"},
-            "mode": {"type": "string", "enum": ["overwrite", "append"], "description": "写入模式，默认overwrite"},
-            "old": {"type": "string", "description": "查找文本（find_replace专用）"},
-            "new": {"type": "string", "description": "替换文本（find_replace专用）"},
-            "pattern": {"type": "string", "description": "glob搜索模式（search专用，如*.py）"},
-            "recursive": {"type": "boolean", "description": "是否递归（search默认true, delete默认false）"},
-            "src": {"type": "string", "description": "源路径（copy/move专用）"},
-            "dst": {"type": "string", "description": "目标路径（copy/move专用）"},
-            "encoding": {"type": "string", "description": "文件编码，默认utf-8"},
-            "max_size": {"type": "integer", "description": "读取最大字节数，默认50000"},
-            "limit": {"type": "integer", "description": "list最大返回条数，默认200"},
-            "confirmed": {"type": "boolean", "description": "是否已确认（内部参数，前端确认后传入）"}
+            "path": {"type": "string", "description": "工作区内的相对路径"},
+            "content": {"type": "string", "description": "写入内容"},
+            "mode": {"type": "string", "enum": ["overwrite", "append"], "description": "写入模式"},
+            "old": {"type": "string", "description": "查找文本"},
+            "new": {"type": "string", "description": "替换文本"},
+            "pattern": {"type": "string", "description": "文件名 glob 模式，如 *.py"},
+            "recursive": {"type": "boolean", "description": "是否递归"},
+            "src": {"type": "string", "description": "复制或移动的源路径"},
+            "dst": {"type": "string", "description": "复制或移动的目标路径"},
+            "encoding": {"type": "string", "description": "文本编码，默认 utf-8"},
+            "offset": {"type": "integer", "minimum": 0, "description": "读取起始字节"},
+            "max_size": {"type": "integer", "minimum": 1, "maximum": MAX_READ_BYTES},
+            "limit": {"type": "integer", "minimum": 1, "maximum": MAX_LIST_ITEMS},
         },
-        "required": ["action"]
+        "required": ["action"],
+        "additionalProperties": False,
     }
 
-    def __init__(self, trust_mode_getter=None):
-        self._trust_mode_getter = trust_mode_getter
-
-    def _get_trust_mode(self):
-        if self._trust_mode_getter:
-            return self._trust_mode_getter()
-        return False
-
-    def _check_path(self, path, action, request_id):
-        """安全校验，返回 (check_path, op_path, error_dict_or_None)"""
-        check_path = _normalize_for_check(path)
-        op_path = _normalize_for_op(path)
-
-        if _is_forbidden(check_path):
-            _audit_log(request_id, action, path, 'error', 'PATH_FORBIDDEN', self._get_trust_mode())
-            return None, None, {"success": False, "error": "PATH_FORBIDDEN", "message": f"禁止访问系统核心路径: {path}"}
-
-        return check_path, op_path, None
-
-    def _needs_confirm(self, action, check_path, is_overwrite=False, is_recursive_delete=False):
-        """判断是否需要确认"""
-        if is_recursive_delete:
-            return True
-
-        trust = self._get_trust_mode()
-        if trust:
-            return False
-
-        if action == 'delete':
-            return True
-        if action == 'write' and is_overwrite:
-            return True
-        if action in ('find_replace',) and _is_sensitive(check_path):
-            return True
-        if action in ('copy', 'move') and is_overwrite:
-            return True
-
-        return False
-
-    async def execute(self, action='', path='', content='', mode='overwrite',
-                      old='', new='', pattern='', recursive=None,
-                      src='', dst='', encoding='utf-8', max_size=50000,
-                      limit=200, confirmed=False, **kwargs) -> str:
-        import json
-
-        if not action:
-            return json.dumps({"success": False, "error": "INVALID_PATH", "message": "必须指定 action"}, ensure_ascii=False)
-
-        request_id = str(uuid.uuid4())[:8]
-
-        # copy/move 用 src/dst
-        if action in ('copy', 'move'):
-            if not src or not dst:
-                return json.dumps({"success": False, "error": "INVALID_PATH", "message": f"{action} 需要 src 和 dst 参数"}, ensure_ascii=False)
-            check_src, op_src, err = self._check_path(src, action, request_id)
-            if err:
-                return json.dumps(err, ensure_ascii=False)
-            check_dst, op_dst, err = self._check_path(dst, action, request_id)
-            if err:
-                return json.dumps(err, ensure_ascii=False)
-
-            dst_exists = os.path.exists(op_dst)
-            is_overwrite = dst_exists and os.path.isfile(op_dst)
-
-            if not confirmed and self._needs_confirm(action, check_src, is_overwrite=is_overwrite):
-                msg = f"确认{('复制' if action == 'copy' else '移动')} {src} → {dst}？"
-                if is_overwrite:
-                    msg += " (目标文件已存在，将被覆盖)"
-                return json.dumps({
-                    "type": "confirm", "request_id": request_id, "action": action,
-                    "src": src, "dst": dst, "message": msg
-                }, ensure_ascii=False)
-
-            try:
-                if action == 'copy':
-                    if os.path.isdir(op_src):
-                        shutil.copytree(op_src, op_dst)
-                    else:
-                        os.makedirs(os.path.dirname(op_dst) or '.', exist_ok=True)
-                        shutil.copy2(op_src, op_dst)
-                    size = sum(f.stat().st_size for f in Path(op_dst).rglob('*') if f.is_file()) if os.path.isdir(op_dst) else os.path.getsize(op_dst)
-                    _audit_log(request_id, action, f"{src}->{dst}", 'success', trust_mode=self._get_trust_mode())
-                    return json.dumps({"success": True, "data": {"copied": size}}, ensure_ascii=False)
-                else:
-                    os.makedirs(os.path.dirname(op_dst) or '.', exist_ok=True)
-                    try:
-                        shutil.move(op_src, op_dst)
-                    except OSError:
-                        if os.path.isdir(op_src):
-                            shutil.copytree(op_src, op_dst)
-                            shutil.rmtree(op_src)
-                        else:
-                            shutil.copy2(op_src, op_dst)
-                            os.remove(op_src)
-                    _audit_log(request_id, action, f"{src}->{dst}", 'success', trust_mode=self._get_trust_mode())
-                    return json.dumps({"success": True, "data": {"moved": True}}, ensure_ascii=False)
-            except Exception as e:
-                _audit_log(request_id, action, f"{src}->{dst}", 'error', str(e), self._get_trust_mode())
-                return json.dumps({"success": False, "error": "PERMISSION_DENIED", "message": str(e)}, ensure_ascii=False)
-
-        # 其他操作用 path
-        if not path:
-            return json.dumps({"success": False, "error": "INVALID_PATH", "message": "必须指定 path"}, ensure_ascii=False)
-
-        check_path, op_path, err = self._check_path(path, action, request_id)
-        if err:
-            return json.dumps(err, ensure_ascii=False)
+    async def execute(
+        self,
+        action: str = "",
+        path: str = "",
+        content: str = "",
+        mode: str = "overwrite",
+        old: str = "",
+        new: str = "",
+        pattern: str = "",
+        recursive: bool | None = None,
+        src: str = "",
+        dst: str = "",
+        encoding: str = "utf-8",
+        offset: int = 0,
+        max_size: int = 50_000,
+        limit: int = 200,
+        _context: ToolContext | None = None,
+        _confirmed: bool = False,
+        **kwargs,
+    ) -> str:
+        if not _context:
+            return tool_error("MISSING_CONTEXT", "工具执行上下文不可用")
+        if action not in self.parameters["properties"]["action"]["enum"]:
+            return tool_error("INVALID_ACTION", f"未知 action: {action}")
 
         try:
-            if action == 'read':
-                return self._do_read(op_path, encoding, max_size, request_id)
-            elif action == 'write':
-                return self._do_write(check_path, op_path, content, mode, encoding, request_id, confirmed)
-            elif action == 'list':
-                return self._do_list(op_path, limit, request_id)
-            elif action == 'search':
-                return self._do_search(op_path, pattern, recursive if recursive is not None else True, request_id)
-            elif action == 'find_replace':
-                return self._do_find_replace(check_path, op_path, old, new, encoding, request_id, confirmed)
-            elif action == 'delete':
-                return self._do_delete(check_path, op_path, recursive if recursive is not None else False, request_id, confirmed)
-            elif action == 'info':
-                return self._do_info(op_path, request_id)
-            else:
-                return json.dumps({"success": False, "error": "INVALID_PATH", "message": f"未知 action: {action}"}, ensure_ascii=False)
-        except Exception as e:
-            _audit_log(request_id, action, path, 'error', str(e), self._get_trust_mode())
-            return json.dumps({"success": False, "error": "PERMISSION_DENIED", "message": str(e)}, ensure_ascii=False)
+            if action in {"copy", "move"}:
+                if not src or not dst:
+                    return tool_error("INVALID_ARGUMENT", f"{action} 需要 src 和 dst")
+                source = resolve_tool_path(_context, src)
+                destination = resolve_tool_path(_context, dst)
+                if source.check_path == _context.workspace.resolve():
+                    return tool_error("WORKSPACE_ROOT_PROTECTED", "不能复制或移动整个工具工作区")
+                preflight_error = self._copy_move_preflight(source, destination)
+                if preflight_error:
+                    return preflight_error
+                if not _confirmed and not _context.trust_mode:
+                    return self._confirm(action, src=src, dst=dst)
+                return self._copy_or_move(action, source, destination, _context)
 
-    def _do_read(self, op_path, encoding, max_size, request_id):
-        import json
-        if not os.path.exists(op_path):
-            return json.dumps({"success": False, "error": "FILE_NOT_FOUND", "message": f"文件不存在: {op_path}"}, ensure_ascii=False)
-        if os.path.isdir(op_path):
-            return json.dumps({"success": False, "error": "PATH_IS_DIRECTORY", "message": f"路径是目录，不是文件: {op_path}"}, ensure_ascii=False)
-        if _is_binary(op_path, op_path):
-            return json.dumps({"success": False, "error": "BINARY_FILE_NOT_SUPPORTED", "message": "不支持操作二进制文件"}, ensure_ascii=False)
+            if not path:
+                path = "." if action in {"list", "search"} else ""
+            if not path:
+                return tool_error("INVALID_ARGUMENT", "必须指定 path")
+            target = resolve_tool_path(_context, path)
 
-        size = os.path.getsize(op_path)
-        with open(op_path, 'r', encoding=encoding, errors='replace') as f:
-            content = f.read(max_size)
-        truncated = size > max_size
-        return json.dumps({"success": True, "data": {"content": content, "truncated": truncated, "size": size}}, ensure_ascii=False)
+            if action in MUTATING_ACTIONS and target.check_path == _context.workspace.resolve():
+                return tool_error("WORKSPACE_ROOT_PROTECTED", "不能修改工具工作区根目录")
 
-    def _do_write(self, check_path, op_path, content, mode, encoding, request_id, confirmed=False):
-        import json
-        is_overwrite = os.path.exists(op_path) and mode == 'overwrite'
-        if os.path.isdir(op_path):
-            return json.dumps({"success": False, "error": "PATH_IS_DIRECTORY", "message": f"路径是目录: {op_path}"}, ensure_ascii=False)
+            preflight_error = self._mutation_preflight(action, target, mode, old, recursive)
+            if preflight_error:
+                return preflight_error
 
-        if not confirmed and self._needs_confirm('write', check_path, is_overwrite=is_overwrite):
-            msg = f"确认写入文件 {op_path}？"
-            if is_overwrite:
-                msg += " (文件已存在，将被覆盖)"
-            return json.dumps({
-                "type": "confirm", "request_id": request_id, "action": "write",
-                "path": op_path, "message": msg
-            }, ensure_ascii=False)
+            if action in MUTATING_ACTIONS and not _confirmed and not _context.trust_mode:
+                return self._confirm(action, path=path)
 
-        try:
-            os.makedirs(os.path.dirname(op_path) or '.', exist_ok=True)
-        except PermissionError:
-            return json.dumps({"success": False, "error": "PERMISSION_DENIED", "message": f"无权创建目录，请尝试其他路径"}, ensure_ascii=False)
-        write_mode = 'a' if mode == 'append' else 'w'
-        try:
-            with open(op_path, write_mode, encoding=encoding) as f:
-                f.write(content)
-        except PermissionError:
-            return json.dumps({"success": False, "error": "PERMISSION_DENIED", "message": f"无权写入文件（Windows权限限制），建议改用code_exec执行Python脚本写入"}, ensure_ascii=False)
-        except OSError as e:
-            return json.dumps({"success": False, "error": "PERMISSION_DENIED", "message": f"写入失败: {e}，建议改用code_exec"}, ensure_ascii=False)
-        _audit_log(request_id, 'write', op_path, 'success', trust_mode=self._get_trust_mode())
-        return json.dumps({"success": True, "data": {"bytes_written": len(content.encode(encoding)), "created_dirs": True}}, ensure_ascii=False)
+            if action == "read":
+                return self._read(target, encoding, offset, max_size)
+            if action == "write":
+                return self._write(target, content, mode, encoding, _context)
+            if action == "list":
+                return self._list(target, limit)
+            if action == "search":
+                return self._search(target, pattern, recursive if recursive is not None else True, limit)
+            if action == "find_replace":
+                return self._find_replace(target, old, new, encoding, _context)
+            if action == "delete":
+                return self._delete(target, recursive if recursive is not None else False, _context)
+            return self._info(target)
+        except ToolPathError as exc:
+            _audit_log(_context, action, path or f"{src}->{dst}", "error", "WORKSPACE_VIOLATION")
+            return tool_error("WORKSPACE_VIOLATION", str(exc))
+        except LookupError as exc:
+            return tool_error("INVALID_ENCODING", str(exc))
+        except PermissionError as exc:
+            _audit_log(_context, action, path or f"{src}->{dst}", "error", str(exc))
+            return tool_error("PERMISSION_DENIED", str(exc))
+        except OSError as exc:
+            _audit_log(_context, action, path or f"{src}->{dst}", "error", str(exc))
+            return tool_error("OS_ERROR", str(exc))
 
-    def _do_list(self, op_path, limit, request_id):
-        import json
-        if not os.path.exists(op_path):
-            return json.dumps({"success": False, "error": "FILE_NOT_FOUND", "message": f"路径不存在: {op_path}"}, ensure_ascii=False)
-        if os.path.isfile(op_path):
-            return json.dumps({"success": False, "error": "PATH_IS_FILE", "message": f"路径是文件，不是目录: {op_path}"}, ensure_ascii=False)
+    @staticmethod
+    def _confirm(action: str, **details) -> str:
+        labels = {
+            "write": "写入文件",
+            "find_replace": "替换文件内容",
+            "copy": "复制文件",
+            "move": "移动文件",
+            "delete": "删除文件",
+        }
+        return tool_confirm(str(uuid.uuid4()), action, f"确认{labels[action]}？", **details)
 
+    @staticmethod
+    def _copy_move_preflight(source: ToolPath, destination: ToolPath) -> str | None:
+        src = source.op_path
+        dst = destination.op_path
+        if not src.exists() and not src.is_symlink():
+            return tool_error("FILE_NOT_FOUND", f"源路径不存在: {src}")
+        if src.is_symlink():
+            return tool_error("SYMLINK_NOT_SUPPORTED", "不支持复制或移动符号链接")
+        if dst.exists() or dst.is_symlink():
+            return tool_error("DESTINATION_EXISTS", f"目标路径已存在: {dst}")
+        return None
+
+    @staticmethod
+    def _mutation_preflight(action: str, target: ToolPath, mode: str, old: str, recursive: bool | None) -> str | None:
+        path = target.op_path
+        if action == "write":
+            if mode not in {"overwrite", "append"}:
+                return tool_error("INVALID_MODE", "mode 必须是 overwrite 或 append")
+            if path.exists() and path.is_dir():
+                return tool_error("PATH_IS_DIRECTORY", f"路径是目录: {path}")
+        elif action == "find_replace":
+            if not old:
+                return tool_error("INVALID_ARGUMENT", "find_replace 需要 old 参数")
+            if not path.exists() or not path.is_file():
+                return tool_error("FILE_NOT_FOUND", f"文件不存在: {path}")
+            if path.stat().st_size > MAX_REPLACE_BYTES:
+                return tool_error("FILE_TOO_LARGE", "find_replace 仅支持 500KB 以内文件")
+        elif action == "delete":
+            if not path.exists() and not path.is_symlink():
+                return tool_error("FILE_NOT_FOUND", f"路径不存在: {path}")
+            if path.is_dir() and not path.is_symlink() and not recursive:
+                return tool_error("RECURSIVE_REQUIRED", "删除目录需要 recursive=true")
+        return None
+
+    @staticmethod
+    def _read(target: ToolPath, encoding: str, offset: int, max_size: int) -> str:
+        path = target.op_path
+        if not path.exists():
+            return tool_error("FILE_NOT_FOUND", f"文件不存在: {path}")
+        if path.is_dir():
+            return tool_error("PATH_IS_DIRECTORY", f"路径是目录: {path}")
+        offset = max(0, int(offset))
+        max_size = max(1, min(int(max_size), MAX_READ_BYTES))
+        size = path.stat().st_size
+        with path.open("rb") as file:
+            file.seek(min(offset, size))
+            raw = file.read(max_size)
+        if b"\x00" in raw[:8192]:
+            return tool_error("BINARY_FILE_NOT_SUPPORTED", "不支持读取二进制文件")
+        text = raw.decode(encoding, errors="replace")
+        return tool_result(True, data={
+            "content": text,
+            "offset": offset,
+            "next_offset": offset + len(raw),
+            "truncated": offset + len(raw) < size,
+            "size": size,
+        })
+
+    @staticmethod
+    def _write(target: ToolPath, content: str, mode: str, encoding: str, context: ToolContext) -> str:
+        path = target.op_path
+        if path.exists() and path.is_dir():
+            return tool_error("PATH_IS_DIRECTORY", f"路径是目录: {path}")
+        if mode == "append":
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding=encoding) as file:
+                written = file.write(content)
+            bytes_written = len(content[:written].encode(encoding))
+        else:
+            bytes_written = _atomic_write(path, content, encoding)
+        _audit_log(context, "write", str(path), "success")
+        return tool_result(True, data={"bytes_written": bytes_written, "path": str(path)})
+
+    @staticmethod
+    def _list(target: ToolPath, limit: int) -> str:
+        path = target.op_path
+        if not path.exists():
+            return tool_error("FILE_NOT_FOUND", f"目录不存在: {path}")
+        if not path.is_dir():
+            return tool_error("PATH_IS_FILE", f"路径不是目录: {path}")
+        limit = max(1, min(int(limit), MAX_LIST_ITEMS))
+        entries = sorted(path.iterdir(), key=lambda item: (not item.is_dir(), item.name.lower()))
         items = []
-        for entry in os.scandir(op_path):
-            if len(items) >= limit:
+        for entry in entries[:limit]:
+            stat = entry.lstat()
+            kind = "symlink" if entry.is_symlink() else "dir" if entry.is_dir() else "file"
+            items.append({"name": entry.name, "type": kind, "size": stat.st_size if kind == "file" else 0})
+        return tool_result(True, data={"items": items, "total": len(entries), "truncated": len(entries) > limit})
+
+    @staticmethod
+    def _search(target: ToolPath, pattern: str, recursive: bool, limit: int) -> str:
+        path = target.op_path
+        if not path.exists() or not path.is_dir():
+            return tool_error("PATH_NOT_DIRECTORY", f"搜索目录不存在: {path}")
+        if not pattern or Path(pattern).is_absolute() or ".." in Path(pattern).parts:
+            return tool_error("INVALID_PATTERN", "pattern 必须是工作区内的 glob 文件名模式")
+        limit = max(1, min(int(limit), MAX_SEARCH_RESULTS))
+        iterator = path.rglob(pattern) if recursive else path.glob(pattern)
+        matches = []
+        truncated = False
+        for match in iterator:
+            if len(matches) >= limit:
+                truncated = True
                 break
-            etype = 'dir' if entry.is_dir(follow_symlinks=False) else 'file'
-            if entry.is_symlink():
-                etype = 'symlink'
-            items.append({
-                "name": entry.name, "type": etype,
-                "size": entry.stat(follow_symlinks=False).st_size if entry.is_file(follow_symlinks=False) else 0
-            })
+            matches.append(str(match))
+        return tool_result(True, data={"matches": matches, "count": len(matches), "truncated": truncated})
 
-        total = sum(1 for _ in os.scandir(op_path))
-        return json.dumps({"success": True, "data": {"items": items, "total": total}}, ensure_ascii=False)
-
-    def _do_search(self, op_path, pattern, recursive, request_id):
-        import json
-        if not pattern:
-            return json.dumps({"success": False, "error": "INVALID_PATH", "message": "search 需要 pattern 参数"}, ensure_ascii=False)
-
-        if recursive:
-            search_pattern = os.path.join(op_path, '**', pattern)
-        else:
-            search_pattern = os.path.join(op_path, pattern)
-
-        matches = glob_mod.glob(search_pattern, recursive=recursive)
-        return json.dumps({"success": True, "data": {"matches": matches[:200], "count": len(matches)}}, ensure_ascii=False)
-
-    def _do_find_replace(self, check_path, op_path, old, new, encoding, request_id, confirmed=False):
-        import json
-        if not old:
-            return json.dumps({"success": False, "error": "INVALID_PATH", "message": "find_replace 需要 old 参数"}, ensure_ascii=False)
-        if not os.path.exists(op_path):
-            return json.dumps({"success": False, "error": "FILE_NOT_FOUND", "message": f"文件不存在: {op_path}"}, ensure_ascii=False)
-        if os.path.isdir(op_path):
-            return json.dumps({"success": False, "error": "PATH_IS_DIRECTORY", "message": f"路径是目录: {op_path}"}, ensure_ascii=False)
-        if _is_binary(op_path, op_path):
-            return json.dumps({"success": False, "error": "BINARY_FILE_NOT_SUPPORTED", "message": "不支持操作二进制文件"}, ensure_ascii=False)
-
-        size = os.path.getsize(op_path)
-        if size > 500 * 1024:
-            return json.dumps({"success": False, "error": "FILE_TOO_LARGE", "message": f"文件过大({size}字节)，find_replace 限制 500KB"}, ensure_ascii=False)
-
-        if not confirmed and self._needs_confirm('find_replace', check_path):
-            return json.dumps({
-                "type": "confirm", "request_id": request_id, "action": "find_replace",
-                "path": op_path, "message": f"确认在 {op_path} 中将 '{old}' 替换为 '{new}'？"
-            }, ensure_ascii=False)
-
-        with open(op_path, 'r', encoding=encoding, errors='replace') as f:
-            content = f.read()
-
-        new_content = content.replace(old, new)
+    @staticmethod
+    def _find_replace(target: ToolPath, old: str, new: str, encoding: str, context: ToolContext) -> str:
+        path = target.op_path
+        content = path.read_text(encoding=encoding, errors="replace")
         replacements = content.count(old)
+        if replacements:
+            _atomic_write(path, content.replace(old, new), encoding)
+            _audit_log(context, "find_replace", str(path), "success")
+        return tool_result(True, data={"replacements": replacements, "path": str(path)})
 
-        if len(new_content.encode(encoding)) > 1024 * 1024:
-            return json.dumps({"success": False, "error": "FILE_TOO_LARGE", "message": "替换后文件超过 1MB"}, ensure_ascii=False)
-
-        with open(op_path, 'w', encoding=encoding) as f:
-            f.write(new_content)
-
-        _audit_log(request_id, 'find_replace', op_path, 'success', trust_mode=self._get_trust_mode())
-        preview = new_content[:500]
-        return json.dumps({"success": True, "data": {"replacements": replacements, "preview": preview}}, ensure_ascii=False)
-
-    def _do_delete(self, check_path, op_path, recursive, request_id, confirmed=False):
-        import json
-        if not os.path.exists(op_path):
-            return json.dumps({"success": False, "error": "FILE_NOT_FOUND", "message": f"路径不存在: {op_path}"}, ensure_ascii=False)
-
-        is_dir = os.path.isdir(op_path)
-
-        if is_dir and recursive:
-            file_count = 0
-            dir_count = 0
-            for root, dirs, files in os.walk(op_path):
-                for name in files + dirs:
-                    child = os.path.join(root, name)
-                    child_check = _normalize_for_check(child)
-                    if _is_forbidden(child_check):
-                        return json.dumps({"success": False, "error": "PATH_FORBIDDEN",
-                            "message": f"目录内包含禁止访问的路径: {child}"}, ensure_ascii=False)
-                    if os.path.isdir(os.path.join(root, name)):
-                        dir_count += 1
-                    else:
-                        file_count += 1
-
-            if not confirmed and self._needs_confirm('delete', check_path, is_recursive_delete=True):
-                return json.dumps({
-                    "type": "confirm", "request_id": request_id, "action": "delete",
-                    "path": op_path,
-                    "message": f"确认递归删除目录 {op_path}？（含 {file_count} 个文件, {dir_count} 个子目录）",
-                    "file_count": file_count, "dir_count": dir_count
-                }, ensure_ascii=False)
-
-            shutil.rmtree(op_path)
-        elif is_dir and not recursive:
-            return json.dumps({"success": False, "error": "PATH_IS_DIRECTORY",
-                "message": f"路径是目录，需要 recursive=true 才能删除: {op_path}"}, ensure_ascii=False)
+    @staticmethod
+    def _copy_or_move(action: str, source: ToolPath, destination: ToolPath, context: ToolContext) -> str:
+        src = source.op_path
+        dst = destination.op_path
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        if action == "copy":
+            shutil.copytree(src, dst) if src.is_dir() else shutil.copy2(src, dst)
         else:
-            if not confirmed and self._needs_confirm('delete', check_path):
-                return json.dumps({
-                    "type": "confirm", "request_id": request_id, "action": "delete",
-                    "path": op_path, "message": f"确认删除文件 {op_path}？"
-                }, ensure_ascii=False)
-            try:
-                os.remove(op_path)
-            except PermissionError:
-                return json.dumps({"success": False, "error": "PERMISSION_DENIED", "message": f"无权删除文件（可能被占用或需要管理员权限），建议改用code_exec执行shell命令删除"}, ensure_ascii=False)
-            except OSError as e:
-                return json.dumps({"success": False, "error": "PERMISSION_DENIED", "message": f"删除失败: {e}，文件可能被其他程序占用"}, ensure_ascii=False)
+            shutil.move(str(src), str(dst))
+        _audit_log(context, action, f"{src}->{dst}", "success")
+        return tool_result(True, data={"src": str(src), "dst": str(dst), "action": action})
 
-        _audit_log(request_id, 'delete', op_path, 'success', trust_mode=self._get_trust_mode())
-        return json.dumps({"success": True, "data": {"deleted": True}}, ensure_ascii=False)
-
-    def _do_info(self, op_path, request_id):
-        import json
-        if not os.path.exists(op_path) and not os.path.islink(op_path):
-            return json.dumps({"success": False, "error": "FILE_NOT_FOUND", "message": f"路径不存在: {op_path}"}, ensure_ascii=False)
-
-        stat = os.lstat(op_path)
-        if os.path.islink(op_path):
-            ftype = 'symlink'
-        elif os.path.isdir(op_path):
-            ftype = 'dir'
+    @staticmethod
+    def _delete(target: ToolPath, recursive: bool, context: ToolContext) -> str:
+        path = target.op_path
+        if path.is_symlink():
+            path.unlink()
+        elif path.is_dir():
+            shutil.rmtree(path)
         else:
-            ftype = 'file'
+            path.unlink()
+        _audit_log(context, "delete", str(path), "success")
+        return tool_result(True, data={"deleted": True, "path": str(path)})
 
-        perms = oct(stat.st_mode & 0o777)
-        return json.dumps({"success": True, "data": {
+    @staticmethod
+    def _info(target: ToolPath) -> str:
+        path = target.op_path
+        if not path.exists() and not path.is_symlink():
+            return tool_error("FILE_NOT_FOUND", f"路径不存在: {path}")
+        stat = path.lstat()
+        kind = "symlink" if path.is_symlink() else "dir" if path.is_dir() else "file"
+        return tool_result(True, data={
+            "path": str(path),
             "size": stat.st_size,
             "modified": int(stat.st_mtime),
-            "type": ftype,
-            "permissions": perms,
-            "is_symlink": os.path.islink(op_path)
-        }}, ensure_ascii=False)
+            "type": kind,
+            "permissions": oct(stat.st_mode & 0o777),
+        })
 
 
 def register(registry):

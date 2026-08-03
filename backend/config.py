@@ -31,6 +31,9 @@ class Settings:
     SKILLS_DATA_DIR = Path(
         os.getenv("VERSENA_SKILLS_DATA_DIR", str(BASE_DIR / "skills"))
     ).expanduser().resolve()
+    TOOL_WORKSPACE = Path(
+        os.getenv("VERSENA_TOOL_WORKSPACE") or str(DATA_DIR / "workspace")
+    ).expanduser().resolve()
     ACCESS_TOKEN_FILE = Path(
         os.getenv("VERSENA_ACCESS_TOKEN_FILE", str(DATA_DIR / "access_token"))
     ).expanduser().resolve()
@@ -50,5 +53,6 @@ class Settings:
         cls.DATA_DIR.mkdir(parents=True, exist_ok=True)
         cls.CONTENT_DIR.mkdir(parents=True, exist_ok=True)
         cls.SKILLS_DATA_DIR.mkdir(parents=True, exist_ok=True)
+        cls.TOOL_WORKSPACE.mkdir(parents=True, exist_ok=True)
 
 settings = Settings()

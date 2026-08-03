@@ -71,6 +71,7 @@ class ReActAgent:
         loops = 0
         tool_seq = 0  # 工具调用序号
         generation_stopped = False
+        tool_context = self.tool_registry.create_context(session_id, stop_event=stop_event) if self.tool_registry else None
 
         try:
             while loops < max_steps:
@@ -169,7 +170,7 @@ class ReActAgent:
                     yield {"type": "segment", "segment": {"type": "text", "content": "工具系统未配置"}}
                     break
 
-                for tc in tool_calls:
+                for tc in valid_tool_calls:
                     func = tc.get("function", {})
                     tool_name = func.get("name", "")
                     try:
@@ -189,7 +190,11 @@ class ReActAgent:
                         "status": "running"
                     }}
 
-                    result = await self.tool_registry.execute(tool_name, tool_args)
+                    result = await self.tool_registry.execute(
+                        tool_name,
+                        tool_args,
+                        context=tool_context,
+                    )
 
                     # 检查是否为 confirm
                     try:
@@ -198,8 +203,12 @@ class ReActAgent:
                             yield {"type": "confirm", "data": result_data}
                             confirmed = await confirm_callback(result_data)
                             if confirmed:
-                                tool_args["confirmed"] = True
-                                result = await self.tool_registry.execute(tool_name, tool_args)
+                                result = await self.tool_registry.execute(
+                                    tool_name,
+                                    tool_args,
+                                    context=tool_context,
+                                    confirmed=True,
+                                )
                                 result_data = json.loads(result)
                             else:
                                 result_data = {"success": False, "error": "USER_DENIED", "message": "用户取消了操作"}
@@ -209,7 +218,7 @@ class ReActAgent:
 
                     # 生成结果摘要
                     result_summary = self._make_summary(tool_name, result_data, result)
-                    result_detail = result[:3000] if isinstance(result, str) else str(result)[:3000]
+                    result_detail = self._result_detail(result_data, result)
 
                     # 发送工具调用完成
                     yield {"type": "segment", "segment": {
@@ -247,6 +256,8 @@ class ReActAgent:
         if not result_data:
             return str(result)[:100] if result else ""
 
+        if result_data.get("type") == "confirm":
+            return "等待确认"
         if tool_name == "web_search":
             count = result_data.get("data", {}).get("count", 0)
             return f"找到 {count} 条结果" if count else "搜索完成"
@@ -259,3 +270,20 @@ class ReActAgent:
             return "操作完成" if result_data.get("success") else "操作失败"
         else:
             return "完成" if result_data.get("success") else "失败"
+
+    @staticmethod
+    def _result_detail(result_data, result):
+        if not result_data:
+            return (result if isinstance(result, str) else str(result))[:3000]
+        data = result_data.get("data") or {}
+        for key in ("output", "content", "display"):
+            if key in data:
+                return str(data[key])[:3000]
+        if "results" in data:
+            lines = []
+            for item in data["results"]:
+                lines.append(f"{item.get('title', '')}\n{item.get('snippet', '')}\n{item.get('url', '')}".strip())
+            return "\n\n".join(lines)[:3000]
+        if data:
+            return json.dumps(data, ensure_ascii=False, indent=2)[:3000]
+        return str(result_data.get("message") or result)[:3000]

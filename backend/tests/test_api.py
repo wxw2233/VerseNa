@@ -96,6 +96,16 @@ def test_source_update_status_api(client, monkeypatch):
     assert response.json()["branch"] == "master"
 
 
+def test_tool_workspace_api(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "TOOL_WORKSPACE", tmp_path / "workspace")
+
+    response = client.get("/api/tools/workspace")
+
+    assert response.status_code == 200
+    assert response.json()["path"] == str(tmp_path / "workspace")
+    assert (tmp_path / "workspace").is_dir()
+
+
 def test_cors_allows_local_frontend_only(client):
     allowed = client.options(
         "/health",

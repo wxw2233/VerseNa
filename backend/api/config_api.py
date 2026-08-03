@@ -283,9 +283,13 @@ async def get_trust_mode():
         value = "false"
     return {"enabled": value.lower() == "true"}
 
+class TrustModeReq(BaseModel):
+    enabled: bool
+
+
 @router.post("/api/config/trust_mode")
-async def set_trust_mode(req: dict):
-    enabled = req.get("enabled", False)
+async def set_trust_mode(req: TrustModeReq):
+    enabled = req.enabled
     await db.set_config("trust_mode", str(enabled).lower())
     settings.TRUST_MODE = enabled
     return {"status": "ok", "enabled": enabled}
@@ -427,6 +431,12 @@ async def list_tools():
         {"name": t["function"]["name"], "description": t["function"]["description"]}
         for t in tools
     ]
+
+
+@router.get("/api/tools/workspace")
+async def get_tool_workspace():
+    settings.TOOL_WORKSPACE.mkdir(parents=True, exist_ok=True)
+    return {"path": str(settings.TOOL_WORKSPACE)}
 
 
 # ========== 搜索 API 配置 ==========

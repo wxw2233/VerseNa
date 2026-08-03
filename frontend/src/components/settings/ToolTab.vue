@@ -3,6 +3,11 @@
     <h2>工具</h2>
     <p class="tab-desc">Agent 可以自动调用以下工具来完成任务。</p>
 
+    <div class="workspace-row">
+      <span class="workspace-label">工具工作区</span>
+      <code :title="workspace">{{ workspace || '加载中...' }}</code>
+    </div>
+
     <div class="tool-list">
       <div v-for="tool in tools" :key="tool.name" class="tool-card">
         <div class="tool-icon">{{ toolIcons[tool.name] || '🔧' }}</div>
@@ -20,7 +25,7 @@
     <div class="trust-mode-row">
       <div class="trust-info">
         <div class="trust-label">🔒 信任模式</div>
-        <div class="trust-desc">开启后，除系统核心文件外，所有文件操作无需确认直接执行。</div>
+        <div class="trust-desc">开启后，工具工作区内的文件变更无需确认；代码执行仍需逐次确认。</div>
       </div>
       <label class="toggle-switch">
         <input type="checkbox" v-model="trustMode" @change="saveTrustMode" />
@@ -35,6 +40,7 @@ import { ref, onMounted } from 'vue'
 
 const tools = ref([])
 const trustMode = ref(false)
+const workspace = ref('')
 
 const toolIcons = {
   web_search: '🔍',
@@ -61,6 +67,14 @@ async function loadTrustMode() {
   } catch { trustMode.value = false }
 }
 
+async function loadWorkspace() {
+  try {
+    const resp = await fetch('/api/tools/workspace')
+    const data = await resp.json()
+    workspace.value = data.path || ''
+  } catch { workspace.value = '' }
+}
+
 async function saveTrustMode() {
   try {
     await fetch('/api/config/trust_mode', {
@@ -74,11 +88,33 @@ async function saveTrustMode() {
 onMounted(() => {
   loadTools()
   loadTrustMode()
+  loadWorkspace()
 })
 </script>
 
 <style scoped>
 .tab-desc { font-size: 13px; color: var(--text-secondary); margin-bottom: 16px; }
+
+.workspace-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 10px 0 16px;
+}
+.workspace-label {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.workspace-row code {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--text-primary);
+}
 
 .tool-list {
   display: flex;

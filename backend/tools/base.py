@@ -1,4 +1,20 @@
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Callable
+from typing import Any
+
+
+@dataclass
+class ToolContext:
+    session_id: str
+    workspace: Path
+    trust_mode_getter: Callable[[], bool] | None = None
+    stop_event: Any = None
+
+    @property
+    def trust_mode(self) -> bool:
+        return bool(self.trust_mode_getter and self.trust_mode_getter())
 
 class BaseTool(ABC):
     name: str = ""
