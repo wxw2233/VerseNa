@@ -49,6 +49,7 @@ def test_agent_config_can_be_saved_and_loaded(client, monkeypatch):
         "max_history": 80,
         "max_context": 64000,
         "max_tokens": 4096,
+        "reasoning_effort": "high",
         "custom_instructions": "Keep answers concise.",
     }
     response = client.post("/api/config/agent", json=payload)

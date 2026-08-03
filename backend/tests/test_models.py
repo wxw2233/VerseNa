@@ -5,6 +5,7 @@ from agent.models.base import BaseModelAdapter, ModelResponse
 def test_model_response_dataclass():
     r = ModelResponse(content="hello")
     assert r.content == "hello"
+    assert r.reasoning_content == ""
     assert r.tool_calls == []
     assert r.finish_reason == "stop"
 
@@ -88,3 +89,63 @@ async def test_openai_adapter_falls_back_to_json_response(monkeypatch):
     chunks = [chunk async for chunk in adapter.chat([{"role": "user", "content": "hello"}])]
 
     assert [chunk.content for chunk in chunks] == ["fallback"]
+
+
+@pytest.mark.asyncio
+async def test_openai_adapter_streams_reasoning_separately(monkeypatch):
+    from agent.models import openai_adapter as adapter_module
+    from agent.models.openai_adapter import OpenAIAdapter
+
+    response = FakeStreamResponse([
+        'data: {"choices":[{"delta":{"reasoning_content":"先分析"}}]}',
+        'data: {"choices":[{"delta":{"content":"最终答案"}}]}',
+        'data: [DONE]',
+    ])
+    monkeypatch.setattr(adapter_module.httpx, "AsyncClient", lambda **kwargs: FakeAsyncClient(response))
+
+    adapter = OpenAIAdapter("key", "https://example.com/v1", "deepseek-reasoner")
+    chunks = [chunk async for chunk in adapter.chat([{"role": "user", "content": "hello"}])]
+
+    assert chunks[0].reasoning_content == "先分析"
+    assert chunks[0].content == ""
+    assert chunks[1].content == "最终答案"
+    assert chunks[1].reasoning_content == ""
+
+
+@pytest.mark.asyncio
+async def test_openai_reasoning_request_uses_supported_parameters(monkeypatch):
+    from agent.models import openai_adapter as adapter_module
+    from agent.models.openai_adapter import OpenAIAdapter
+
+    captured = {}
+    response = FakeStreamResponse(['data: [DONE]'])
+
+    class CapturingClient(FakeAsyncClient):
+        def stream(self, *args, **kwargs):
+            captured.update(kwargs)
+            return self.response
+
+    monkeypatch.setattr(adapter_module.httpx, "AsyncClient", lambda **kwargs: CapturingClient(response))
+
+    adapter = OpenAIAdapter(
+        "key",
+        "https://api.openai.com/v1",
+        "o3",
+        provider_id="openai",
+        reasoning_available=True,
+    )
+    _ = [chunk async for chunk in adapter.chat(
+        [{"role": "user", "content": "hello"}],
+        temperature=0.8,
+        top_p=0.9,
+        max_tokens=2048,
+        reasoning_enabled=True,
+        reasoning_effort="high",
+    )]
+
+    payload = captured["json"]
+    assert payload["reasoning_effort"] == "high"
+    assert payload["max_completion_tokens"] == 2048
+    assert "max_tokens" not in payload
+    assert "temperature" not in payload
+    assert "top_p" not in payload

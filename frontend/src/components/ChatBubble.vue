@@ -19,6 +19,15 @@
           <!-- 文本段 -->
           <div v-if="seg.type === 'text'" class="text-seg" v-html="renderText(seg.content)"></div>
 
+          <div v-if="seg.type === 'reasoning'" class="reasoning-seg" :data-status="seg.status">
+            <button class="reasoning-header" type="button" @click="reasoningExpanded = !reasoningExpanded">
+              <BrainCircuit :size="15" aria-hidden="true" />
+              <span>{{ reasoningLabel(seg) }}</span>
+              <ChevronDown class="reasoning-arrow" :class="{ open: reasoningExpanded }" :size="14" aria-hidden="true" />
+            </button>
+            <div v-if="reasoningExpanded && seg.content" class="reasoning-content">{{ seg.content }}</div>
+          </div>
+
           <!-- 工具段时间线节点 -->
           <template v-if="seg.type === 'tool'">
             <!-- 输出完成后折叠状态：显示小提示 -->
@@ -59,7 +68,7 @@
       </template>
 
       <span v-if="msg.emoji" class="emoji">{{ msg.emoji }}</span>
-      <div v-if="msg.streaming" class="typing-indicator">
+      <div v-if="msg.streaming && !hasRunningReasoning" class="typing-indicator">
         <span class="typing-dot"></span>
         <span class="typing-dot"></span>
         <span class="typing-dot"></span>
@@ -106,7 +115,7 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import { marked } from 'marked'
-import { ChevronDown, ChevronRight, ChevronUp, FileText, Pencil, RefreshCcw, Volume1, Volume2, Wrench } from 'lucide-vue-next'
+import { BrainCircuit, ChevronDown, ChevronRight, ChevronUp, FileText, Pencil, RefreshCcw, Volume1, Volume2, Wrench } from 'lucide-vue-next'
 import { useSessionStore } from '../stores/session'
 import { useThemeStore } from '../stores/theme'
 import { prepareTextForSpeech } from '../utils/ttsText'
@@ -127,6 +136,7 @@ function renderText(content) {
 
 const props = defineProps({ msg: Object })
 const emit = defineEmits(['retry', 'edit'])
+const reasoningExpanded = ref(Boolean(props.msg.streaming))
 
 // 编辑模式
 const isEditing = ref(false)
@@ -149,6 +159,28 @@ function confirmEdit() {
 const hasTools = computed(() =>
   props.msg.segments?.some(s => s.type === 'tool')
 )
+
+const hasAnswerText = computed(() =>
+  props.msg.segments?.some(segment => segment.type === 'text' && segment.content?.trim()) || false
+)
+
+const hasRunningReasoning = computed(() =>
+  props.msg.segments?.some(segment => segment.type === 'reasoning' && segment.status === 'running') || false
+)
+
+watch(hasAnswerText, hasText => {
+  if (hasText) reasoningExpanded.value = false
+})
+
+function reasoningLabel(segment) {
+  if (segment.status === 'unavailable') return '当前模型不支持深度思考'
+  if (segment.status === 'error') return '思考中断'
+  if (segment.status === 'stopped') return '思考已停止'
+  if (segment.status === 'running') return '思考中'
+  const duration = Number(segment.duration_ms || 0)
+  if (!duration) return '思考完成'
+  return `思考完成 · ${(duration / 1000).toFixed(duration >= 10000 ? 0 : 1)} 秒`
+}
 
 const usesWideLayout = computed(() => {
   if (hasTools.value) return true
@@ -386,6 +418,42 @@ async function speakText() {
 .text-seg :deep(strong) { color: var(--text-primary); font-weight: 700; }
 .text-seg :deep(em) { font-style: italic; }
 .text-seg :deep(del) { text-decoration: line-through; color: var(--text-secondary); }
+
+.reasoning-seg {
+  margin: 2px 0 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.reasoning-header {
+  width: 100%;
+  min-height: 28px;
+  padding: 2px 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+.reasoning-header span { flex: 1; }
+.reasoning-arrow { transition: transform var(--motion-fast) var(--ease-standard); }
+.reasoning-arrow.open { transform: rotate(180deg); }
+.reasoning-content {
+  max-height: 280px;
+  margin: 4px 0 6px 7px;
+  padding: 4px 0 4px 14px;
+  overflow: auto;
+  border-left: 1px solid rgba(255, 255, 255, 0.16);
+  color: var(--text-secondary);
+  line-height: 1.65;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.reasoning-seg[data-status="running"] { color: var(--primary); }
+.reasoning-seg[data-status="unavailable"],
+.reasoning-seg[data-status="error"] { color: #f59e0b; }
 
 .tool-actions-bar { display: flex; justify-content: flex-end; margin-bottom: 4px; }
 .tool-toggle-all { background: none; border: none; color: var(--text-secondary); cursor: pointer; font-size: 11px; }

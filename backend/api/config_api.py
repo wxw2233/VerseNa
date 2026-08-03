@@ -236,6 +236,7 @@ async def get_active_models():
     # 填充默认值
     return {
         "chat": active.get("chat", {"provider": "", "model": ""}),
+        "reasoning": active.get("reasoning", {"provider": "", "model": ""}),
         "vision": active.get("vision", {"provider": "", "model": ""}),
         "image_gen": active.get("image_gen", {"provider": "", "model": ""}),
         "tts": active.get("tts", {"provider": "", "model": ""}),
@@ -249,7 +250,7 @@ class ActiveModelReq(BaseModel):
 @router.post("/api/models/active")
 async def set_active_model(req: ActiveModelReq):
     """设置某个角色的激活模型"""
-    if req.role not in ("chat", "vision", "image_gen", "tts"):
+    if req.role not in ("chat", "reasoning", "vision", "image_gen", "tts"):
         raise HTTPException(400, "无效的角色类型")
 
     active = await _get_active_models()
@@ -302,6 +303,7 @@ AGENT_CONFIG_DEFAULTS = {
     "max_history": 50,
     "max_context": 128000,
     "max_tokens": 8192,
+    "reasoning_effort": "medium",
     "custom_instructions": "",
 }
 
@@ -321,7 +323,7 @@ async def get_agent_config():
         raw = await db.get_config(f"agent_{key}", None)
         if raw is None:
             result[key] = default
-        elif key in ("custom_instructions",):
+        elif key in ("custom_instructions", "reasoning_effort"):
             result[key] = raw
         else:
             try:
@@ -337,6 +339,7 @@ class AgentConfigReq(BaseModel):
     temperature: float | None = None
     top_p: float | None = None
     max_tokens: int | None = None
+    reasoning_effort: str | None = None
     custom_instructions: str | None = None
 
 @router.post("/api/config/agent")
@@ -345,6 +348,9 @@ async def set_agent_config(req: AgentConfigReq):
     updates = _model_dump(req, exclude_none=True)
     for key, value in updates.items():
         if key in AGENT_CONFIG_DEFAULTS:
+            if key == "reasoning_effort":
+                if value not in {"low", "medium", "high"}:
+                    raise HTTPException(400, "推理强度必须是 low、medium 或 high")
             # 数值类型做范围限制
             if key in AGENT_CONFIG_LIMITS and isinstance(value, (int, float)):
                 lo, hi = AGENT_CONFIG_LIMITS[key]

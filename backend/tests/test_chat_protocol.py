@@ -10,6 +10,44 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from db.database import Database
 
 
+def test_reasoning_segments_are_compacted_for_persistence():
+    from api.chat import _append_response_segment
+
+    segments = []
+    _append_response_segment(segments, {
+        "type": "reasoning",
+        "reasoning_id": "reasoning_1",
+        "content": "",
+        "status": "running",
+    })
+    _append_response_segment(segments, {
+        "type": "reasoning",
+        "reasoning_id": "reasoning_1",
+        "content": "分析",
+        "status": "running",
+    })
+    _append_response_segment(segments, {
+        "type": "reasoning",
+        "reasoning_id": "reasoning_1",
+        "content": "完成",
+        "status": "done",
+        "duration_ms": 1200,
+    })
+    _append_response_segment(segments, {"type": "text", "content": "答"})
+    _append_response_segment(segments, {"type": "text", "content": "案"})
+
+    assert segments == [
+        {
+            "type": "reasoning",
+            "reasoning_id": "reasoning_1",
+            "content": "分析完成",
+            "status": "done",
+            "duration_ms": 1200,
+        },
+        {"type": "text", "content": "答案"},
+    ]
+
+
 @pytest.mark.asyncio
 async def test_client_message_id_is_unique(tmp_path):
     database = Database(tmp_path / "idempotency.db")

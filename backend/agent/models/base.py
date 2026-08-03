@@ -4,7 +4,8 @@ from typing import AsyncGenerator
 
 @dataclass
 class ModelResponse:
-    content: str
+    content: str = ""
+    reasoning_content: str = ""
     tool_calls: list = field(default_factory=list)
     finish_reason: str = "stop"
 

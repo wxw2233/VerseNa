@@ -10,27 +10,77 @@ from persona.manager import persona_manager
 from tools.registry import tool_registry
 from api.log_api import log_info, log_error
 from db.database import db
-from models.providers import get_provider
+from models.providers import get_provider, model_supports_reasoning
 from auth import SESSION_COOKIE_NAME, auth_manager, is_allowed_origin
 
 router = APIRouter()
 
-async def create_agent(api_key: str = None, base_url: str = None, model_name: str = None) -> ReActAgent:
+MAX_PERSISTED_REASONING_CHARS = 50000
+
+
+def _append_response_segment(segments: list[dict], segment: dict) -> None:
+    """Merge streamed updates into a compact, reloadable message timeline."""
+    current = dict(segment)
+    segment_type = current.get("type")
+
+    if segment_type == "reasoning":
+        reasoning_id = current.get("reasoning_id")
+        for index in range(len(segments) - 1, -1, -1):
+            existing = segments[index]
+            if existing.get("type") != "reasoning" or existing.get("reasoning_id") != reasoning_id:
+                continue
+            merged = {**existing, **current}
+            merged["content"] = (
+                (existing.get("content") or "") + (current.get("content") or "")
+            )[:MAX_PERSISTED_REASONING_CHARS]
+            segments[index] = merged
+            return
+
+    if segment_type == "tool":
+        tool_call_id = current.get("tool_call_id")
+        for index in range(len(segments) - 1, -1, -1):
+            existing = segments[index]
+            if existing.get("type") == "tool" and existing.get("tool_call_id") == tool_call_id:
+                segments[index] = {**existing, **current}
+                return
+
+    if segment_type == "text" and segments and segments[-1].get("type") == "text":
+        segments[-1]["content"] = (
+            (segments[-1].get("content") or "") + (current.get("content") or "")
+        )
+        return
+
+    segments.append(current)
+
+async def create_agent(
+    api_key: str = None,
+    base_url: str = None,
+    model_name: str = None,
+    model_role: str = "chat",
+) -> ReActAgent:
     """创建 Agent，优先使用新版多模型配置"""
     key = api_key
     url = base_url
     model = model_name
+    provider_id = "custom"
+    reasoning_role_configured = False
 
     # 如果没有显式指定，从 active_models 配置读取
     if not key or not url or not model:
         try:
             raw = await db.get_config("active_models", "{}")
             active = json.loads(raw) if raw else {}
-            chat_config = active.get("chat", {})
+            role_config = active.get(model_role, {})
+            if model_role == "reasoning":
+                reasoning_role_configured = bool(
+                    role_config.get("provider") and role_config.get("model")
+                )
+                if not reasoning_role_configured:
+                    role_config = active.get("chat", {})
 
-            if chat_config.get("provider") and chat_config.get("model"):
-                provider_id = chat_config["provider"]
-                model = model or chat_config["model"]
+            if role_config.get("provider") and role_config.get("model"):
+                provider_id = role_config["provider"]
+                model = model or role_config["model"]
 
                 # 从用户提供商配置读取 key 和 url
                 providers_raw = await db.get_config("model_providers", "{}")
@@ -48,7 +98,18 @@ async def create_agent(api_key: str = None, base_url: str = None, model_name: st
     url = url or settings.DEFAULT_API_BASE
     model = model or settings.DEFAULT_MODEL_NAME
 
-    adapter = OpenAIAdapter(api_key=key, base_url=url, model_name=model)
+    inferred_reasoning = model_supports_reasoning(provider_id, model)
+    if provider_id in {"openai", "deepseek"}:
+        reasoning_available = inferred_reasoning
+    else:
+        reasoning_available = reasoning_role_configured or inferred_reasoning
+    adapter = OpenAIAdapter(
+        api_key=key,
+        base_url=url,
+        model_name=model,
+        provider_id=provider_id,
+        reasoning_available=reasoning_available,
+    )
     memory = MemoryManager(model=adapter)
     save_mem_tool = tool_registry.get_tool('save_memory')
     if save_mem_tool:
@@ -184,6 +245,8 @@ async def websocket_chat(ws: WebSocket):
             session_id = msg.get("session_id", "default")
             content = msg.get("content", "")
             image_url = msg.get("image_url", "")
+            reasoning_enabled = msg.get("reasoning_enabled") is True
+            requested_effort = msg.get("reasoning_effort")
             log_info("Chat", f"WS消息: session={session_id} content={content[:80]} image={'yes' if image_url else 'no'}")
             persona_name = msg.get("persona", "default")
 
@@ -244,6 +307,13 @@ async def websocket_chat(ws: WebSocket):
                 if last_user:
                     content = last_user["content"]
                     image_url = ""
+                    if "reasoning_enabled" not in msg:
+                        try:
+                            last_meta = json.loads(last_user.get("metadata") or "{}")
+                        except (json.JSONDecodeError, TypeError):
+                            last_meta = {}
+                        reasoning_enabled = last_meta.get("reasoning_enabled") is True
+                        requested_effort = last_meta.get("reasoning_effort")
                 else:
                     await send_accepted(
                         client_message_id,
@@ -262,7 +332,11 @@ async def websocket_chat(ws: WebSocket):
                     "user",
                     content,
                     persona_name,
-                    metadata={"generation_id": generation_id},
+                    metadata={
+                        "generation_id": generation_id,
+                        "reasoning_enabled": reasoning_enabled,
+                        "reasoning_effort": requested_effort if requested_effort in {"low", "medium", "high"} else None,
+                    },
                     client_message_id=client_message_id,
                 )
                 if not saved:
@@ -351,7 +425,7 @@ async def websocket_chat(ws: WebSocket):
                     raw = await db.get_config(f"agent_{key}", None)
                     if raw is None:
                         agent_config[key] = default
-                    elif key in ("custom_instructions",):
+                    elif key in ("custom_instructions", "reasoning_effort"):
                         agent_config[key] = raw
                     else:
                         try:
@@ -360,6 +434,10 @@ async def websocket_chat(ws: WebSocket):
                             agent_config[key] = default
             except Exception:
                 pass
+
+            if requested_effort in {"low", "medium", "high"}:
+                agent_config["reasoning_effort"] = requested_effort
+            agent_config["reasoning_enabled"] = reasoning_enabled
 
             # 主题包角色的 temperature/top_p 覆盖全局配置
             try:
@@ -371,11 +449,13 @@ async def websocket_chat(ws: WebSocket):
             except Exception:
                 pass
 
-            tool_segments = []
+            response_segments = []
+            done_metadata = {}
             generation_failed = False
             stop_event.clear()  # 新消息开始前清除停止信号
             try:
-                async for event in agent.run(
+                request_agent = await create_agent(model_role="reasoning") if reasoning_enabled else agent
+                async for event in request_agent.run(
                     session_id,
                     content,
                     system_prompt=system_prompt,
@@ -389,14 +469,25 @@ async def websocket_chat(ws: WebSocket):
                     generation_id=generation_id,
                 ):
                     if event.get("type") == "done":
+                        done_metadata = {
+                            key: event.get(key)
+                            for key in (
+                                "reasoning_enabled",
+                                "reasoning_available",
+                                "reasoning_effort",
+                                "reasoning_model",
+                                "reasoning_duration_ms",
+                            )
+                            if event.get(key) is not None
+                        }
                         event = {
                             **event,
                             "emotion": emotion_state.primary,
                             "emoji": event.get("emoji") or emotion_state.emoji,
                         }
                     await send_event(event, generation_id)
-                    if event.get("type") == "segment" and event.get("segment", {}).get("type") == "tool":
-                        tool_segments.append(event["segment"])
+                    if event.get("type") == "segment":
+                        _append_response_segment(response_segments, event.get("segment", {}))
             except Exception as e:
                 generation_failed = True
                 try:
@@ -405,19 +496,17 @@ async def websocket_chat(ws: WebSocket):
                     pass
             finally:
                 log_info("Chat", f"会话结束: session={session_id} generation={generation_id}")
-                if tool_segments:
+                if response_segments or done_metadata:
                     try:
-                        # 去重：同 tool_call_id 只保留最后出现的状态
-                        deduped = {}
-                        for segment in tool_segments:
-                            deduped[segment.get("tool_call_id", "")] = segment
-                        segments = list(deduped.values())
-                        log_info("Chat", f"保存 {len(segments)} 个 tool segments")
+                        metadata_update = {**done_metadata}
+                        if response_segments:
+                            metadata_update["segments"] = response_segments
+                        log_info("Chat", f"保存 {len(response_segments)} 个响应 segments")
                         await db.update_message_metadata_by_generation(
                             session_id,
                             "assistant",
                             generation_id,
-                            {"segments": segments},
+                            metadata_update,
                         )
                     except Exception as seg_e:
                         log_error("Chat", f"保存 segments 失败: {seg_e}")

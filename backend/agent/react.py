@@ -15,7 +15,16 @@ class ReActAgent:
         self.tool_registry = tool_registry
         self.max_steps = max_steps or settings.MAX_REACT_LOOPS
 
-    def _chat_kwargs(self, tools, stream, temperature, top_p, max_tokens):
+    def _chat_kwargs(
+        self,
+        tools,
+        stream,
+        temperature,
+        top_p,
+        max_tokens,
+        reasoning_enabled=False,
+        reasoning_effort="medium",
+    ):
         """Only pass optional generation args supported by the adapter."""
         kwargs = {
             "tools": tools,
@@ -23,6 +32,8 @@ class ReActAgent:
             "temperature": temperature,
             "top_p": top_p,
             "max_tokens": max_tokens,
+            "reasoning_enabled": reasoning_enabled,
+            "reasoning_effort": reasoning_effort,
         }
         try:
             params = inspect.signature(self.model.chat).parameters
@@ -41,11 +52,24 @@ class ReActAgent:
         max_history = cfg.get("max_history", 20)
         max_context = cfg.get("max_context", 4096)
         custom_instructions = cfg.get("custom_instructions", "")
+        reasoning_requested = bool(cfg.get("reasoning_enabled", False))
+        reasoning_effort = cfg.get("reasoning_effort", "medium")
+        if reasoning_effort not in {"low", "medium", "high"}:
+            reasoning_effort = "medium"
+        reasoning_available = bool(getattr(self.model, "reasoning_available", False))
+        reasoning_enabled = reasoning_requested and reasoning_available
 
         if custom_instructions and system_prompt:
             system_prompt += f"\n\n## 自定义指令\n{custom_instructions}"
 
         message_metadata = {"generation_id": generation_id} if generation_id else {}
+        if reasoning_requested:
+            message_metadata.update({
+                "reasoning_enabled": True,
+                "reasoning_effort": reasoning_effort,
+                "reasoning_model": getattr(self.model, "model_name", ""),
+                "reasoning_available": reasoning_available,
+            })
         if persist_user:
             await self.memory.add_message(
                 session_id,
@@ -71,7 +95,17 @@ class ReActAgent:
         loops = 0
         tool_seq = 0  # 工具调用序号
         generation_stopped = False
+        reasoning_duration_ms = 0
         tool_context = self.tool_registry.create_context(session_id, stop_event=stop_event) if self.tool_registry else None
+
+        if reasoning_requested and not reasoning_available:
+            yield {"type": "segment", "segment": {
+                "type": "reasoning",
+                "reasoning_id": "reasoning_unsupported",
+                "content": "",
+                "status": "unavailable",
+                "model": getattr(self.model, "model_name", ""),
+            }}
 
         try:
             while loops < max_steps:
@@ -88,13 +122,51 @@ class ReActAgent:
                 loops += 1
                 chunk_content = ""
                 tool_calls = []
+                reasoning_id = f"reasoning_{loops}"
+                reasoning_open = False
+                reasoning_started_at = None
+
+                if reasoning_enabled:
+                    reasoning_open = True
+                    reasoning_started_at = time.monotonic()
+                    yield {"type": "segment", "segment": {
+                        "type": "reasoning",
+                        "reasoning_id": reasoning_id,
+                        "content": "",
+                        "status": "running",
+                        "model": getattr(self.model, "model_name", ""),
+                    }}
+
+                async def close_reasoning(status="done"):
+                    nonlocal reasoning_open, reasoning_duration_ms
+                    if not reasoning_open:
+                        return None
+                    reasoning_open = False
+                    elapsed = int((time.monotonic() - reasoning_started_at) * 1000)
+                    reasoning_duration_ms += elapsed
+                    return {"type": "segment", "segment": {
+                        "type": "reasoning",
+                        "reasoning_id": reasoning_id,
+                        "content": "",
+                        "status": status,
+                        "duration_ms": elapsed,
+                        "model": getattr(self.model, "model_name", ""),
+                    }}
 
                 # LLM 调用（最多重试 3 次）
                 llm_success = False
                 last_error = None
                 for attempt in range(3):
                     try:
-                        chat_kwargs = self._chat_kwargs(tools, True, temperature, top_p, max_tokens)
+                        chat_kwargs = self._chat_kwargs(
+                            tools,
+                            True,
+                            temperature,
+                            top_p,
+                            max_tokens,
+                            reasoning_enabled,
+                            reasoning_effort,
+                        )
                         model_stream = self.model.chat(messages, **chat_kwargs).__aiter__()
                         while True:
                             next_chunk = asyncio.create_task(anext(model_stream))
@@ -109,6 +181,9 @@ class ReActAgent:
                                 if close_stream:
                                     await close_stream()
                                 generation_stopped = True
+                                reasoning_event = await close_reasoning("stopped")
+                                if reasoning_event:
+                                    yield reasoning_event
                                 break
 
                             if stop_wait:
@@ -119,11 +194,29 @@ class ReActAgent:
                                 chunk = next_chunk.result()
                             except StopAsyncIteration:
                                 break
+                            if chunk.reasoning_content:
+                                yield {"type": "segment", "segment": {
+                                    "type": "reasoning",
+                                    "reasoning_id": reasoning_id,
+                                    "content": chunk.reasoning_content,
+                                    "status": "running",
+                                    "model": getattr(self.model, "model_name", ""),
+                                }}
                             if chunk.content:
+                                reasoning_event = await close_reasoning()
+                                if reasoning_event:
+                                    yield reasoning_event
                                 chunk_content += chunk.content
                                 yield {"type": "segment", "segment": {"type": "text", "content": chunk.content}}
                             if chunk.tool_calls:
+                                reasoning_event = await close_reasoning()
+                                if reasoning_event:
+                                    yield reasoning_event
                                 tool_calls.extend(chunk.tool_calls)
+
+                        reasoning_event = await close_reasoning("stopped" if generation_stopped else "done")
+                        if reasoning_event:
+                            yield reasoning_event
 
                         if generation_stopped:
                             yield {"type": "segment", "segment": {"type": "text", "content": "\n\n[已停止]"}}
@@ -249,7 +342,15 @@ class ReActAgent:
 
         emotion = persona_manager.get_emotion_engine(persona) if hasattr(self, '_persona_manager') else None
         emoji = ""
-        yield {"type": "done", "emoji": emoji}
+        yield {
+            "type": "done",
+            "emoji": emoji,
+            "reasoning_enabled": reasoning_requested,
+            "reasoning_available": reasoning_available,
+            "reasoning_effort": reasoning_effort if reasoning_requested else None,
+            "reasoning_model": getattr(self.model, "model_name", "") if reasoning_requested else None,
+            "reasoning_duration_ms": reasoning_duration_ms,
+        }
 
     def _make_summary(self, tool_name, result_data, result):
         """生成工具结果摘要"""

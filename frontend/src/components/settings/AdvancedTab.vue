@@ -40,6 +40,22 @@
         <input type="number" v-model.number="config.max_tokens" :min="64" :max="65536" :step="256" class="num-input" />
       </div>
 
+      <div class="config-item">
+        <div class="config-label">
+          <span class="label-title">深度思考强度</span>
+          <span class="label-desc">控制支持该参数的推理模型在速度与分析深度之间的取舍</span>
+        </div>
+        <div class="effort-control" role="group" aria-label="深度思考强度">
+          <button
+            v-for="option in effortOptions"
+            :key="option.value"
+            type="button"
+            :class="{ active: config.reasoning_effort === option.value }"
+            @click="config.reasoning_effort = option.value"
+          >{{ option.label }}</button>
+        </div>
+      </div>
+
       <!-- Custom Instructions -->
       <div class="config-item full-width">
         <div class="config-label">
@@ -73,8 +89,15 @@ const config = reactive({
   max_history: 30,
   max_context: 4096,
   max_tokens: 4096,
+  reasoning_effort: 'medium',
   custom_instructions: '',
 })
+
+const effortOptions = [
+  { value: 'low', label: '低' },
+  { value: 'medium', label: '中' },
+  { value: 'high', label: '高' },
+]
 
 const defaults = { ...config }
 const saving = ref(false)
@@ -87,7 +110,13 @@ const numericFields = {
 }
 
 function buildPayload() {
-  const payload = { custom_instructions: config.custom_instructions || '' }
+  const effort = effortOptions.some(option => option.value === config.reasoning_effort)
+    ? config.reasoning_effort
+    : 'medium'
+  const payload = {
+    custom_instructions: config.custom_instructions || '',
+    reasoning_effort: effort,
+  }
   for (const [key, [min, max]] of Object.entries(numericFields)) {
     const value = Number(config[key])
     if (!Number.isFinite(value) || !Number.isInteger(value) || value < min || value > max) {
@@ -205,6 +234,28 @@ onMounted(loadConfig)
 }
 .num-input:focus {
   box-shadow: 0 0 0 1px var(--primary);
+}
+
+.effort-control {
+  display: grid;
+  grid-template-columns: repeat(3, 42px);
+  height: 32px;
+  padding: 2px;
+  border-radius: 6px;
+  background: rgba(20, 20, 40, 0.60);
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.15);
+}
+.effort-control button {
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+}
+.effort-control button.active {
+  background: var(--primary);
+  color: #fff;
 }
 
 .custom-textarea {

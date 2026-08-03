@@ -84,3 +84,12 @@ def get_provider(preset_id: str):
     import copy
     p = PROVIDER_PRESETS.get(preset_id)
     return copy.deepcopy(p) if p else None
+
+
+def model_supports_reasoning(provider_id: str, model_name: str) -> bool:
+    """Best-effort capability check used when no dedicated reasoning role exists."""
+    name = (model_name or "").lower()
+    if provider_id == "openai":
+        return name.startswith(("o1", "o3", "o4", "gpt-5"))
+    hints = ("reasoner", "reasoning", "deepseek-r1", "qwq", "thinking")
+    return any(hint in name for hint in hints)

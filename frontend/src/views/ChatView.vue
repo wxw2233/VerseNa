@@ -168,8 +168,9 @@ function createRequestIds() {
 
 function requestFingerprint(content) {
   if (typeof content === 'string') return `text:${content}`
-  if (content?.image) return `image:${content.text || ''}:${content.image.dataUrl || content.image.url || ''}`
-  if (content?.file) return `file:${content.text || ''}:${content.file.saved_as || content.file.filename || ''}`
+  const reasoning = content?.reasoning_enabled === true ? ':reasoning' : ':standard'
+  if (content?.image) return `image:${content.text || ''}:${content.image.dataUrl || content.image.url || ''}${reasoning}`
+  if (content?.file) return `file:${content.text || ''}:${content.file.saved_as || content.file.filename || ''}${reasoning}`
   return JSON.stringify(content)
 }
 
@@ -407,6 +408,7 @@ async function handleSend(content, acknowledge = () => {}) {
     ? retainedSendRequest.ids
     : createRequestIds()
   let payload
+  const reasoningEnabled = typeof content === 'object' && content?.reasoning_enabled === true
   if (typeof content === 'object' && content.image) {
     const msgContent = content.text
       ? content.text + '\n[图片已发送]'
@@ -417,6 +419,7 @@ async function handleSend(content, acknowledge = () => {}) {
       persona: personaStore.current,
       system_prompt: '',
       image_url: content.image.dataUrl,
+      reasoning_enabled: reasoningEnabled,
       ...requestIds,
     }
   } else if (typeof content === 'object' && content.file) {
@@ -427,14 +430,17 @@ async function handleSend(content, acknowledge = () => {}) {
       content: msgContent,
       persona: personaStore.current,
       system_prompt: '',
+      reasoning_enabled: reasoningEnabled,
       ...requestIds,
     }
   } else {
+    const messageText = typeof content === 'object' ? content.text : content
     payload = {
       session_id: sessionStore.currentSessionId,
-      content,
+      content: messageText,
       persona: personaStore.current,
       system_prompt: '',
+      reasoning_enabled: reasoningEnabled,
       ...requestIds,
     }
   }
@@ -459,6 +465,7 @@ async function handleSend(content, acknowledge = () => {}) {
         image: content.image,
         streaming: false,
         clientMessageId,
+        reasoningEnabled,
       })
     } else if (typeof content === 'object' && content.file) {
       store.messages.push({
@@ -467,12 +474,14 @@ async function handleSend(content, acknowledge = () => {}) {
         file: content.file,
         streaming: false,
         clientMessageId,
+        reasoningEnabled,
       })
     } else {
-      store.addUserMessage(content, null, clientMessageId)
+      const messageText = typeof content === 'object' ? content.text : content
+      store.addUserMessage(messageText, null, clientMessageId, reasoningEnabled)
     }
 
-    store.startStreaming(generationId)
+    store.startStreaming(generationId, reasoningEnabled)
     scrollToBottom()
     acknowledge(true)
   } catch (error) {
@@ -491,10 +500,12 @@ async function handleRetry(msgIndex) {
     ? retainedActionRequest.ids
     : createRequestIds()
   try {
+    const reasoningEnabled = store.messages[msgIndex]?.reasoningEnabled === true
     const accepted = await sendWithAck({
       type: 'resend',
       session_id: sessionStore.currentSessionId,
       persona: personaStore.current,
+      reasoning_enabled: reasoningEnabled,
       ...requestIds,
     })
     retainedActionRequest = null
@@ -504,7 +515,7 @@ async function handleRetry(msgIndex) {
       return
     }
     store.deleteFrom(msgIndex)
-    store.startStreaming(accepted.generation_id || requestIds.generation_id)
+    store.startStreaming(accepted.generation_id || requestIds.generation_id, reasoningEnabled)
   } catch (error) {
     retainedActionRequest = { key: requestKey, ids: requestIds }
     toast.warning(error.message || '重新生成请求未发送')
@@ -523,12 +534,14 @@ async function handleEdit(msgIndex, newContent) {
     ? retainedActionRequest.ids
     : createRequestIds()
   try {
+    const reasoningEnabled = msg?.reasoningEnabled === true
     const accepted = await sendWithAck({
       type: 'edit',
       session_id: sessionStore.currentSessionId,
       persona: personaStore.current,
       message_id: msg.dbId,
       content: newContent,
+      reasoning_enabled: reasoningEnabled,
       ...requestIds,
     })
     retainedActionRequest = null
@@ -540,7 +553,7 @@ async function handleEdit(msgIndex, newContent) {
     store.deleteFrom(msgIndex + 1)
     msg.content = newContent
     msg.clientMessageId = accepted.client_message_id || requestIds.client_message_id
-    store.startStreaming(accepted.generation_id || requestIds.generation_id)
+    store.startStreaming(accepted.generation_id || requestIds.generation_id, reasoningEnabled)
   } catch (error) {
     retainedActionRequest = { key: requestKey, ids: requestIds }
     toast.warning(error.message || '编辑请求未发送，原消息保持不变')
@@ -614,7 +627,13 @@ async function autoTitleIfNeeded() {
     const resp = await fetch(`/api/sessions/${sid}/auto-title`, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ user_message: userMsg.content, assistant_message: assistantMsg.segments?.map(s => s.content || '').join('') || assistantMsg.content || '' })
+      body: JSON.stringify({
+        user_message: userMsg.content,
+        assistant_message: assistantMsg.segments
+          ?.filter(segment => segment.type === 'text')
+          .map(segment => segment.content || '')
+          .join('') || assistantMsg.content || '',
+      })
     })
     const data = await resp.json()
     if (data.name) await sessionStore.fetchSessions()

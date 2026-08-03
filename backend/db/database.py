@@ -259,6 +259,15 @@ class Database:
                     d["segments"] = meta["segments"]
                 if "generation_id" in meta:
                     d["generation_id"] = meta["generation_id"]
+                for key in (
+                    "reasoning_enabled",
+                    "reasoning_available",
+                    "reasoning_effort",
+                    "reasoning_model",
+                    "reasoning_duration_ms",
+                ):
+                    if key in meta:
+                        d[key] = meta[key]
             except (json.JSONDecodeError, TypeError):
                 pass
             result.append(d)

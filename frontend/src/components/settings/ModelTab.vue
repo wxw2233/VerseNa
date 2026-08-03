@@ -218,6 +218,7 @@ const providerForm = reactive({
 
 const roleForm = reactive({
   chat: { provider: '', model: '' },
+  reasoning: { provider: '', model: '' },
   vision: { provider: '', model: '' },
   image_gen: { provider: '', model: '' },
   tts: { provider: '', model: '' },
@@ -231,6 +232,7 @@ const customForm = reactive({
 
 const roleDefs = [
   { key: 'chat', icon: '💬', label: '对话模型', desc: '主力对话模型，支持工具调用', modelType: 'all' },
+  { key: 'reasoning', icon: '🧠', label: '推理模型', desc: '启用深度思考时使用，未分配则尝试当前对话模型', modelType: 'all' },
   { key: 'vision', icon: '👁', label: '图片识别', desc: '理解图片内容，需要视觉能力', modelType: 'vision' },
   { key: 'image_gen', icon: '🎨', label: '图片生成', desc: '根据文字生成图片', modelType: 'image' },
   { key: 'tts', icon: '🎤', label: '语音合成', desc: '将文字转为语音，支持音色克隆', modelType: 'tts' },
@@ -317,6 +319,7 @@ async function loadActiveModels() {
     const resp = await fetch('/api/models/active')
     const data = await resp.json()
     roleForm.chat = data.chat || { provider: '', model: '' }
+    roleForm.reasoning = data.reasoning || { provider: '', model: '' }
     roleForm.vision = data.vision || { provider: '', model: '' }
     roleForm.image_gen = data.image_gen || { provider: '', model: '' }
     roleForm.tts = data.tts || { provider: '', model: '' }
@@ -403,7 +406,7 @@ async function saveProvider() {
 async function saveRoles() {
   try {
     for (const [role, config] of Object.entries(roleForm)) {
-      if (config.provider && config.model) {
+      if ((config.provider && config.model) || role === 'reasoning') {
         await fetch('/api/models/active', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },

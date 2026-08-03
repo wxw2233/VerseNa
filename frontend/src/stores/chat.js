@@ -11,17 +11,19 @@ export const useChatStore = defineStore('chat', () => {
 
   const statusPriority = { running: 1, done: 2, error: 3 }
 
-  function addUserMessage(content, dbId, clientMessageId) {
+  function addUserMessage(content, dbId, clientMessageId, reasoningEnabled = false, reasoningEffort = null) {
     messages.value.push({
       role: 'user',
       content,
       streaming: false,
       dbId: dbId || null,
       clientMessageId: clientMessageId || null,
+      reasoningEnabled,
+      reasoningEffort,
     })
   }
 
-  function startStreaming(generationId) {
+  function startStreaming(generationId, reasoningEnabled = false) {
     activeGenerationId.value = generationId || null
     isStreaming.value = true
     isStopping.value = false
@@ -33,6 +35,7 @@ export const useChatStore = defineStore('chat', () => {
       streaming: true,
       emoji: null,
       generationId: generationId || null,
+      reasoningEnabled,
     })
   }
 
@@ -74,6 +77,20 @@ export const useChatStore = defineStore('chat', () => {
         if (lastSeg && lastSeg.type === 'text') {
           // 合并连续 text segment
           segs[segs.length - 1] = { ...lastSeg, content: lastSeg.content + segment.content }
+        } else {
+          segs.push({ ...segment })
+        }
+      } else if (segment.type === 'reasoning') {
+        const idx = segs.findIndex(
+          s => s.type === 'reasoning' && s.reasoning_id === segment.reasoning_id,
+        )
+        if (idx >= 0) {
+          const existing = segs[idx]
+          segs[idx] = {
+            ...existing,
+            ...segment,
+            content: (existing.content || '') + (segment.content || ''),
+          }
         } else {
           segs.push({ ...segment })
         }
@@ -126,6 +143,9 @@ export const useChatStore = defineStore('chat', () => {
         if (s.type === 'tool' && s.status === 'running') {
           return { ...s, status: 'error', result_summary: '执行超时或断流' }
         }
+        if (s.type === 'reasoning' && s.status === 'running') {
+          return { ...s, status: 'done' }
+        }
         return s
       })
       last.segments = segs
@@ -147,6 +167,9 @@ export const useChatStore = defineStore('chat', () => {
       const segs = last.segments.map(s => {
         if (s.type === 'tool' && s.status === 'running') {
           return { ...s, status: 'error', result_summary: '服务异常，执行中断' }
+        }
+        if (s.type === 'reasoning' && s.status === 'running') {
+          return { ...s, status: 'error' }
         }
         return s
       })
@@ -176,7 +199,13 @@ export const useChatStore = defineStore('chat', () => {
     clearMessages()
     for (const message of history) {
       if (message.role === 'user') {
-        addUserMessage(message.content, message.id, message.client_message_id)
+        addUserMessage(
+          message.content,
+          message.id,
+          message.client_message_id,
+          message.reasoning_enabled === true,
+          message.reasoning_effort || null,
+        )
         continue
       }
       if (message.role !== 'assistant') continue
@@ -186,6 +215,10 @@ export const useChatStore = defineStore('chat', () => {
         streaming: false,
         dbId: message.id,
         generationId: message.generation_id || null,
+        reasoningEnabled: message.reasoning_enabled === true,
+        reasoningEffort: message.reasoning_effort || null,
+        reasoningModel: message.reasoning_model || null,
+        reasoningDurationMs: message.reasoning_duration_ms || 0,
       }
       if (message.segments?.length) {
         restored.segments = message.content && message.segments.every(segment => segment.type !== 'text')

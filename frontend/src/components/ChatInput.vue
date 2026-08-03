@@ -22,6 +22,17 @@
       <button class="attach-btn" :disabled="submitting" @click="$refs.fileInput.click()" title="添加附件" aria-label="添加附件">
         <Paperclip :size="17" aria-hidden="true" />
       </button>
+      <button
+        class="reasoning-btn"
+        :class="{ on: reasoningEnabled }"
+        :disabled="submitting"
+        @click="toggleReasoning"
+        :title="reasoningEnabled ? '深度思考：开' : '深度思考：关'"
+        :aria-label="reasoningEnabled ? '关闭深度思考' : '开启深度思考'"
+        :aria-pressed="reasoningEnabled"
+      >
+        <BrainCircuit :size="17" aria-hidden="true" />
+      </button>
       <textarea
         v-model="text"
         @keydown.enter.exact.prevent="send"
@@ -80,7 +91,7 @@
 
 <script setup>
 import { ref, watch, nextTick, onMounted } from 'vue'
-import { FileText, LoaderCircle, Mic, Paperclip, Send, Square, Volume2, VolumeX, X } from 'lucide-vue-next'
+import { BrainCircuit, FileText, LoaderCircle, Mic, Paperclip, Send, Square, Volume2, VolumeX, X } from 'lucide-vue-next'
 import { useToast } from '../composables/useToast'
 
 const props = defineProps({
@@ -97,6 +108,12 @@ const toast = useToast()
 const pendingImage = ref(null)
 const pendingFile = ref(null) // 非图片附件
 const submitting = ref(false)
+const reasoningEnabled = ref(localStorage.getItem('reasoning-enabled') === 'true')
+
+function toggleReasoning() {
+  reasoningEnabled.value = !reasoningEnabled.value
+  localStorage.setItem('reasoning-enabled', String(reasoningEnabled.value))
+}
 
 // --- 语音输入 ---
 const isRecording = ref(false)
@@ -155,9 +172,11 @@ async function send() {
 
   let payload
   if (img) {
-    payload = { text: content, image: img }
+    payload = { text: content, image: img, reasoning_enabled: reasoningEnabled.value }
   } else if (file) {
-    payload = { text: content, file }
+    payload = { text: content, file, reasoning_enabled: reasoningEnabled.value }
+  } else if (reasoningEnabled.value) {
+    payload = { text: content, reasoning_enabled: true }
   } else {
     payload = content
   }
@@ -368,6 +387,7 @@ textarea:focus {
 }
 
 .attach-btn,
+.reasoning-btn,
 .mic-btn {
   width: var(--control-height);
   height: var(--control-height);
@@ -385,10 +405,16 @@ textarea:focus {
   flex-shrink: 0;
 }
 .attach-btn:hover,
+.reasoning-btn:hover,
 .mic-btn:hover {
   color: var(--text-primary);
   box-shadow: 0 0 0 1px rgba(255,255,255,0.20);
   transform: translateY(-1px);
+}
+.reasoning-btn.on {
+  color: var(--primary);
+  background: rgba(124, 92, 252, 0.15);
+  box-shadow: 0 0 0 1px var(--primary);
 }
 .mic-btn.recording {
   background: rgba(239, 68, 68, 0.2);
@@ -502,18 +528,32 @@ textarea:focus {
 
 @media (max-width: 767px) {
   .input-wrapper {
-    width: 100%;
+    width: 100vw;
+    max-width: 100vw;
     padding: 0 12px 12px;
   }
 
   .input-bar {
     display: grid;
-    grid-template-columns: var(--control-height) minmax(0, 1fr) repeat(3, var(--control-height));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: 6px;
     padding: 8px;
   }
 
+  .input-bar textarea {
+    grid-column: 1 / -1;
+    grid-row: 1;
+  }
+
+  .attach-btn { grid-column: 1; grid-row: 2; }
+  .reasoning-btn { grid-column: 2; grid-row: 2; }
+  .mic-btn { grid-column: 3; grid-row: 2; }
+  .tts-btn { grid-column: 4; grid-row: 2; }
+  .send-btn,
+  .stop-btn { grid-column: 5; grid-row: 2; }
+
   .attach-btn,
+  .reasoning-btn,
   .mic-btn,
   .tts-btn,
   .send-btn,
@@ -521,6 +561,7 @@ textarea:focus {
     width: var(--control-height);
     min-width: var(--control-height);
     padding: 0;
+    justify-self: center;
   }
 
   .send-btn span,

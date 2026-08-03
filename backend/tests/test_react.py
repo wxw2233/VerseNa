@@ -75,3 +75,37 @@ async def test_stop_interrupts_active_model_stream():
     assert adapter.closed is True
     assert any("已停止" in event.get("segment", {}).get("content", "") for event in remaining)
     assert remaining[-1]["type"] == "done"
+
+
+@pytest.mark.asyncio
+async def test_reasoning_is_streamed_separately_and_not_saved_as_answer():
+    class ReasoningAdapter(BaseModelAdapter):
+        model_name = "reasoning-model"
+        reasoning_available = True
+
+        async def chat(self, messages, tools=None, stream=True, reasoning_enabled=False, reasoning_effort="medium"):
+            assert reasoning_enabled is True
+            assert reasoning_effort == "high"
+            yield ModelResponse(reasoning_content="内部分析")
+            yield ModelResponse(content="最终回答")
+
+        async def list_models(self):
+            return [self.model_name]
+
+    agent = ReActAgent(ReasoningAdapter(), MemoryManager())
+    events = [event async for event in agent.run(
+        "reasoning-session",
+        "复杂问题",
+        agent_config={"reasoning_enabled": True, "reasoning_effort": "high"},
+    )]
+
+    reasoning = [event["segment"] for event in events if event.get("segment", {}).get("type") == "reasoning"]
+    text = [event["segment"] for event in events if event.get("segment", {}).get("type") == "text"]
+    assert "内部分析" in "".join(segment.get("content", "") for segment in reasoning)
+    assert "".join(segment["content"] for segment in text) == "最终回答"
+    assert reasoning[-1]["status"] == "done"
+
+    history = await db.get_history("reasoning-session")
+    assistant = next(message for message in history if message["role"] == "assistant")
+    assert assistant["content"] == "最终回答"
+    assert "内部分析" not in assistant["content"]

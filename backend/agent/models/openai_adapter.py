@@ -4,10 +4,19 @@ from typing import AsyncGenerator
 from .base import BaseModelAdapter, ModelResponse
 
 class OpenAIAdapter(BaseModelAdapter):
-    def __init__(self, api_key: str, base_url: str, model_name: str):
+    def __init__(
+        self,
+        api_key: str,
+        base_url: str,
+        model_name: str,
+        provider_id: str = "custom",
+        reasoning_available: bool = False,
+    ):
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
         self.model_name = model_name
+        self.provider_id = provider_id
+        self.reasoning_available = reasoning_available
 
     @staticmethod
     def _sanitize_messages(messages: list[dict]) -> list[dict]:
@@ -27,7 +36,9 @@ class OpenAIAdapter(BaseModelAdapter):
         return cleaned
 
     async def chat(self, messages: list[dict], tools: list = None, stream: bool = True,
-                   temperature: float = None, top_p: float = None, max_tokens: int = None) -> AsyncGenerator[ModelResponse, None]:
+                   temperature: float = None, top_p: float = None, max_tokens: int = None,
+                   reasoning_enabled: bool = False,
+                   reasoning_effort: str = "medium") -> AsyncGenerator[ModelResponse, None]:
         messages = self._sanitize_messages(messages)
 
         payload = {
@@ -37,12 +48,16 @@ class OpenAIAdapter(BaseModelAdapter):
         }
         if tools:
             payload["tools"] = tools
-        if temperature is not None:
+        openai_reasoning = reasoning_enabled and self.provider_id == "openai"
+        if temperature is not None and not openai_reasoning:
             payload["temperature"] = temperature
-        if top_p is not None:
+        if top_p is not None and not openai_reasoning:
             payload["top_p"] = top_p
         if max_tokens is not None:
-            payload["max_tokens"] = max_tokens
+            token_key = "max_completion_tokens" if openai_reasoning else "max_tokens"
+            payload[token_key] = max_tokens
+        if openai_reasoning:
+            payload["reasoning_effort"] = self._normalize_reasoning_effort(reasoning_effort)
 
         from api.log_api import log_info
         try:
@@ -60,7 +75,8 @@ class OpenAIAdapter(BaseModelAdapter):
         last_error = None
         for attempt in range(3):
             try:
-                async with httpx.AsyncClient(timeout=120) as client:
+                timeout = httpx.Timeout(connect=20, read=600, write=120, pool=20)
+                async with httpx.AsyncClient(timeout=timeout) as client:
                     if stream:
                         async with client.stream(
                             "POST",
@@ -96,6 +112,9 @@ class OpenAIAdapter(BaseModelAdapter):
                                         continue
 
                                     delta = chunk["choices"][0].get("delta", {})
+                                    reasoning_content = self._extract_reasoning(delta)
+                                    if reasoning_content:
+                                        yield ModelResponse(reasoning_content=reasoning_content)
                                     if delta.get("content"):
                                         yield ModelResponse(content=delta["content"])
                                     self._merge_tool_call_deltas(
@@ -117,6 +136,7 @@ class OpenAIAdapter(BaseModelAdapter):
                                     message = choice.get("message", {})
                                     yield ModelResponse(
                                         content=message.get("content", ""),
+                                        reasoning_content=self._extract_reasoning(message),
                                         tool_calls=message.get("tool_calls") or [],
                                         finish_reason=choice.get("finish_reason", "stop"),
                                     )
@@ -132,6 +152,7 @@ class OpenAIAdapter(BaseModelAdapter):
                             choice = data["choices"][0]
                             yield ModelResponse(
                                 content=choice["message"].get("content", ""),
+                                reasoning_content=self._extract_reasoning(choice["message"]),
                                 tool_calls=choice["message"].get("tool_calls") or [],
                                 finish_reason=choice.get("finish_reason", "stop"),
                             )
@@ -148,6 +169,29 @@ class OpenAIAdapter(BaseModelAdapter):
 
             yield ModelResponse(content=last_error or "[连接失败]")
             return
+
+    @staticmethod
+    def _normalize_reasoning_effort(value: str) -> str:
+        return value if value in {"low", "medium", "high"} else "medium"
+
+    @staticmethod
+    def _extract_reasoning(data: dict) -> str:
+        for key in ("reasoning_content", "reasoning"):
+            value = data.get(key)
+            if isinstance(value, str) and value:
+                return value
+
+        details = data.get("reasoning_details")
+        if not isinstance(details, list):
+            return ""
+        parts = []
+        for detail in details:
+            if not isinstance(detail, dict):
+                continue
+            value = detail.get("text") or detail.get("content") or detail.get("summary")
+            if isinstance(value, str) and value:
+                parts.append(value)
+        return "".join(parts)
 
     @staticmethod
     def _merge_tool_call_deltas(accumulated: dict, deltas: list):
