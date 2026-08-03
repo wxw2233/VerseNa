@@ -4,7 +4,7 @@
   "description": "VerseNa - AI 角色扮演聊天桌面客户端",
   "main": "main.js",
   "author": "wxw",
-  "license": "MIT",
+  "license": "CC-BY-NC-4.0",
   "scripts": {
     "start": "electron .",
     "dev": "cross-env NODE_ENV=development electron .",
