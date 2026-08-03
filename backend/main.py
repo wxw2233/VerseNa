@@ -55,8 +55,9 @@ async def require_api_authentication(request: Request, call_next):
             headers={"Cache-Control": "no-store"},
         )
     if auth_manager.validate_session(session_id):
+        request_origin = request.headers.get("origin", "") or request.headers.get("referer", "")
         if request.method in {"GET", "HEAD"} or is_allowed_origin(
-            request.headers.get("origin", ""),
+            request_origin,
             request.headers.get("host", ""),
             settings.ALLOWED_ORIGINS,
         ):

@@ -57,13 +57,13 @@
 
     <div class="config-footer">
       <button class="btn-reset" @click="resetDefaults">恢复默认值</button>
-      <button class="btn-save" @click="save">保存</button>
+      <button class="btn-save" :disabled="saving" @click="save">保存</button>
     </div>
   </div>
 </template>
 
 <script setup>
-import { reactive, onMounted } from 'vue'
+import { reactive, ref, onMounted } from 'vue'
 import { useToast } from '../../composables/useToast'
 
 const toast = useToast()
@@ -77,6 +77,34 @@ const config = reactive({
 })
 
 const defaults = { ...config }
+const saving = ref(false)
+
+const numericFields = {
+  max_steps: [1, 100],
+  max_history: [5, 500],
+  max_context: [2000, 1000000],
+  max_tokens: [256, 65536],
+}
+
+function buildPayload() {
+  const payload = { custom_instructions: config.custom_instructions || '' }
+  for (const [key, [min, max]] of Object.entries(numericFields)) {
+    const value = Number(config[key])
+    if (!Number.isFinite(value) || !Number.isInteger(value) || value < min || value > max) {
+      throw new Error(`${key} 必须是 ${min} 到 ${max} 之间的整数`)
+    }
+    payload[key] = value
+  }
+  return payload
+}
+
+function responseError(data, status) {
+  if (typeof data?.detail === 'string') return data.detail
+  if (Array.isArray(data?.detail)) {
+    return data.detail.map(item => item.msg || String(item)).join('; ')
+  }
+  return `HTTP ${status}`
+}
 
 async function loadConfig() {
   try {
@@ -87,19 +115,22 @@ async function loadConfig() {
 }
 
 async function save() {
+  if (saving.value) return
+  saving.value = true
   try {
+    const payload = buildPayload()
     const resp = await fetch('/api/config/agent', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(config),
+      body: JSON.stringify(payload),
     })
-    if (resp.ok) {
-      toast.success('保存成功')
-    } else {
-      toast.error('保存失败')
-    }
+    const data = await resp.json().catch(() => ({}))
+    if (!resp.ok) throw new Error(responseError(data, resp.status))
+    toast.success('保存成功')
   } catch (e) {
     toast.error('保存失败: ' + e.message)
+  } finally {
+    saving.value = false
   }
 }
 
@@ -234,5 +265,10 @@ onMounted(loadConfig)
 .btn-save:hover {
   filter: brightness(1.1);
   transform: translateY(-1px);
+}
+.btn-save:disabled {
+  opacity: 0.55;
+  cursor: default;
+  transform: none;
 }
 </style>

@@ -60,6 +60,8 @@ bash scripts/start-termux.sh
 
 The Termux archive includes `frontend/dist`, so Android does not need Node.js for normal use.
 
+Runtime data is stored under `$HOME/.local/share/versena` by default. This keeps the SQLite database and access token on Termux's private filesystem, where file locking and atomic writes work reliably. Existing data under `backend/data` is migrated automatically when the private data directory is empty. Set `VERSENA_DATA_DIR` before startup to choose another private, writable location.
+
 ## Fresh Clone Test
 
 After cloning the repository on Windows:
@@ -91,6 +93,8 @@ LAN mode is protected by an access token. The backend prints the token on first 
 The minimum token length is 6 characters. For LAN use, prefer a longer random token when possible.
 
 ## Common Issues
+
+Do not place `VERSENA_DATA_DIR` under `/sdcard`, `~/storage`, or another Android shared-storage path. SQLite writes and file locking are not reliable there. The project source or release archive may live in shared storage, but runtime data should remain in Termux's private filesystem.
 
 If Windows packaging reports a corrupt Python archive, rerun the packaging script. The script downloads to a temporary file first and replaces the cache only after the archive looks valid.
 

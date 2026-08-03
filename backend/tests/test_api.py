@@ -32,6 +32,31 @@ def test_get_model_config(client):
     assert "model_name" in resp.json()
 
 
+def test_agent_config_can_be_saved_and_loaded(client, monkeypatch):
+    saved = {}
+
+    async def get_config(key, default=""):
+        return saved.get(key, default)
+
+    async def set_config(key, value):
+        saved[key] = value
+
+    monkeypatch.setattr("api.config_api.db.get_config", get_config)
+    monkeypatch.setattr("api.config_api.db.set_config", set_config)
+
+    payload = {
+        "max_steps": 24,
+        "max_history": 80,
+        "max_context": 64000,
+        "max_tokens": 4096,
+        "custom_instructions": "Keep answers concise.",
+    }
+    response = client.post("/api/config/agent", json=payload)
+
+    assert response.status_code == 200
+    assert client.get("/api/config/agent").json() == payload
+
+
 def test_cors_allows_local_frontend_only(client):
     allowed = client.options(
         "/health",

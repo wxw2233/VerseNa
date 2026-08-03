@@ -110,6 +110,26 @@ def test_login_issues_cookie_and_logout_revokes_it(auth_client):
     assert auth_client.get("/api/config/model").status_code == 401
 
 
+def test_authenticated_post_accepts_same_origin_referer(auth_client, monkeypatch):
+    saved = {}
+
+    async def set_config(key, value):
+        saved[key] = value
+
+    monkeypatch.setattr("api.config_api.db.set_config", set_config)
+    assert auth_client.post("/api/auth/login", json={"token": TEST_TOKEN}).status_code == 200
+
+    response = auth_client.post(
+        "/api/config/agent",
+        headers={"Referer": "http://testserver/settings"},
+        json={"max_steps": 20, "max_history": 60},
+    )
+
+    assert response.status_code == 200
+    assert saved["agent_max_steps"] == "20"
+    assert saved["agent_max_history"] == "60"
+
+
 def test_bearer_token_authentication(auth_client):
     response = auth_client.get(
         "/api/config/model",
