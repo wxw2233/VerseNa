@@ -1,18 +1,30 @@
 import json
 import httpx
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, ConfigDict
+import pydantic
+from pydantic import BaseModel
 from config import settings
 from db.database import db
 from models.providers import get_all_providers, get_provider, PROVIDER_PRESETS
 
 router = APIRouter()
+PYDANTIC_V2 = int(pydantic.__version__.split(".", 1)[0]) >= 2
+
+if PYDANTIC_V2:
+    from pydantic import ConfigDict
+
+
+def _model_dump(model: BaseModel, **kwargs) -> dict:
+    if PYDANTIC_V2:
+        return model.model_dump(**kwargs)
+    return model.dict(**kwargs)
 
 
 # ========== 旧版单模型配置（保持向后兼容） ==========
 
 class ModelConfig(BaseModel):
-    model_config = ConfigDict(protected_namespaces=())
+    if PYDANTIC_V2:
+        model_config = ConfigDict(protected_namespaces=())
 
     api_key: str
     base_url: str
@@ -326,7 +338,7 @@ class AgentConfigReq(BaseModel):
 @router.post("/api/config/agent")
 async def set_agent_config(req: AgentConfigReq):
     """保存 Agent 高级配置"""
-    updates = req.model_dump(exclude_none=True)
+    updates = _model_dump(req, exclude_none=True)
     for key, value in updates.items():
         if key in AGENT_CONFIG_DEFAULTS:
             # 数值类型做范围限制
@@ -444,7 +456,7 @@ class SearchConfigReq(BaseModel):
 
 @router.post("/api/search/config")
 async def set_search_config(req: SearchConfigReq):
-    updates = req.model_dump(exclude_none=True)
+    updates = _model_dump(req, exclude_none=True)
     for key, value in updates.items():
         if key in SEARCH_API_DEFAULTS:
             await db.set_config(f"search_{key}", str(value))

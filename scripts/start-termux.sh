@@ -16,8 +16,8 @@ else
   PYTHON_BIN="$(command -v python || true)"
 fi
 
-if [[ -z "$PYTHON_BIN" ]] || ! "$PYTHON_BIN" -c 'import fastapi, pydantic; assert int(pydantic.__version__.split(".", 1)[0]) >= 2' >/dev/null 2>&1; then
-  echo "VerseNa requires FastAPI with Pydantic 2 in a compatible Python environment." >&2
+if [[ -z "$PYTHON_BIN" ]] || ! "$PYTHON_BIN" -c 'import fastapi, pydantic' >/dev/null 2>&1; then
+  echo "VerseNa requires compatible FastAPI and Pydantic packages." >&2
   echo "Run: bash scripts/setup-termux.sh" >&2
   exit 1
 fi

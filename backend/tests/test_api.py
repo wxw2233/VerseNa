@@ -57,6 +57,20 @@ def test_agent_config_can_be_saved_and_loaded(client, monkeypatch):
     assert client.get("/api/config/agent").json() == payload
 
 
+def test_model_dump_supports_pydantic_v1(monkeypatch):
+    import api.config_api as config_api
+
+    class LegacyModel:
+        def dict(self, **kwargs):
+            return {"kwargs": kwargs}
+
+    monkeypatch.setattr(config_api, "PYDANTIC_V2", False)
+
+    assert config_api._model_dump(LegacyModel(), exclude_none=True) == {
+        "kwargs": {"exclude_none": True}
+    }
+
+
 def test_source_update_status_api(client, monkeypatch):
     async def status():
         return {
