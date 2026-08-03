@@ -65,6 +65,7 @@
       <MemoryTab v-if="activeTab === 'memory'" />
       <AdvancedTab v-if="activeTab === 'advanced'" />
       <MonitorTab v-if="activeTab === 'monitor'" />
+      <UpdateTab v-if="activeTab === 'update'" />
     </section>
   </div>
 </template>
@@ -82,6 +83,7 @@ import MonitorTab from '../components/settings/MonitorTab.vue'
 import SkillTab from '../components/settings/SkillTab.vue'
 import AdvancedTab from '../components/settings/AdvancedTab.vue'
 import SecurityTab from '../components/settings/SecurityTab.vue'
+import UpdateTab from '../components/settings/UpdateTab.vue'
 import QQBotConfig from '../components/QQBotConfig.vue'
 import { getAuthStatus, logoutSession } from '../utils/auth'
 
@@ -89,6 +91,7 @@ const activeTab = ref('persona')
 const themeStore = useThemeStore()
 const personaTabRef = ref(null)
 const authRequired = ref(false)
+const sourceUpdatesSupported = ref(false)
 
 const allMenuItems = [
   { id: 'persona', icon: '🎭', label: '次元设置' },
@@ -102,12 +105,12 @@ const allMenuItems = [
   { id: 'memory', icon: '🧠', label: '记忆' },
   { id: 'advanced', icon: '⚙️', label: '高级' },
   { id: 'monitor', icon: '📊', label: '监控' },
+  { id: 'update', icon: '↑', label: '源码更新' },
 ]
-const menuItems = computed(() => (
-  authRequired.value
-    ? allMenuItems
-    : allMenuItems.filter(item => item.id !== 'security')
-))
+const menuItems = computed(() => allMenuItems.filter(item => (
+  (item.id !== 'security' || authRequired.value)
+  && (item.id !== 'update' || sourceUpdatesSupported.value)
+)))
 
 // --- Shared theme pack data ---
 const themePacks = ref([])
@@ -143,6 +146,11 @@ async function onPackChanged() {
 onMounted(async () => {
   try {
     authRequired.value = Boolean((await getAuthStatus()).required)
+  } catch {}
+  try {
+    const updateResponse = await fetch('/api/update/status')
+    const updateStatus = await updateResponse.json()
+    sourceUpdatesSupported.value = Boolean(updateResponse.ok && updateStatus.supported)
   } catch {}
   await loadThemePacks()
   await themeStore.applyTheme()

@@ -126,6 +126,9 @@ app.include_router(skill_router)
 from api.auth_api import router as auth_router
 app.include_router(auth_router)
 
+from api.update_api import router as update_router
+app.include_router(update_router)
+
 
 @app.get("/{full_path:path}", include_in_schema=False)
 async def serve_frontend(full_path: str):

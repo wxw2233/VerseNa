@@ -5,6 +5,8 @@ This project supports two release formats:
 - Windows desktop package with an embedded Python runtime.
 - Termux archive with prebuilt frontend assets.
 
+These package formats do not currently receive automatic updates. The maintained update channel is for Git source checkouts; see [Source Updates](SOURCE_UPDATES.md).
+
 ## Windows
 
 Build an unpacked desktop package:

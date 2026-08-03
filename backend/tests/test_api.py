@@ -57,6 +57,31 @@ def test_agent_config_can_be_saved_and_loaded(client, monkeypatch):
     assert client.get("/api/config/agent").json() == payload
 
 
+def test_source_update_status_api(client, monkeypatch):
+    async def status():
+        return {
+            "supported": True,
+            "version": "1.1.0",
+            "branch": "master",
+            "commit_short": "abcdef0",
+            "upstream": "origin/master",
+            "dirty": False,
+            "ahead": 0,
+            "behind": 0,
+            "update_available": False,
+            "pending": False,
+            "restart_required": False,
+            "message": "up to date",
+        }
+
+    monkeypatch.setattr("api.update_api.source_updater.status", status)
+
+    response = client.get("/api/update/status")
+
+    assert response.status_code == 200
+    assert response.json()["branch"] == "master"
+
+
 def test_cors_allows_local_frontend_only(client):
     allowed = client.options(
         "/health",
