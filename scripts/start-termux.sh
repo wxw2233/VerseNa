@@ -6,6 +6,22 @@ ENV_FILE="$PROJECT_ROOT/backend/.env"
 LEGACY_DATA_DIR="$PROJECT_ROOT/backend/data"
 TERMUX_DATA_DIR="${VERSENA_DATA_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/versena}"
 
+if [[ -n "${VERSENA_PYTHON:-}" ]]; then
+  PYTHON_BIN="$VERSENA_PYTHON"
+elif [[ -x "$PROJECT_ROOT/.venv/bin/python" ]]; then
+  PYTHON_BIN="$PROJECT_ROOT/.venv/bin/python"
+elif [[ -n "${VIRTUAL_ENV:-}" ]] && [[ -x "$VIRTUAL_ENV/bin/python" ]]; then
+  PYTHON_BIN="$VIRTUAL_ENV/bin/python"
+else
+  PYTHON_BIN="$(command -v python || true)"
+fi
+
+if [[ -z "$PYTHON_BIN" ]] || ! "$PYTHON_BIN" -c 'import fastapi, pydantic; assert int(pydantic.__version__.split(".", 1)[0]) >= 2' >/dev/null 2>&1; then
+  echo "VerseNa requires FastAPI with Pydantic 2 in a compatible Python environment." >&2
+  echo "Run: bash scripts/setup-termux.sh" >&2
+  exit 1
+fi
+
 if [[ ! -f "$ENV_FILE" ]]; then
   umask 077
   printf '%s\n' \
@@ -27,7 +43,7 @@ if [[ -d "$LEGACY_DATA_DIR" ]] && [[ -z "$(find "$TERMUX_DATA_DIR" -mindepth 1 -
 fi
 
 if [[ ! -f "$PROJECT_ROOT/frontend/dist/index.html" ]]; then
-  echo "frontend/dist is missing; use a VerseNa Termux release package with a prebuilt frontend." >&2
+  echo "frontend/dist is missing; run: bash scripts/setup-termux.sh" >&2
   exit 1
 fi
 
@@ -42,4 +58,4 @@ echo "  Data: $TERMUX_DATA_DIR"
 echo
 
 cd "$PROJECT_ROOT/backend"
-exec python main.py
+exec "$PYTHON_BIN" main.py

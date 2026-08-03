@@ -7,14 +7,12 @@ VerseNa can update installations that were created with `git clone`. Packaged Wi
 Existing source installations must receive the updater once with a normal Git update:
 
 ```bash
+cd ~/VerseNa
 git pull --ff-only
-cd frontend
-npm ci
-npm run build
-cd ..
+bash scripts/setup-termux.sh  # Termux only
 ```
 
-Restart VerseNa after these commands. Later updates can be managed from **Settings -> Source Update**.
+On other platforms, install changed dependencies and rebuild `frontend/dist` with the platform's normal source setup. Restart VerseNa after these commands. Later updates can be managed from **Settings -> Source Update**.
 
 ## Update Flow
 
@@ -34,6 +32,7 @@ Database files, access tokens, uploaded files, logs, and ignored runtime data ar
 
 - The checkout must have a configured upstream, normally `origin/master`.
 - Git, Python, Node.js, and npm must be available on `PATH`.
+- Termux source installations should be initialized with `bash scripts/setup-termux.sh`; daily startup uses `bash scripts/start-termux.sh`.
 - Tracked source files must be clean. Untracked and ignored runtime files do not block updates.
 - Git must be able to reach the configured remote. Existing Git proxy and credential settings are respected.
 

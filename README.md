@@ -85,6 +85,15 @@ powershell -ExecutionPolicy Bypass -File scripts/start-lan.ps1
 
 Windows、Termux 和安全注意事项见 [局域网访问文档](docs/LAN_ACCESS.md)。打包发布流程见 [打包文档](docs/PACKAGING.md)。
 
+Termux 使用源码部署：
+
+```bash
+git clone https://github.com/wxw2233/VerseNa.git
+cd VerseNa
+bash scripts/setup-termux.sh
+bash scripts/start-termux.sh
+```
+
 首次 LAN 启动会在终端面板打印并持久化随机访问令牌；登录后可在 **设置 → 访问安全** 中生成或修改令牌。
 
 ### 源码更新

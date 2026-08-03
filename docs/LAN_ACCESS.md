@@ -20,12 +20,14 @@ powershell -ExecutionPolicy Bypass -File scripts/start-lan.ps1
 
 ## Termux
 
-首次安装运行环境：
+源码首次安装运行环境：
 
 ```bash
 pkg update
-pkg install python git
-python -m pip install -r backend/requirements-termux.txt
+pkg install python git nodejs-lts
+git clone https://github.com/wxw2233/VerseNa.git
+cd VerseNa
+bash scripts/setup-termux.sh
 termux-setup-storage
 ```
 
@@ -35,7 +37,7 @@ termux-setup-storage
 bash scripts/start-termux.sh
 ```
 
-Termux 发布包应预先包含 `frontend/dist`，Android 端不需要安装 Node.js。发布包生成方式见 [打包文档](PACKAGING.md)。第一次启动时请记录终端面板打印的访问令牌。建议关闭 VerseNa/Termux 的电池优化；脚本在可用时会启用 `termux-wake-lock`。
+Termux 源码部署会使用项目内的 `.venv`，运行数据默认保存在 `$HOME/.local/share/versena`。第一次启动时请记录终端面板打印的访问令牌。建议关闭 VerseNa/Termux 的电池优化；脚本在可用时会启用 `termux-wake-lock`。
 
 ## 手动配置
 
