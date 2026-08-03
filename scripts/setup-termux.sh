@@ -26,6 +26,15 @@ echo "Installing backend dependencies..."
 "$VENV_DIR/bin/python" -m pip install --upgrade pip
 "$VENV_DIR/bin/python" -m pip install -r "$PROJECT_ROOT/backend/requirements-termux.txt"
 
+echo "Verifying the backend runtime..."
+if ! (
+  cd "$PROJECT_ROOT/backend"
+  "$VENV_DIR/bin/python" -c 'import main, pydantic; print(f"Backend runtime OK (Pydantic {pydantic.__version__})")'
+); then
+  echo "Backend verification failed; review the Python error above." >&2
+  exit 1
+fi
+
 echo "Building the frontend..."
 (
   cd "$PROJECT_ROOT/frontend"
