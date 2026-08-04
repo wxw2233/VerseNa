@@ -1,5 +1,6 @@
 import json
 import asyncio
+import time
 
 import httpx
 import pytest
@@ -73,6 +74,34 @@ async def test_file_manager_confirmed_write_and_read(registry, tool_context):
     assert read["data"]["content"] == "hello"
     assert read["data"]["eof"] is True
     assert read["data"]["remaining_bytes"] == 0
+
+
+@pytest.mark.asyncio
+async def test_file_manager_read_does_not_block_stop_event(registry, tmp_path, monkeypatch):
+    target = tmp_path / "slow.txt"
+    target.write_text("content", encoding="utf-8")
+    stop_event = asyncio.Event()
+    context = ToolContext("stop-file-read", tmp_path, stop_event=stop_event)
+    tool = registry.get_tool("file_manager")
+
+    def slow_read(cancel_event, *args):
+        while not cancel_event.is_set():
+            time.sleep(0.01)
+        return json.dumps({"success": False, "error": "CANCELLED"})
+
+    monkeypatch.setattr(tool, "_read", slow_read)
+    operation = asyncio.create_task(registry.execute(
+        "file_manager",
+        {"action": "read", "path": "slow.txt"},
+        context=context,
+    ))
+
+    await asyncio.sleep(0.05)
+    assert operation.done() is False
+    stop_event.set()
+    result = json.loads(await asyncio.wait_for(operation, timeout=1))
+
+    assert result["error"] == "CANCELLED"
 
 
 @pytest.mark.asyncio

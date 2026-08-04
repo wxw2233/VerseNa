@@ -1,6 +1,8 @@
+import asyncio
 import os
 import shutil
 import tempfile
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -15,6 +17,7 @@ MAX_READ_BYTES = 100_000
 MAX_LIST_ITEMS = 500
 MAX_SEARCH_RESULTS = 500
 MAX_REPLACE_BYTES = 500 * 1024
+MAX_DIRECTORY_SCAN = 5_000
 MUTATING_ACTIONS = {"write", "find_replace", "copy", "move", "delete"}
 
 
@@ -130,7 +133,13 @@ class FileManagerTool(BaseTool):
                     return preflight_error
                 if not _confirmed and not _context.trust_mode:
                     return self._confirm(action, src=src, dst=dst)
-                return self._copy_or_move(action, source, destination, _context)
+                return await asyncio.to_thread(
+                    self._copy_or_move,
+                    action,
+                    source,
+                    destination,
+                    _context,
+                )
 
             if not path:
                 path = "." if action in {"list", "search"} else ""
@@ -149,18 +158,64 @@ class FileManagerTool(BaseTool):
                 return self._confirm(action, path=path)
 
             if action == "read":
-                return self._read(target, encoding, offset, max_size)
+                return await self._run_interruptible(
+                    _context,
+                    self._read,
+                    target,
+                    encoding,
+                    offset,
+                    max_size,
+                    timeout=20,
+                )
             if action == "write":
-                return self._write(target, content, mode, encoding, _context)
+                return await asyncio.to_thread(
+                    self._write,
+                    target,
+                    content,
+                    mode,
+                    encoding,
+                    _context,
+                )
             if action == "list":
-                return self._list(target, limit)
+                return await self._run_interruptible(
+                    _context,
+                    self._list,
+                    target,
+                    limit,
+                    timeout=20,
+                )
             if action == "search":
-                return self._search(target, pattern, recursive if recursive is not None else True, limit)
+                return await self._run_interruptible(
+                    _context,
+                    self._search,
+                    target,
+                    pattern,
+                    recursive if recursive is not None else True,
+                    limit,
+                    timeout=30,
+                )
             if action == "find_replace":
-                return self._find_replace(target, old, new, encoding, _context)
+                return await asyncio.to_thread(
+                    self._find_replace,
+                    target,
+                    old,
+                    new,
+                    encoding,
+                    _context,
+                )
             if action == "delete":
-                return self._delete(target, recursive if recursive is not None else False, _context)
-            return self._info(target)
+                return await asyncio.to_thread(
+                    self._delete,
+                    target,
+                    recursive if recursive is not None else False,
+                    _context,
+                )
+            return await self._run_interruptible(
+                _context,
+                self._info,
+                target,
+                timeout=10,
+            )
         except ToolPathError as exc:
             _audit_log(_context, action, path or f"{src}->{dst}", "error", "WORKSPACE_VIOLATION")
             return tool_error("WORKSPACE_VIOLATION", str(exc))
@@ -172,6 +227,47 @@ class FileManagerTool(BaseTool):
         except OSError as exc:
             _audit_log(_context, action, path or f"{src}->{dst}", "error", str(exc))
             return tool_error("OS_ERROR", str(exc))
+
+    @staticmethod
+    async def _run_interruptible(
+        context: ToolContext,
+        operation,
+        *args,
+        timeout: float,
+    ) -> str:
+        if context.stop_event and context.stop_event.is_set():
+            return tool_error("CANCELLED", "操作已停止")
+
+        cancel_event = threading.Event()
+        operation_task = asyncio.create_task(
+            asyncio.to_thread(operation, cancel_event, *args)
+        )
+        stop_task = (
+            asyncio.create_task(context.stop_event.wait())
+            if context.stop_event
+            else None
+        )
+        wait_for = {operation_task, stop_task} if stop_task else {operation_task}
+        try:
+            completed, _ = await asyncio.wait(
+                wait_for,
+                timeout=timeout,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if operation_task in completed:
+                return operation_task.result()
+
+            cancel_event.set()
+            operation_task.cancel()
+            if stop_task and stop_task in completed:
+                return tool_error("CANCELLED", "操作已停止")
+            return tool_error("TIMEOUT", f"文件操作超过 {int(timeout)} 秒，已中止")
+        finally:
+            if operation_task.cancelled():
+                await asyncio.gather(operation_task, return_exceptions=True)
+            if stop_task:
+                stop_task.cancel()
+                await asyncio.gather(stop_task, return_exceptions=True)
 
     @staticmethod
     def _confirm(action: str, **details) -> str:
@@ -219,7 +315,9 @@ class FileManagerTool(BaseTool):
         return None
 
     @staticmethod
-    def _read(target: ToolPath, encoding: str, offset: int, max_size: int) -> str:
+    def _read(cancel_event: threading.Event, target: ToolPath, encoding: str, offset: int, max_size: int) -> str:
+        if cancel_event.is_set():
+            return tool_error("CANCELLED", "操作已停止")
         path = target.op_path
         if not path.exists():
             return tool_error("FILE_NOT_FOUND", f"文件不存在: {path}")
@@ -268,38 +366,82 @@ class FileManagerTool(BaseTool):
         return tool_result(True, data={"bytes_written": bytes_written, "path": str(path)})
 
     @staticmethod
-    def _list(target: ToolPath, limit: int) -> str:
+    def _list(cancel_event: threading.Event, target: ToolPath, limit: int) -> str:
         path = target.op_path
         if not path.exists():
             return tool_error("FILE_NOT_FOUND", f"目录不存在: {path}")
         if not path.is_dir():
             return tool_error("PATH_IS_FILE", f"路径不是目录: {path}")
         limit = max(1, min(int(limit), MAX_LIST_ITEMS))
-        entries = sorted(path.iterdir(), key=lambda item: (not item.is_dir(), item.name.lower()))
+        entries = []
+        scan_truncated = False
+        for entry in path.iterdir():
+            if cancel_event.is_set():
+                return tool_error("CANCELLED", "操作已停止")
+            entries.append(entry)
+            if len(entries) >= MAX_DIRECTORY_SCAN:
+                scan_truncated = True
+                break
+        entries.sort(key=lambda item: (not item.is_dir(), item.name.lower()))
         items = []
         for entry in entries[:limit]:
             stat = entry.lstat()
             kind = "symlink" if entry.is_symlink() else "dir" if entry.is_dir() else "file"
             items.append({"name": entry.name, "type": kind, "size": stat.st_size if kind == "file" else 0})
-        return tool_result(True, data={"items": items, "total": len(entries), "truncated": len(entries) > limit})
+        return tool_result(True, data={
+            "items": items,
+            "total": len(entries),
+            "truncated": scan_truncated or len(entries) > limit,
+            "scan_truncated": scan_truncated,
+        })
 
     @staticmethod
-    def _search(target: ToolPath, pattern: str, recursive: bool, limit: int) -> str:
+    def _search(
+        cancel_event: threading.Event,
+        target: ToolPath,
+        pattern: str,
+        recursive: bool,
+        limit: int,
+    ) -> str:
         path = target.op_path
         if not path.exists() or not path.is_dir():
             return tool_error("PATH_NOT_DIRECTORY", f"搜索目录不存在: {path}")
         if not pattern or Path(pattern).is_absolute() or ".." in Path(pattern).parts:
             return tool_error("INVALID_PATTERN", "pattern 必须是工作区内的 glob 文件名模式")
         limit = max(1, min(int(limit), MAX_SEARCH_RESULTS))
-        iterator = path.rglob(pattern) if recursive else path.glob(pattern)
         matches = []
         truncated = False
+        scanned = 0
+        if recursive:
+            iterator = (
+                Path(root) / name
+                for root, directories, files in os.walk(path, followlinks=False)
+                for name in [*directories, *files]
+            )
+        else:
+            iterator = path.iterdir()
         for match in iterator:
-            if len(matches) >= limit:
+            if cancel_event.is_set():
+                return tool_error("CANCELLED", "操作已停止")
+            scanned += 1
+            if scanned > MAX_DIRECTORY_SCAN:
                 truncated = True
                 break
-            matches.append(str(match))
-        return tool_result(True, data={"matches": matches, "count": len(matches), "truncated": truncated})
+            try:
+                relative = match.relative_to(path)
+            except ValueError:
+                relative = match
+            if relative.match(pattern):
+                matches.append(str(match))
+                if len(matches) >= limit:
+                    truncated = True
+                    break
+        return tool_result(True, data={
+            "matches": matches,
+            "count": len(matches),
+            "truncated": truncated,
+            "scanned": scanned,
+        })
 
     @staticmethod
     def _find_replace(target: ToolPath, old: str, new: str, encoding: str, context: ToolContext) -> str:
@@ -336,7 +478,9 @@ class FileManagerTool(BaseTool):
         return tool_result(True, data={"deleted": True, "path": str(path)})
 
     @staticmethod
-    def _info(target: ToolPath) -> str:
+    def _info(cancel_event: threading.Event, target: ToolPath) -> str:
+        if cancel_event.is_set():
+            return tool_error("CANCELLED", "操作已停止")
         path = target.op_path
         if not path.exists() and not path.is_symlink():
             return tool_error("FILE_NOT_FOUND", f"路径不存在: {path}")

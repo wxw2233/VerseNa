@@ -20,16 +20,16 @@
           <div v-if="seg.type === 'text'" class="text-seg" v-html="renderText(seg.content)"></div>
 
           <div
-            v-if="seg.type === 'reasoning' && i === firstReasoningIndex"
+            v-if="seg.type === 'reasoning'"
             class="reasoning-seg"
-            :data-status="reasoningSummary.status"
+            :data-status="seg.status"
           >
-            <button class="reasoning-header" type="button" @click="reasoningExpanded = !reasoningExpanded">
+            <button class="reasoning-header" type="button" @click="toggleReasoning(seg, i)">
               <BrainCircuit :size="15" aria-hidden="true" />
-              <span>{{ reasoningLabel(reasoningSummary) }}</span>
-              <ChevronDown class="reasoning-arrow" :class="{ open: reasoningExpanded }" :size="14" aria-hidden="true" />
+              <span>{{ reasoningLabel(seg) }}</span>
+              <ChevronDown class="reasoning-arrow" :class="{ open: isReasoningExpanded(seg, i) }" :size="14" aria-hidden="true" />
             </button>
-            <div v-if="reasoningExpanded && reasoningSummary.content" class="reasoning-content">{{ reasoningSummary.content }}</div>
+            <div v-if="isReasoningExpanded(seg, i) && seg.content" class="reasoning-content">{{ seg.content }}</div>
           </div>
 
           <!-- 工具段时间线节点 -->
@@ -143,7 +143,7 @@ function renderText(content) {
 
 const props = defineProps({ msg: Object })
 const emit = defineEmits(['retry', 'edit'])
-const reasoningExpanded = ref(Boolean(props.msg.streaming))
+const expandedReasoning = ref({})
 
 // 编辑模式
 const isEditing = ref(false)
@@ -171,36 +171,33 @@ const hasAnswerText = computed(() =>
   props.msg.segments?.some(segment => segment.type === 'text' && segment.content?.trim()) || false
 )
 
-const firstReasoningIndex = computed(() =>
-  props.msg.segments?.findIndex(segment => segment.type === 'reasoning') ?? -1
-)
-
-const reasoningSummary = computed(() => {
-  const segments = props.msg.segments?.filter(segment => segment.type === 'reasoning') || []
-  const content = segments
-    .map(segment => segment.content?.trim())
-    .filter(Boolean)
-    .join('\n\n')
-  let status = 'done'
-  if (segments.some(segment => segment.status === 'running')) status = 'running'
-  else if (segments.some(segment => segment.status === 'error')) status = 'error'
-  else if (segments.some(segment => segment.status === 'stopped')) status = 'stopped'
-  else if (!content && segments.some(segment => segment.status === 'unavailable')) status = 'unavailable'
-  return {
-    type: 'reasoning',
-    status,
-    content,
-    duration_ms: segments.reduce((total, segment) => total + Number(segment.duration_ms || 0), 0),
-  }
-})
-
 const hasRunningReasoning = computed(() =>
-  reasoningSummary.value.status === 'running'
+  props.msg.segments?.some(segment => segment.type === 'reasoning' && segment.status === 'running') || false
 )
 
 watch(hasAnswerText, hasText => {
-  if (hasText) reasoningExpanded.value = false
+  if (hasText) expandedReasoning.value = {}
 })
+
+function reasoningKey(segment, index) {
+  return segment.reasoning_id || `reasoning-${index}`
+}
+
+function isReasoningExpanded(segment, index) {
+  const key = reasoningKey(segment, index)
+  if (Object.prototype.hasOwnProperty.call(expandedReasoning.value, key)) {
+    return expandedReasoning.value[key]
+  }
+  return props.msg.streaming && segment.status === 'running'
+}
+
+function toggleReasoning(segment, index) {
+  const key = reasoningKey(segment, index)
+  expandedReasoning.value = {
+    ...expandedReasoning.value,
+    [key]: !isReasoningExpanded(segment, index),
+  }
+}
 
 function reasoningLabel(segment) {
   if (segment.status === 'unavailable') return '当前模型不支持深度思考'

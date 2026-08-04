@@ -107,6 +107,42 @@ class ReActAgent:
             stop_event=stop_event,
         ) if self.tool_registry else None
 
+        async def execute_tool(tool_name, tool_args, confirmed=False):
+            if stop_event and stop_event.is_set():
+                return json.dumps({
+                    "success": False,
+                    "error": "CANCELLED",
+                    "message": "操作已停止",
+                }, ensure_ascii=False)
+
+            execute_task = asyncio.create_task(self.tool_registry.execute(
+                tool_name,
+                tool_args,
+                context=tool_context,
+                confirmed=confirmed,
+            ))
+            if not stop_event:
+                return await execute_task
+
+            stop_wait = asyncio.create_task(stop_event.wait())
+            try:
+                completed, _ = await asyncio.wait(
+                    {execute_task, stop_wait},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if execute_task in completed:
+                    return execute_task.result()
+                execute_task.cancel()
+                await asyncio.gather(execute_task, return_exceptions=True)
+                return json.dumps({
+                    "success": False,
+                    "error": "CANCELLED",
+                    "message": "操作已停止",
+                }, ensure_ascii=False)
+            finally:
+                stop_wait.cancel()
+                await asyncio.gather(stop_wait, return_exceptions=True)
+
         try:
             while loops < max_steps:
                 # 检查停止信号
@@ -267,6 +303,9 @@ class ReActAgent:
                     break
 
                 for tc in valid_tool_calls:
+                    if stop_event and stop_event.is_set():
+                        generation_stopped = True
+                        break
                     func = tc.get("function", {})
                     tool_name = func.get("name", "")
                     try:
@@ -304,11 +343,7 @@ class ReActAgent:
                         if result is not None:
                             result = self._mark_result_reused(result)
                         else:
-                            result = await self.tool_registry.execute(
-                                tool_name,
-                                tool_args,
-                                context=tool_context,
-                            )
+                            result = await execute_tool(tool_name, tool_args)
 
                     # 检查是否为 confirm
                     try:
@@ -317,10 +352,9 @@ class ReActAgent:
                             yield {"type": "confirm", "data": result_data}
                             confirmed = await confirm_callback(result_data)
                             if confirmed:
-                                result = await self.tool_registry.execute(
+                                result = await execute_tool(
                                     tool_name,
                                     tool_args,
-                                    context=tool_context,
                                     confirmed=True,
                                 )
                                 result_data = json.loads(result)
@@ -351,6 +385,14 @@ class ReActAgent:
                     # MiMo 百万上下文，不截断 tool result
                     result_for_msg = result if isinstance(result, str) else str(result)
                     messages.append({"role": "tool", "tool_call_id": tc.get("id", ""), "content": result_for_msg})
+
+                    if stop_event and stop_event.is_set():
+                        generation_stopped = True
+                        break
+
+                if generation_stopped:
+                    yield {"type": "segment", "segment": {"type": "text", "content": "\n\n[已停止]"}}
+                    break
 
         except Exception as e:
             yield {"type": "error", "message": str(e)}

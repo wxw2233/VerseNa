@@ -252,6 +252,72 @@ async def test_identical_tool_call_reuses_result_without_second_execution(tmp_pa
     assert len(tool_results) == 2
 
 
+@pytest.mark.asyncio
+async def test_stop_cancels_active_tool_and_skips_remaining_calls():
+    tool_calls = [
+        {
+            "id": f"call_{index}",
+            "type": "function",
+            "function": {"name": "blocking", "arguments": json.dumps({"index": index})},
+        }
+        for index in range(2)
+    ]
+
+    class ToolCallingAdapter(BaseModelAdapter):
+        async def chat(self, messages, tools=None, stream=True, **kwargs):
+            yield ModelResponse(tool_calls=tool_calls)
+
+        async def list_models(self):
+            return ["tool-model"]
+
+    class BlockingRegistry:
+        def __init__(self):
+            self.executions = []
+            self.cancelled = False
+
+        def create_context(self, session_id, **kwargs):
+            return object()
+
+        async def execute(self, name, arguments, **kwargs):
+            self.executions.append(arguments["index"])
+            try:
+                await asyncio.Event().wait()
+            finally:
+                self.cancelled = True
+
+    registry = BlockingRegistry()
+    stop_event = asyncio.Event()
+    stream = ReActAgent(
+        ToolCallingAdapter(),
+        MemoryManager(),
+        tool_registry=registry,
+    ).run(
+        "stop-tool-session",
+        "run tools",
+        tools=[{}],
+        stop_event=stop_event,
+    )
+
+    running = await anext(stream)
+    assert running["segment"]["type"] == "tool"
+    assert running["segment"]["status"] == "running"
+
+    async def collect_remaining():
+        return [event async for event in stream]
+
+    remaining_task = asyncio.create_task(collect_remaining())
+    await asyncio.sleep(0.05)
+    assert registry.executions == [0]
+    stop_event.set()
+    remaining = await asyncio.wait_for(remaining_task, timeout=1)
+    assert registry.executions == [0]
+    assert registry.cancelled is True
+    assert any(
+        "已停止" in event.get("segment", {}).get("content", "")
+        for event in remaining
+    )
+
+
 def test_file_reads_must_follow_next_offset_and_stop_at_eof():
     progress = {"large.txt": {"next_offset": 50000, "eof": False}}
     wrong_offset = json.loads(ReActAgent._validate_read_continuation(
