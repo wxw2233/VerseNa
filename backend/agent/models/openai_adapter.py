@@ -77,10 +77,11 @@ class OpenAIAdapter(BaseModelAdapter):
 
         # 请求 + 重试
         last_error = None
+        trust_env = True
         for attempt in range(3):
             try:
                 timeout = httpx.Timeout(connect=20, read=600, write=120, pool=20)
-                async with httpx.AsyncClient(timeout=timeout) as client:
+                async with httpx.AsyncClient(timeout=timeout, trust_env=trust_env) as client:
                     if stream:
                         async with client.stream(
                             "POST",
@@ -162,6 +163,13 @@ class OpenAIAdapter(BaseModelAdapter):
                             )
                             return
                         last_error = f"[API错误 {resp.status_code}] {resp.text[:200]}"
+            except httpx.TransportError as e:
+                last_error = f"[连接失败] {e}"
+                if trust_env:
+                    trust_env = False
+                    log_info("LLM", "环境代理连接失败，切换为直连")
+                    if attempt < 2:
+                        continue
             except Exception as e:
                 last_error = f"[连接失败] {e}"
 
@@ -217,7 +225,16 @@ class OpenAIAdapter(BaseModelAdapter):
                 tool_call["function"]["arguments"] += function["arguments"]
 
     async def list_models(self) -> list[str]:
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(f"{self.base_url}/models", headers={"Authorization": f"Bearer {self.api_key}"})
-            data = resp.json()
-            return [m["id"] for m in data.get("data", [])]
+        from api.log_api import log_info
+
+        headers = {"Authorization": f"Bearer {self.api_key}"}
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(f"{self.base_url}/models", headers=headers)
+        except httpx.TransportError as exc:
+            log_info("LLM", f"环境代理连接失败，模型列表切换为直连: {type(exc).__name__}")
+            async with httpx.AsyncClient(trust_env=False) as client:
+                resp = await client.get(f"{self.base_url}/models", headers=headers)
+        resp.raise_for_status()
+        data = resp.json()
+        return [m["id"] for m in data.get("data", [])]

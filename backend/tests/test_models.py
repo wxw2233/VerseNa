@@ -149,3 +149,128 @@ async def test_openai_reasoning_request_uses_supported_parameters(monkeypatch):
     assert "max_tokens" not in payload
     assert "temperature" not in payload
     assert "top_p" not in payload
+
+
+@pytest.mark.asyncio
+async def test_openai_adapter_falls_back_to_direct_connection(monkeypatch):
+    from agent.models import openai_adapter as adapter_module
+    from agent.models.openai_adapter import OpenAIAdapter
+
+    trust_env_values = []
+    response = FakeStreamResponse([
+        'data: {"choices":[{"delta":{"content":"connected"}}]}',
+        'data: [DONE]',
+    ])
+
+    class ProxyFailureStream:
+        async def __aenter__(self):
+            raise adapter_module.httpx.ConnectError("proxy unavailable")
+
+        async def __aexit__(self, *args):
+            return False
+
+    class NetworkClient(FakeAsyncClient):
+        def __init__(self, trust_env=True, **kwargs):
+            super().__init__(response)
+            self.trust_env = trust_env
+            trust_env_values.append(trust_env)
+
+        def stream(self, *args, **kwargs):
+            if self.trust_env:
+                return ProxyFailureStream()
+            return self.response
+
+    monkeypatch.setattr(adapter_module.httpx, "AsyncClient", NetworkClient)
+
+    adapter = OpenAIAdapter("key", "https://example.com/v1", "model")
+    chunks = [chunk async for chunk in adapter.chat([{"role": "user", "content": "hello"}])]
+
+    assert [chunk.content for chunk in chunks] == ["connected"]
+    assert trust_env_values == [True, False]
+
+
+@pytest.mark.asyncio
+async def test_openai_non_stream_falls_back_to_direct_connection(monkeypatch):
+    from agent.models import openai_adapter as adapter_module
+    from agent.models.openai_adapter import OpenAIAdapter
+
+    trust_env_values = []
+
+    class ChatResponse:
+        status_code = 200
+
+        def json(self):
+            return {
+                "choices": [{
+                    "message": {"content": "connected"},
+                    "finish_reason": "stop",
+                }],
+            }
+
+    class NetworkClient:
+        def __init__(self, trust_env=True, **kwargs):
+            self.trust_env = trust_env
+            trust_env_values.append(trust_env)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def post(self, *args, **kwargs):
+            if self.trust_env:
+                raise adapter_module.httpx.ConnectError("proxy unavailable")
+            return ChatResponse()
+
+    monkeypatch.setattr(adapter_module.httpx, "AsyncClient", NetworkClient)
+
+    adapter = OpenAIAdapter("key", "https://example.com/v1", "model")
+    chunks = [
+        chunk
+        async for chunk in adapter.chat(
+            [{"role": "user", "content": "hello"}],
+            stream=False,
+        )
+    ]
+
+    assert [chunk.content for chunk in chunks] == ["connected"]
+    assert trust_env_values == [True, False]
+
+
+@pytest.mark.asyncio
+async def test_openai_model_list_falls_back_to_direct_connection(monkeypatch):
+    from agent.models import openai_adapter as adapter_module
+    from agent.models.openai_adapter import OpenAIAdapter
+
+    trust_env_values = []
+
+    class ModelListResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"data": [{"id": "model-a"}]}
+
+    class NetworkClient:
+        def __init__(self, trust_env=True, **kwargs):
+            self.trust_env = trust_env
+            trust_env_values.append(trust_env)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def get(self, *args, **kwargs):
+            if self.trust_env:
+                raise adapter_module.httpx.ConnectError("proxy unavailable")
+            return ModelListResponse()
+
+    monkeypatch.setattr(adapter_module.httpx, "AsyncClient", NetworkClient)
+
+    adapter = OpenAIAdapter("key", "https://example.com/v1", "model")
+
+    assert await adapter.list_models() == ["model-a"]
+    assert trust_env_values == [True, False]
