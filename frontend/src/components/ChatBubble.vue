@@ -334,7 +334,8 @@ async function speakText() {
       },
     })
     if (browserUtterance) {
-      toast.warning('云端语音不可用，已切换到系统语音')
+      const reason = detail ? `：${String(detail).slice(0, 120)}` : ''
+      toast.warning(`云端语音不可用，已切换到系统语音${reason}`)
     } else {
       finishSpeech(run)
       toast.error(detail || '语音播放失败，当前设备不支持系统语音')

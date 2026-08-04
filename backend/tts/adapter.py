@@ -7,6 +7,21 @@ from db.database import db
 from api.log_api import log_info, log_error
 
 
+class TTSSynthesisError(RuntimeError):
+    def __init__(self, message: str, status_code: int = 502):
+        super().__init__(message)
+        self.status_code = status_code
+
+
+_AUDIO_MIME_TYPES = {
+    ".mp3": "audio/mpeg",
+    ".wav": "audio/wav",
+    ".m4a": "audio/mp4",
+    ".ogg": "audio/ogg",
+    ".flac": "audio/flac",
+}
+
+
 async def _post_with_network_fallback(url: str, timeout: float, **kwargs):
     """代理不可用时重试直连，避免本机代理故障让 TTS 整体失效。"""
     try:
@@ -16,6 +31,54 @@ async def _post_with_network_fallback(url: str, timeout: float, **kwargs):
         log_info("TTS", f"代理或默认网络请求失败，尝试直连: {type(exc).__name__}")
         async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
             return await client.post(url, **kwargs)
+
+
+def find_reference_audio(pack_id: str) -> tuple[Path, str]:
+    """查找主题包参考音频，兼容源码内容目录和外置数据目录。"""
+    from config import settings
+
+    pack_id = (pack_id or "").strip()
+    if not pack_id or pack_id in {".", ".."} or any(char in pack_id for char in "/\\"):
+        raise TTSSynthesisError("当前会话未绑定有效主题包，无法选择参考音频", 422)
+
+    search_dirs = [
+        settings.CONTENT_DIR / "themepacks" / pack_id / "assets",
+        settings.CONTENT_DIR / "themes" / pack_id / "assets",
+        settings.DATA_DIR / "themepacks" / pack_id / "assets",
+        settings.DATA_DIR / "themes" / pack_id / "assets",
+    ]
+    seen = set()
+    for audio_dir in search_dirs:
+        resolved = audio_dir.resolve()
+        if resolved in seen or not resolved.is_dir():
+            continue
+        seen.add(resolved)
+        files = [
+            path for path in resolved.iterdir()
+            if path.is_file() and path.suffix.lower() in _AUDIO_MIME_TYPES
+        ]
+        files.sort(key=lambda path: (not path.stem.lower().startswith("ref_audio"), path.name.lower()))
+        if files:
+            audio_path = files[0]
+            return audio_path, _AUDIO_MIME_TYPES[audio_path.suffix.lower()]
+
+    raise TTSSynthesisError(
+        f"主题包“{pack_id}”中没有参考音频，请上传 ref_audio.mp3 或 ref_audio.wav",
+        422,
+    )
+
+
+def _response_error(response) -> str:
+    try:
+        payload = response.json()
+        error = payload.get("error", payload) if isinstance(payload, dict) else payload
+        if isinstance(error, dict):
+            detail = error.get("message") or error.get("detail") or error.get("code")
+        else:
+            detail = str(error)
+    except Exception:
+        detail = response.text
+    return " ".join(str(detail or "").split())[:240]
 
 
 async def get_tts_config() -> dict | None:
@@ -146,6 +209,9 @@ async def synthesize(tts_config: dict, text: str, voice_id: str | None = None, p
     base_url = tts_config["base_url"].rstrip("/")
     provider = tts_config["provider"]
 
+    if not base_url and provider != "elevenlabs":
+        raise TTSSynthesisError("TTS 提供商未配置 Base URL", 400)
+
     # ElevenLabs 用专用 API
     if provider == "elevenlabs":
         return await _elevenlabs_tts(api_key, model, text, voice_id)
@@ -178,13 +244,14 @@ async def synthesize(tts_config: dict, text: str, voice_id: str | None = None, p
         if resp.status_code == 200:
             log_info("TTS", f"合成成功，音频大小: {len(resp.content)} bytes")
             return resp.content
-        else:
-            body = resp.text[:300]
-            log_error("TTS", f"API 返回 {resp.status_code}: {body}")
-            return None
+        detail = _response_error(resp)
+        log_error("TTS", f"API 返回 {resp.status_code}: {detail}")
+        raise TTSSynthesisError(f"TTS 服务返回 HTTP {resp.status_code}: {detail or '未知错误'}")
+    except TTSSynthesisError:
+        raise
     except Exception as e:
         log_error("TTS", f"请求异常: {e}")
-        return None
+        raise TTSSynthesisError(f"无法连接 TTS 服务: {type(e).__name__}: {e}") from e
 
 
 async def _elevenlabs_tts(api_key: str, model: str, text: str, voice_id: str | None) -> bytes | None:
@@ -206,45 +273,32 @@ async def _elevenlabs_tts(api_key: str, model: str, text: str, voice_id: str | N
         )
         if resp.status_code == 200:
             return resp.content
-        return None
-    except Exception:
-        return None
+        detail = _response_error(resp)
+        raise TTSSynthesisError(f"ElevenLabs 返回 HTTP {resp.status_code}: {detail or '未知错误'}")
+    except TTSSynthesisError:
+        raise
+    except Exception as exc:
+        raise TTSSynthesisError(f"无法连接 ElevenLabs: {type(exc).__name__}: {exc}") from exc
 
 
 async def _mimo_tts(api_key: str, base_url: str, model: str, text: str, pack_id: str) -> bytes | None:
     """MiMo TTS — 使用 chat completions 接口 + base64 参考音频"""
-    from config import settings
+    audio_path, mime_type = find_reference_audio(pack_id)
+    try:
+        audio_bytes = audio_path.read_bytes()
+    except OSError as exc:
+        raise TTSSynthesisError(f"无法读取参考音频 {audio_path.name}: {exc}", 422) from exc
+    if not audio_bytes:
+        raise TTSSynthesisError(f"参考音频 {audio_path.name} 是空文件", 422)
 
-    # 查找参考音频（多个可能的目录）
-    ref_audio_b64 = None
-    mime_type = "audio/mpeg"
-
-    search_dirs = [
-        settings.CONTENT_DIR / "themepacks" / pack_id / "assets",
-        settings.CONTENT_DIR / "themes" / pack_id / "assets",
-        settings.DATA_DIR / "themes" / pack_id / "assets",
-    ]
-
-    for audio_dir in search_dirs:
-        if not audio_dir.exists():
-            continue
-        for ext, mime in [("mp3", "audio/mpeg"), ("wav", "audio/wav"), ("m4a", "audio/mpeg")]:
-            candidates = list(audio_dir.glob(f"ref_audio.{ext}")) or list(audio_dir.glob(f"*.{ext}"))
-            if candidates:
-                with open(candidates[0], "rb") as f:
-                    ref_audio_b64 = base64.b64encode(f.read()).decode("utf-8")
-                mime_type = mime
-                break
-        if ref_audio_b64:
-            break
-
-    if not ref_audio_b64:
-        log_error("TTS/MiMo", "未找到参考音频，请在主题包素材中上传音频")
-        return None
+    ref_audio_b64 = base64.b64encode(audio_bytes).decode("ascii")
 
     voice_str = f"data:{mime_type};base64,{ref_audio_b64}"
 
-    log_info("TTS/MiMo", f"合成: model={model}, text_len={len(text)}, audio_mime={mime_type}")
+    log_info(
+        "TTS/MiMo",
+        f"合成: model={model}, text_len={len(text)}, ref={audio_path.name}, ref_size={len(audio_bytes)}, audio_mime={mime_type}",
+    )
 
     try:
         resp = await _post_with_network_fallback(
@@ -267,23 +321,29 @@ async def _mimo_tts(api_key: str, base_url: str, model: str, text: str, pack_id:
             },
         )
         if resp.status_code != 200:
-            body = resp.text[:300]
-            log_error("TTS/MiMo", f"API 返回 {resp.status_code}: {body}")
-            return None
+            detail = _response_error(resp)
+            log_error("TTS/MiMo", f"API 返回 {resp.status_code}: {detail}")
+            raise TTSSynthesisError(
+                f"MiMo TTS 返回 HTTP {resp.status_code}: {detail or '未知错误'}"
+            )
 
         data = resp.json()
         audio_data = data.get("choices", [{}])[0].get("message", {}).get("audio", {}).get("data", "")
         if not audio_data:
             log_error("TTS/MiMo", f"响应中无音频数据: {json.dumps(data, ensure_ascii=False)[:300]}")
-            return None
+            raise TTSSynthesisError("MiMo TTS 响应中没有音频数据")
 
-        audio_bytes = base64.b64decode(audio_data)
-        log_info("TTS/MiMo", f"合成成功，音频大小: {len(audio_bytes)} bytes")
-        return audio_bytes
+        result = base64.b64decode(audio_data, validate=True)
+        if not result:
+            raise TTSSynthesisError("MiMo TTS 返回了空音频")
+        log_info("TTS/MiMo", f"合成成功，音频大小: {len(result)} bytes")
+        return result
 
+    except TTSSynthesisError:
+        raise
     except Exception as e:
         log_error("TTS/MiMo", f"请求异常: {e}")
-        return None
+        raise TTSSynthesisError(f"无法连接 MiMo TTS: {type(e).__name__}: {e}") from e
 
 
 async def tts_speak(pack_id: str, text: str) -> bytes | None:

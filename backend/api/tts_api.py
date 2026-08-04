@@ -4,7 +4,14 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel
-from tts.adapter import get_tts_config, get_voice_id, save_voice_id, clone_voice, synthesize
+from tts.adapter import (
+    TTSSynthesisError,
+    clone_voice,
+    get_tts_config,
+    get_voice_id,
+    save_voice_id,
+    synthesize,
+)
 from config import settings
 
 router = APIRouter()
@@ -44,7 +51,10 @@ async def tts_speak(req: TTSRequest):
     from api.log_api import log_info
     log_info("TTS", f"合成: pack={req.pack_id}, voice={voice_id}, provider={config['provider']}, model={config['model']}, base_url={config['base_url']}")
 
-    audio = await synthesize(config, req.text, voice_id, pack_id=req.pack_id)
+    try:
+        audio = await synthesize(config, req.text, voice_id, pack_id=req.pack_id)
+    except TTSSynthesisError as exc:
+        raise HTTPException(exc.status_code, str(exc)) from exc
     if not audio:
         raise HTTPException(500, f"语音合成失败 (provider={config['provider']}, model={config['model']})，请查看监控日志")
 

@@ -174,6 +174,32 @@ def test_directory_browser_rejects_invalid_or_existing_folder(client, tmp_path):
     assert not (tmp_path.parent / "outside").exists()
 
 
+def test_tts_api_returns_actionable_synthesis_error(client, monkeypatch):
+    from tts.adapter import TTSSynthesisError
+
+    async def get_config():
+        return {
+            "provider": "custom_mimo",
+            "model": "mimo-v2.5-tts-voiceclone",
+            "api_key": "test-key",
+            "base_url": "https://mimo.example/v1",
+        }
+
+    async def synthesize_error(*args, **kwargs):
+        raise TTSSynthesisError("无法连接 MiMo TTS: ConnectError", 502)
+
+    monkeypatch.setattr("api.tts_api.get_tts_config", get_config)
+    monkeypatch.setattr("api.tts_api.synthesize", synthesize_error)
+
+    response = client.post(
+        "/api/tts/speak",
+        json={"text": "hello", "pack_id": "character"},
+    )
+
+    assert response.status_code == 502
+    assert response.json()["detail"] == "无法连接 MiMo TTS: ConnectError"
+
+
 def test_cors_allows_local_frontend_only(client):
     allowed = client.options(
         "/health",

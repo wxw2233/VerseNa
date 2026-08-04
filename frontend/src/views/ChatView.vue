@@ -689,7 +689,8 @@ async function autoSpeakLast() {
       },
     })
     if (autoBrowserUtterance) {
-      toast.warning(message)
+      const reason = detail ? `：${String(detail).slice(0, 120)}` : ''
+      toast.warning(`${message}${reason}`)
     } else {
       toast.warning(detail || '语音播放失败，当前设备不支持系统语音')
     }
