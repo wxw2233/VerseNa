@@ -1,7 +1,10 @@
 import json
 import httpx
 from typing import AsyncGenerator
+from urllib.parse import urlparse
 from .base import BaseModelAdapter, ModelResponse
+
+_DIRECT_BASE_URLS: set[str] = set()
 
 class OpenAIAdapter(BaseModelAdapter):
     def __init__(
@@ -62,6 +65,10 @@ class OpenAIAdapter(BaseModelAdapter):
             payload[token_key] = max_tokens
         if openai_reasoning:
             payload["reasoning_effort"] = self._normalize_reasoning_effort(reasoning_effort)
+        if self._uses_mimo_thinking_control():
+            payload["thinking"] = {
+                "type": "enabled" if reasoning_enabled else "disabled",
+            }
 
         from api.log_api import log_info
         try:
@@ -77,7 +84,7 @@ class OpenAIAdapter(BaseModelAdapter):
 
         # 请求 + 重试
         last_error = None
-        trust_env = True
+        trust_env = not self._prefers_direct_connection()
         for attempt in range(3):
             try:
                 timeout = httpx.Timeout(connect=20, read=600, write=120, pool=20)
@@ -167,6 +174,7 @@ class OpenAIAdapter(BaseModelAdapter):
                 last_error = f"[连接失败] {e}"
                 if trust_env:
                     trust_env = False
+                    _DIRECT_BASE_URLS.add(self.base_url)
                     log_info("LLM", "环境代理连接失败，切换为直连")
                     if attempt < 2:
                         continue
@@ -185,6 +193,14 @@ class OpenAIAdapter(BaseModelAdapter):
     @staticmethod
     def _normalize_reasoning_effort(value: str) -> str:
         return value if value in {"low", "medium", "high"} else "medium"
+
+    def _uses_mimo_thinking_control(self) -> bool:
+        hostname = (urlparse(self.base_url).hostname or "").lower()
+        return self.model_name.lower().startswith("mimo-") or hostname.endswith("xiaomimimo.com")
+
+    def _prefers_direct_connection(self) -> bool:
+        hostname = (urlparse(self.base_url).hostname or "").lower()
+        return self.base_url in _DIRECT_BASE_URLS or hostname == "token-plan-cn.xiaomimimo.com"
 
     @staticmethod
     def _extract_reasoning(data: dict) -> str:
@@ -228,10 +244,14 @@ class OpenAIAdapter(BaseModelAdapter):
         from api.log_api import log_info
 
         headers = {"Authorization": f"Bearer {self.api_key}"}
+        trust_env = not self._prefers_direct_connection()
         try:
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(trust_env=trust_env) as client:
                 resp = await client.get(f"{self.base_url}/models", headers=headers)
         except httpx.TransportError as exc:
+            if not trust_env:
+                raise
+            _DIRECT_BASE_URLS.add(self.base_url)
             log_info("LLM", f"环境代理连接失败，模型列表切换为直连: {type(exc).__name__}")
             async with httpx.AsyncClient(trust_env=False) as client:
                 resp = await client.get(f"{self.base_url}/models", headers=headers)

@@ -113,6 +113,38 @@ async def test_reasoning_is_streamed_separately_and_not_saved_as_answer():
 
 
 @pytest.mark.asyncio
+async def test_reasoning_chunks_are_hidden_when_reasoning_is_disabled():
+    class UnexpectedReasoningAdapter(BaseModelAdapter):
+        model_name = "hybrid-model"
+        reasoning_available = True
+
+        async def chat(self, messages, tools=None, stream=True, reasoning_enabled=False, **kwargs):
+            assert reasoning_enabled is False
+            yield ModelResponse(reasoning_content="hidden analysis")
+            yield ModelResponse(content="answer")
+
+        async def list_models(self):
+            return [self.model_name]
+
+    events = [event async for event in ReActAgent(
+        UnexpectedReasoningAdapter(), MemoryManager()
+    ).run(
+        "reasoning-disabled-session",
+        "simple request",
+        agent_config={"reasoning_enabled": False},
+    )]
+
+    segments = [event.get("segment", {}) for event in events]
+    assert not any(segment.get("type") == "reasoning" for segment in segments)
+    assert "".join(
+        segment.get("content", "")
+        for segment in segments
+        if segment.get("type") == "text"
+    ) == "answer"
+    assert events[-1]["reasoning_enabled"] is False
+
+
+@pytest.mark.asyncio
 async def test_reasoning_is_detected_from_stream_when_capability_is_unknown():
     class DynamicReasoningAdapter(BaseModelAdapter):
         model_name = "custom-model"

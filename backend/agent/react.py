@@ -196,7 +196,7 @@ class ReActAgent:
                                 chunk = next_chunk.result()
                             except StopAsyncIteration:
                                 break
-                            if chunk.reasoning_content:
+                            if chunk.reasoning_content and reasoning_enabled:
                                 reasoning_observed = True
                                 yield {"type": "segment", "segment": {
                                     "type": "reasoning",

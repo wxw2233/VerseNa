@@ -182,11 +182,19 @@ async def test_openai_adapter_falls_back_to_direct_connection(monkeypatch):
 
     monkeypatch.setattr(adapter_module.httpx, "AsyncClient", NetworkClient)
 
-    adapter = OpenAIAdapter("key", "https://example.com/v1", "model")
+    adapter = OpenAIAdapter("key", "https://stream-fallback.example/v1", "model")
     chunks = [chunk async for chunk in adapter.chat([{"role": "user", "content": "hello"}])]
 
     assert [chunk.content for chunk in chunks] == ["connected"]
     assert trust_env_values == [True, False]
+
+    second_adapter = OpenAIAdapter("key", "https://stream-fallback.example/v1", "model")
+    second_chunks = [
+        chunk
+        async for chunk in second_adapter.chat([{"role": "user", "content": "hello again"}])
+    ]
+    assert [chunk.content for chunk in second_chunks] == ["connected"]
+    assert trust_env_values == [True, False, False]
 
 
 @pytest.mark.asyncio
@@ -225,7 +233,7 @@ async def test_openai_non_stream_falls_back_to_direct_connection(monkeypatch):
 
     monkeypatch.setattr(adapter_module.httpx, "AsyncClient", NetworkClient)
 
-    adapter = OpenAIAdapter("key", "https://example.com/v1", "model")
+    adapter = OpenAIAdapter("key", "https://nonstream-fallback.example/v1", "model")
     chunks = [
         chunk
         async for chunk in adapter.chat(
@@ -270,7 +278,41 @@ async def test_openai_model_list_falls_back_to_direct_connection(monkeypatch):
 
     monkeypatch.setattr(adapter_module.httpx, "AsyncClient", NetworkClient)
 
-    adapter = OpenAIAdapter("key", "https://example.com/v1", "model")
+    adapter = OpenAIAdapter("key", "https://models-fallback.example/v1", "model")
 
     assert await adapter.list_models() == ["model-a"]
     assert trust_env_values == [True, False]
+
+
+@pytest.mark.asyncio
+async def test_mimo_disables_thinking_and_prefers_direct_connection(monkeypatch):
+    from agent.models import openai_adapter as adapter_module
+    from agent.models.openai_adapter import OpenAIAdapter
+
+    captured = {}
+    response = FakeStreamResponse([
+        'data: {"choices":[{"delta":{"content":"fast"}}]}',
+        'data: [DONE]',
+    ])
+
+    class CapturingClient(FakeAsyncClient):
+        def __init__(self, **kwargs):
+            super().__init__(response)
+            captured["client"] = kwargs
+
+        def stream(self, *args, **kwargs):
+            captured["request"] = kwargs
+            return self.response
+
+    monkeypatch.setattr(adapter_module.httpx, "AsyncClient", CapturingClient)
+
+    adapter = OpenAIAdapter(
+        "key",
+        "https://token-plan-cn.xiaomimimo.com/v1",
+        "mimo-v2.5-pro",
+    )
+    chunks = [chunk async for chunk in adapter.chat([{"role": "user", "content": "hello"}])]
+
+    assert [chunk.content for chunk in chunks] == ["fast"]
+    assert captured["client"]["trust_env"] is False
+    assert captured["request"]["json"]["thinking"] == {"type": "disabled"}
