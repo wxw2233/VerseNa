@@ -56,8 +56,8 @@ class ReActAgent:
         reasoning_effort = cfg.get("reasoning_effort", "medium")
         if reasoning_effort not in {"low", "medium", "high"}:
             reasoning_effort = "medium"
-        reasoning_available = bool(getattr(self.model, "reasoning_available", False))
-        reasoning_enabled = reasoning_requested and reasoning_available
+        reasoning_known_available = bool(getattr(self.model, "reasoning_available", False))
+        reasoning_enabled = reasoning_requested
 
         if custom_instructions and system_prompt:
             system_prompt += f"\n\n## 自定义指令\n{custom_instructions}"
@@ -68,7 +68,7 @@ class ReActAgent:
                 "reasoning_enabled": True,
                 "reasoning_effort": reasoning_effort,
                 "reasoning_model": getattr(self.model, "model_name", ""),
-                "reasoning_available": reasoning_available,
+                "reasoning_available": reasoning_known_available,
             })
         if persist_user:
             await self.memory.add_message(
@@ -96,16 +96,16 @@ class ReActAgent:
         tool_seq = 0  # 工具调用序号
         generation_stopped = False
         reasoning_duration_ms = 0
-        tool_context = self.tool_registry.create_context(session_id, stop_event=stop_event) if self.tool_registry else None
-
-        if reasoning_requested and not reasoning_available:
-            yield {"type": "segment", "segment": {
-                "type": "reasoning",
-                "reasoning_id": "reasoning_unsupported",
-                "content": "",
-                "status": "unavailable",
-                "model": getattr(self.model, "model_name", ""),
-            }}
+        reasoning_observed = False
+        first_reasoning_id = None
+        tool_result_cache = {}
+        read_progress = {}
+        tool_context = self.tool_registry.create_context(
+            session_id,
+            workspace=cfg.get("tool_workspace"),
+            approval_mode=cfg.get("approval_mode", "ask"),
+            stop_event=stop_event,
+        ) if self.tool_registry else None
 
         try:
             while loops < max_steps:
@@ -123,6 +123,8 @@ class ReActAgent:
                 chunk_content = ""
                 tool_calls = []
                 reasoning_id = f"reasoning_{loops}"
+                if first_reasoning_id is None:
+                    first_reasoning_id = reasoning_id
                 reasoning_open = False
                 reasoning_started_at = None
 
@@ -195,6 +197,7 @@ class ReActAgent:
                             except StopAsyncIteration:
                                 break
                             if chunk.reasoning_content:
+                                reasoning_observed = True
                                 yield {"type": "segment", "segment": {
                                     "type": "reasoning",
                                     "reasoning_id": reasoning_id,
@@ -273,6 +276,12 @@ class ReActAgent:
 
                     tool_seq += 1
                     tool_call_id = f"tc_{int(time.time() * 1000):013d}_{tool_seq:03d}"
+                    tool_signature = json.dumps(
+                        [tool_name, tool_args],
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        default=str,
+                    )
 
                     # 发送工具调用开始
                     yield {"type": "segment", "segment": {
@@ -283,11 +292,23 @@ class ReActAgent:
                         "status": "running"
                     }}
 
-                    result = await self.tool_registry.execute(
+                    read_error = self._validate_read_continuation(
                         tool_name,
                         tool_args,
-                        context=tool_context,
+                        read_progress,
                     )
+                    if read_error:
+                        result = read_error
+                    else:
+                        result = tool_result_cache.get(tool_signature)
+                        if result is not None:
+                            result = self._mark_result_reused(result)
+                        else:
+                            result = await self.tool_registry.execute(
+                                tool_name,
+                                tool_args,
+                                context=tool_context,
+                            )
 
                     # 检查是否为 confirm
                     try:
@@ -308,6 +329,10 @@ class ReActAgent:
                                 result = json.dumps(result_data, ensure_ascii=False)
                     except (json.JSONDecodeError, TypeError):
                         result_data = {}
+
+                    if tool_signature not in tool_result_cache:
+                        tool_result_cache[tool_signature] = result
+                    self._update_read_progress(tool_name, tool_args, result_data, read_progress)
 
                     # 生成结果摘要
                     result_summary = self._make_summary(tool_name, result_data, result)
@@ -330,6 +355,18 @@ class ReActAgent:
         except Exception as e:
             yield {"type": "error", "message": str(e)}
 
+        reasoning_available = reasoning_known_available or reasoning_observed
+        if reasoning_requested and not reasoning_available and first_reasoning_id:
+            yield {"type": "segment", "segment": {
+                "type": "reasoning",
+                "reasoning_id": first_reasoning_id,
+                "content": "",
+                "status": "unavailable",
+                "model": getattr(self.model, "model_name", ""),
+            }}
+        if reasoning_requested:
+            message_metadata["reasoning_available"] = reasoning_available
+
         # done 事件
         await self.memory.add_message(
             session_id,
@@ -351,6 +388,65 @@ class ReActAgent:
             "reasoning_model": getattr(self.model, "model_name", "") if reasoning_requested else None,
             "reasoning_duration_ms": reasoning_duration_ms,
         }
+
+    @staticmethod
+    def _mark_result_reused(result):
+        try:
+            data = json.loads(result)
+        except (json.JSONDecodeError, TypeError):
+            return result
+        data["reused"] = True
+        data["message"] = "相同工具调用已执行过，已复用上次结果，请勿再次调用"
+        return json.dumps(data, ensure_ascii=False)
+
+    @staticmethod
+    def _validate_read_continuation(tool_name, tool_args, read_progress):
+        if tool_name != "file_manager" or tool_args.get("action") != "read":
+            return None
+        path = tool_args.get("path", "")
+        state = read_progress.get(path)
+        if not state:
+            return None
+        if state["eof"]:
+            return json.dumps({
+                "success": False,
+                "error": "EOF_REACHED",
+                "message": "此文件已读取完毕，请勿重复读取",
+                "data": {"path": path, "eof": True, "next_offset": state["next_offset"]},
+            }, ensure_ascii=False)
+        try:
+            requested_offset = int(tool_args.get("offset", 0) or 0)
+        except (TypeError, ValueError):
+            requested_offset = -1
+        if requested_offset != state["next_offset"]:
+            return json.dumps({
+                "success": False,
+                "error": "READ_CONTINUATION_REQUIRED",
+                "message": f"续读 offset 必须等于上次返回的 next_offset={state['next_offset']}",
+                "data": {
+                    "path": path,
+                    "expected_offset": state["next_offset"],
+                    "received_offset": requested_offset,
+                },
+            }, ensure_ascii=False)
+        return None
+
+    @staticmethod
+    def _update_read_progress(tool_name, tool_args, result_data, read_progress):
+        if tool_name != "file_manager":
+            return
+        action = tool_args.get("action")
+        path = tool_args.get("path", "")
+        if action != "read":
+            if action in {"write", "find_replace", "move", "delete"}:
+                read_progress.pop(path, None)
+            return
+        data = result_data.get("data") or {}
+        if result_data.get("success") and "next_offset" in data:
+            read_progress[path] = {
+                "next_offset": data["next_offset"],
+                "eof": bool(data.get("eof", not data.get("truncated", False))),
+            }
 
     def _make_summary(self, tool_name, result_data, result):
         """生成工具结果摘要"""

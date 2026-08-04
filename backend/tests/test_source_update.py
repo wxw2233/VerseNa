@@ -28,7 +28,7 @@ async def test_source_update_is_disabled_outside_git_checkout(tmp_path):
     status = await updater.status()
 
     assert status["supported"] is False
-    assert "Git checkout" in status["message"]
+    assert "Git 源码目录" in status["message"]
 
 
 @pytest.mark.asyncio
@@ -65,22 +65,24 @@ async def test_source_update_reports_upstream_commits(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_source_update_rejects_dirty_checkout(tmp_path, monkeypatch):
+async def test_source_update_rejects_ahead_checkout(tmp_path, monkeypatch):
     updater = SourceUpdater(tmp_path)
     monkeypatch.setattr(
         updater,
         "_check_sync",
         lambda: {
             "supported": True,
-            "dirty": True,
-            "ahead": 0,
+            "dirty": False,
+            "dirty_paths": [],
+            "ahead": 1,
             "behind": 1,
             "pending": False,
-            "message": "dirty",
+            "check_error": "",
+            "message": "ahead",
         },
     )
 
-    with pytest.raises(SourceUpdateError, match="tracked source changes") as raised:
+    with pytest.raises(SourceUpdateError, match="尚未推送") as raised:
         await updater.apply()
 
     assert raised.value.status_code == 409
@@ -98,6 +100,7 @@ async def test_source_update_fast_forwards_from_local_remote(tmp_path, monkeypat
     checkout.joinpath("frontend").mkdir()
     checkout.joinpath("frontend", "package-lock.json").write_text("{}\n", encoding="utf-8")
     checkout.joinpath("README.md").write_text("first\n", encoding="utf-8")
+    checkout.joinpath("LOCAL.txt").write_text("original\n", encoding="utf-8")
     run_git(checkout, "add", ".")
     run_git(checkout, "commit", "-m", "initial")
     initial_commit = run_git(checkout, "rev-parse", "HEAD")
@@ -110,6 +113,7 @@ async def test_source_update_fast_forwards_from_local_remote(tmp_path, monkeypat
     run_git(checkout, "update-ref", "refs/remotes/origin/master", upstream_commit)
     run_git(checkout, "reset", "--hard", initial_commit)
     run_git(checkout, "branch", "--set-upstream-to=origin/master", "master")
+    checkout.joinpath("LOCAL.txt").write_text("local change\n", encoding="utf-8")
 
     checkout.joinpath("frontend", "node_modules").mkdir()
     updater = SourceUpdater(checkout)
@@ -132,3 +136,71 @@ async def test_source_update_fast_forwards_from_local_remote(tmp_path, monkeypat
     assert result["behind"] == 0
     assert result["restart_required"] is True
     assert checkout.joinpath("README.md").read_text(encoding="utf-8") == "second\n"
+    assert checkout.joinpath("LOCAL.txt").read_text(encoding="utf-8") == "local change\n"
+
+
+def test_source_update_check_skips_fetch_when_remote_commit_matches(monkeypatch, tmp_path):
+    updater = SourceUpdater(tmp_path)
+    current = {
+        "supported": True,
+        "commit": "abc123",
+        "upstream": "origin/master",
+        "dirty": False,
+        "dirty_paths": [],
+        "ahead": 0,
+        "behind": 0,
+        "update_available": False,
+        "pending": False,
+        "message": "",
+    }
+    monkeypatch.setattr(updater, "_status_sync", lambda: dict(current))
+    monkeypatch.setattr(updater, "_remote_commit", lambda upstream: "abc123")
+    monkeypatch.setattr(updater, "_fetch", lambda: pytest.fail("fetch should not run"))
+
+    result = updater._check_sync()
+
+    assert result["update_available"] is False
+    assert result["remote_commit"] == "abc123"
+
+
+def test_source_update_check_returns_status_when_remote_is_unreachable(monkeypatch, tmp_path):
+    updater = SourceUpdater(tmp_path)
+    current = {
+        "supported": True,
+        "commit": "abc123",
+        "upstream": "origin/master",
+        "dirty": False,
+        "dirty_paths": [],
+        "ahead": 0,
+        "behind": 0,
+        "update_available": False,
+        "pending": False,
+        "message": "",
+    }
+    monkeypatch.setattr(updater, "_status_sync", lambda: dict(current))
+
+    def fail_remote(upstream):
+        raise SourceUpdateError("network unavailable")
+
+    monkeypatch.setattr(updater, "_remote_commit", fail_remote)
+
+    result = updater._check_sync()
+
+    assert result["update_available"] is False
+    assert "network unavailable" in result["check_error"]
+
+
+def test_source_update_fetch_does_not_write_fetch_head(monkeypatch, tmp_path):
+    updater = SourceUpdater(tmp_path)
+    calls = []
+    monkeypatch.setattr(
+        updater,
+        "_git",
+        lambda args, timeout=30: calls.append((args, timeout)) or "",
+    )
+
+    updater._fetch()
+
+    assert calls == [
+        (["fetch", "--quiet", "--prune", "--no-write-fetch-head"], 180)
+    ]

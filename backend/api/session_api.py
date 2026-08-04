@@ -2,6 +2,10 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from db.database import db
 from api.log_api import log_info, log_error
+from config import settings
+from pathlib import Path
+import os
+import string
 import uuid
 
 router = APIRouter()
@@ -38,6 +42,27 @@ class SessionUpdate(BaseModel):
     name: str = None
     theme_pack_id: str = None
 
+
+class ToolSettingsUpdate(BaseModel):
+    tool_workspace: str = None
+    approval_mode: str = None
+
+
+class DirectoryCreate(BaseModel):
+    parent: str
+    name: str
+
+
+def _directory_roots():
+    if os.name == "nt":
+        return [
+            Path(f"{letter}:\\")
+            for letter in string.ascii_uppercase
+            if Path(f"{letter}:\\").exists()
+        ]
+    roots = [Path("/"), Path.home().resolve()]
+    return list(dict.fromkeys(roots))
+
 @router.put("/api/sessions/{session_id}/rename")
 async def rename_session(session_id: str, req: SessionRename):
     """重命名会话"""
@@ -47,7 +72,13 @@ async def rename_session(session_id: str, req: SessionRename):
     )
     # 更新元数据
     meta = await db.get_session_meta(session_id)
-    await db.set_session_meta(req.name, name=req.name, theme_pack_id=meta["theme_pack_id"])
+    await db.set_session_meta(
+        req.name,
+        name=req.name,
+        theme_pack_id=meta["theme_pack_id"],
+        tool_workspace=meta["tool_workspace"],
+        approval_mode=meta["approval_mode"],
+    )
     # 删除旧元数据
     await db._db.execute("DELETE FROM session_metadata WHERE session_id = ?", (session_id,))
     await db._db.commit()
@@ -66,6 +97,99 @@ async def get_session_history(session_id: str, limit: int = 50):
     """获取指定会话的历史消息"""
     history = await db.get_history(session_id, limit)
     return history
+
+
+@router.get("/api/sessions/{session_id}/tool-settings")
+async def get_session_tool_settings(session_id: str):
+    meta = await db.get_session_meta(session_id)
+    configured = meta.get("tool_workspace", "")
+    workspace = Path(configured or settings.TOOL_WORKSPACE).expanduser().resolve()
+    return {
+        "tool_workspace": configured,
+        "effective_workspace": str(workspace),
+        "approval_mode": meta.get("approval_mode", "ask"),
+        "is_default": not bool(configured),
+    }
+
+
+@router.put("/api/sessions/{session_id}/tool-settings")
+async def update_session_tool_settings(session_id: str, req: ToolSettingsUpdate):
+    updates = {}
+    if req.tool_workspace is not None:
+        raw_path = req.tool_workspace.strip()
+        if raw_path:
+            workspace = Path(raw_path).expanduser().resolve()
+            if not workspace.exists():
+                raise HTTPException(400, "工作目录不存在")
+            if not workspace.is_dir():
+                raise HTTPException(400, "工作目录必须是文件夹")
+            updates["tool_workspace"] = str(workspace)
+        else:
+            updates["tool_workspace"] = ""
+    if req.approval_mode is not None:
+        if req.approval_mode not in {"ask", "auto"}:
+            raise HTTPException(400, "审批模式必须是 ask 或 auto")
+        updates["approval_mode"] = req.approval_mode
+    await db.set_session_meta(session_id, **updates)
+    return await get_session_tool_settings(session_id)
+
+
+@router.get("/api/tools/directories")
+async def browse_tool_directories(path: str = ""):
+    current = Path(path).expanduser().resolve() if path else Path.home().resolve()
+    if not current.exists():
+        raise HTTPException(404, "目录不存在")
+    if not current.is_dir():
+        raise HTTPException(400, "路径必须是文件夹")
+    try:
+        directories = sorted(
+            (entry for entry in current.iterdir() if entry.is_dir()),
+            key=lambda entry: entry.name.lower(),
+        )
+    except PermissionError:
+        raise HTTPException(403, "没有权限浏览此目录")
+    except OSError as exc:
+        raise HTTPException(400, f"无法浏览目录: {exc}")
+
+    parent = current.parent if current.parent != current else None
+    return {
+        "current": str(current),
+        "parent": str(parent) if parent else None,
+        "directories": [
+            {"name": entry.name, "path": str(entry)}
+            for entry in directories[:500]
+        ],
+        "truncated": len(directories) > 500,
+        "roots": [
+            {"name": str(root), "path": str(root)}
+            for root in _directory_roots()
+        ],
+    }
+
+
+@router.post("/api/tools/directories", status_code=201)
+async def create_tool_directory(req: DirectoryCreate):
+    parent = Path(req.parent).expanduser().resolve()
+    name = req.name.strip()
+
+    if not parent.exists():
+        raise HTTPException(404, "父目录不存在")
+    if not parent.is_dir():
+        raise HTTPException(400, "父路径必须是文件夹")
+    if not name or name in {".", ".."} or any(char in name for char in '/\\'):
+        raise HTTPException(400, "文件夹名称无效")
+
+    directory = parent / name
+    try:
+        directory.mkdir()
+    except FileExistsError:
+        raise HTTPException(409, "同名文件或文件夹已存在")
+    except PermissionError:
+        raise HTTPException(403, "没有权限在此目录中新建文件夹")
+    except OSError as exc:
+        raise HTTPException(400, f"无法新建文件夹: {exc}")
+
+    return {"name": directory.name, "path": str(directory.resolve())}
 
 @router.delete("/api/sessions/{session_id}")
 async def delete_session(session_id: str):

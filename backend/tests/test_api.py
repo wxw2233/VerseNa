@@ -107,6 +107,73 @@ def test_tool_workspace_api(client, tmp_path, monkeypatch):
     assert (tmp_path / "workspace").is_dir()
 
 
+def test_session_tool_settings_are_validated_and_persisted(client, tmp_path):
+    session_id = "tool-settings-test"
+    workspace = tmp_path / "project"
+    workspace.mkdir()
+
+    saved = client.put(
+        f"/api/sessions/{session_id}/tool-settings",
+        json={"tool_workspace": str(workspace), "approval_mode": "auto"},
+    )
+    loaded = client.get(f"/api/sessions/{session_id}/tool-settings")
+    invalid = client.put(
+        f"/api/sessions/{session_id}/tool-settings",
+        json={"tool_workspace": str(tmp_path / "missing")},
+    )
+
+    assert saved.status_code == 200
+    assert loaded.json()["effective_workspace"] == str(workspace.resolve())
+    assert loaded.json()["approval_mode"] == "auto"
+    assert invalid.status_code == 400
+
+
+def test_directory_browser_lists_folders_only(client, tmp_path):
+    child = tmp_path / "child"
+    child.mkdir()
+    (tmp_path / "note.txt").write_text("not a directory", encoding="utf-8")
+
+    response = client.get("/api/tools/directories", params={"path": str(tmp_path)})
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["current"] == str(tmp_path.resolve())
+    assert data["parent"] == str(tmp_path.resolve().parent)
+    assert data["directories"] == [{"name": "child", "path": str(child.resolve())}]
+
+
+def test_directory_browser_creates_folder(client, tmp_path):
+    response = client.post(
+        "/api/tools/directories",
+        json={"parent": str(tmp_path), "name": "new-folder"},
+    )
+
+    assert response.status_code == 201
+    assert response.json() == {
+        "name": "new-folder",
+        "path": str((tmp_path / "new-folder").resolve()),
+    }
+    assert (tmp_path / "new-folder").is_dir()
+
+
+def test_directory_browser_rejects_invalid_or_existing_folder(client, tmp_path):
+    existing = tmp_path / "existing"
+    existing.mkdir()
+
+    invalid = client.post(
+        "/api/tools/directories",
+        json={"parent": str(tmp_path), "name": "../outside"},
+    )
+    duplicate = client.post(
+        "/api/tools/directories",
+        json={"parent": str(tmp_path), "name": "existing"},
+    )
+
+    assert invalid.status_code == 400
+    assert duplicate.status_code == 409
+    assert not (tmp_path.parent / "outside").exists()
+
+
 def test_cors_allows_local_frontend_only(client):
     allowed = client.options(
         "/health",

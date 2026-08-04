@@ -71,6 +71,8 @@ async def test_file_manager_confirmed_write_and_read(registry, tool_context):
 
     assert written["success"] is True
     assert read["data"]["content"] == "hello"
+    assert read["data"]["eof"] is True
+    assert read["data"]["remaining_bytes"] == 0
 
 
 @pytest.mark.asyncio
@@ -128,6 +130,29 @@ async def test_code_exec_requires_confirmation_and_runs_python(registry, tool_co
 
 
 @pytest.mark.asyncio
+async def test_auto_approval_applies_to_file_changes_and_code_execution(registry, tmp_path):
+    context = ToolContext(
+        "auto-session",
+        tmp_path,
+        approval_mode="auto",
+    )
+    written = json.loads(await registry.execute(
+        "file_manager",
+        {"action": "write", "path": "auto.txt", "content": "ok"},
+        context=context,
+    ))
+    executed = json.loads(await registry.execute(
+        "code_exec",
+        {"language": "python", "code": "print('auto')"},
+        context=context,
+    ))
+
+    assert written["success"] is True
+    assert executed["success"] is True
+    assert executed["data"]["output"] == "auto"
+
+
+@pytest.mark.asyncio
 async def test_code_exec_timeout_terminates_process(registry, tool_context):
     result = json.loads(await registry.execute(
         "code_exec",
@@ -172,6 +197,8 @@ async def test_code_exec_caps_captured_output(registry, tool_context):
 
     assert result["success"] is True
     assert result["data"]["truncated"] is True
+    assert "输出已截断" in result["data"]["output"]
+    assert result["data"]["output"].endswith("x" * 100)
     assert len(result["data"]["output"].encode("utf-8")) <= 12000
 
 

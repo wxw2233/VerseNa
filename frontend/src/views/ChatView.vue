@@ -12,6 +12,16 @@
 
     <SessionList ref="sessionListRef" :class="{ 'mobile-open': mobileSidebarOpen }" />
     <div class="chat-main">
+      <button
+        class="workspace-toggle"
+        :class="{ active: workspacePanelOpen }"
+        @click="workspacePanelOpen = !workspacePanelOpen"
+        title="工作目录"
+        :aria-label="workspacePanelOpen ? '关闭工作目录' : '打开工作目录'"
+        :aria-expanded="workspacePanelOpen"
+      >
+        <FolderCog :size="18" aria-hidden="true" />
+      </button>
       <div
         class="messages"
         ref="messagesRef"
@@ -84,9 +94,22 @@
         :is-streaming="store.isStreaming"
         :is-stopping="store.isStopping"
         :connected="connected"
+        :approval-mode="toolSettings.approval_mode"
+        @update:approval-mode="updateApprovalMode"
         @toggle-tts="autoTTS = !autoTTS; localStorage.setItem('auto-tts', autoTTS)"
       />
     </div>
+
+    <Transition name="workspace-panel">
+      <ToolWorkspacePanel
+        v-if="workspacePanelOpen"
+        :settings="toolSettings"
+        :saving="toolSettingsSaving"
+        @close="workspacePanelOpen = false"
+        @save-workspace="saveToolWorkspace"
+        @reset-workspace="saveToolWorkspace('')"
+      />
+    </Transition>
 
     <!-- Confirm Dialog -->
     <div v-if="confirmDialog.visible" class="confirm-overlay" @click.self="onConfirm(false)">
@@ -116,8 +139,8 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, nextTick, onMounted, watch } from 'vue'
-import { ArrowDown, LoaderCircle, PanelLeftClose, PanelLeftOpen, RefreshCcw, TriangleAlert, WifiOff } from 'lucide-vue-next'
+import { ref, reactive, computed, nextTick, onBeforeUnmount, onMounted, watch } from 'vue'
+import { ArrowDown, FolderCog, LoaderCircle, PanelLeftClose, PanelLeftOpen, RefreshCcw, TriangleAlert, WifiOff } from 'lucide-vue-next'
 import { useToast } from '../composables/useToast'
 import { useKeyboard } from '../composables/useKeyboard'
 import { useChatStore } from '../stores/chat'
@@ -125,11 +148,13 @@ import { useWebSocket } from '../composables/useWebSocket'
 import { usePersonaStore } from '../stores/persona'
 import { useSessionStore } from '../stores/session'
 import { useThemeStore } from '../stores/theme'
+import { cancelBrowserSpeech, speakWithBrowser } from '../utils/browserSpeech'
 import { prepareTextForSpeech } from '../utils/ttsText'
 import ChatBubble from '../components/ChatBubble.vue'
 import ChatInput from '../components/ChatInput.vue'
 import SessionList from '../components/SessionList.vue'
 import EmptyState from '../components/EmptyState.vue'
+import ToolWorkspacePanel from '../components/ToolWorkspacePanel.vue'
 
 const store = useChatStore()
 const personaStore = usePersonaStore()
@@ -142,6 +167,14 @@ const currentResponseUnread = ref(false)
 const isAutoScrolling = ref(false)
 let autoScrollTimer = null
 const toast = useToast()
+const workspacePanelOpen = ref(false)
+const toolSettingsSaving = ref(false)
+const toolSettings = reactive({
+  tool_workspace: '',
+  effective_workspace: '',
+  approval_mode: 'ask',
+  is_default: true,
+})
 const {
   connected,
   status: connectionStatus,
@@ -217,6 +250,9 @@ const confirmDialog = reactive({
 // 自动 TTS 开关
 const autoTTS = ref(localStorage.getItem('auto-tts') === 'true')
 let ttsAudio = null
+let ttsAudioUrl = ''
+let autoBrowserUtterance = null
+let autoSpeechRun = 0
 
 
 
@@ -284,7 +320,64 @@ watch(() => sessionStore.currentSessionId, () => {
   isAtBottom.value = true
   resetUnreadState()
   nextTick(() => scrollToBottom())
-})
+  loadToolSettings()
+}, { immediate: true })
+
+async function loadToolSettings() {
+  const sessionId = sessionStore.currentSessionId
+  try {
+    const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/tool-settings`)
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+    const data = await response.json()
+    if (sessionStore.currentSessionId === sessionId) Object.assign(toolSettings, data)
+  } catch {
+    Object.assign(toolSettings, {
+      tool_workspace: '',
+      effective_workspace: '',
+      approval_mode: 'ask',
+      is_default: true,
+    })
+    toast.warning('工作目录设置加载失败')
+  }
+}
+
+async function updateToolSettings(updates) {
+  const sessionId = sessionStore.currentSessionId
+  const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/tool-settings`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(updates),
+  })
+  const data = await response.json().catch(() => ({}))
+  if (!response.ok) throw new Error(data.detail || `保存失败: HTTP ${response.status}`)
+  if (sessionStore.currentSessionId === sessionId) Object.assign(toolSettings, data)
+  return data
+}
+
+async function updateApprovalMode(mode) {
+  const previous = toolSettings.approval_mode
+  toolSettings.approval_mode = mode
+  try {
+    await updateToolSettings({ approval_mode: mode })
+    toast.info(mode === 'auto' ? '已切换为自动审批' : '已切换为请求批准')
+  } catch (error) {
+    toolSettings.approval_mode = previous
+    toast.error(error.message || '审批模式保存失败')
+  }
+}
+
+async function saveToolWorkspace(path) {
+  if (toolSettingsSaving.value) return
+  toolSettingsSaving.value = true
+  try {
+    await updateToolSettings({ tool_workspace: path })
+    toast.info(path ? '工作目录已切换' : '已恢复默认工作目录')
+  } catch (error) {
+    toast.error(error.message || '工作目录保存失败')
+  } finally {
+    toolSettingsSaving.value = false
+  }
+}
 
 watch(connectionStatus, (nextStatus, previousStatus) => {
   if (previousStatus !== 'connected' || nextStatus === 'connected' || !store.isStreaming) return
@@ -576,6 +669,32 @@ async function autoSpeakLast() {
   text = prepareTextForSpeech(text)
   if (!text || text.length < 2) return
 
+  const run = ++autoSpeechRun
+  let fallbackStarted = false
+  releaseAutoAudio()
+  cancelBrowserSpeech()
+  autoBrowserUtterance = null
+
+  const fallbackToBrowser = (message, detail = '') => {
+    if (run !== autoSpeechRun || fallbackStarted) return
+    fallbackStarted = true
+    releaseAutoAudio()
+    autoBrowserUtterance = speakWithBrowser(text, {
+      onEnd: () => {
+        if (run === autoSpeechRun) autoBrowserUtterance = null
+      },
+      onError: () => {
+        if (run === autoSpeechRun) autoBrowserUtterance = null
+        toast.warning('系统语音播放失败')
+      },
+    })
+    if (autoBrowserUtterance) {
+      toast.warning(message)
+    } else {
+      toast.warning(detail || '语音播放失败，当前设备不支持系统语音')
+    }
+  }
+
   try {
     const session = sessionStore.sessions.find(s => s.id === sessionStore.currentSessionId)
     // 优先用会话关联的主题包，否则用当前主题
@@ -587,31 +706,52 @@ async function autoSpeakLast() {
     })
     if (!resp.ok) {
       const err = await resp.json().catch(() => ({}))
-      toast.warning(err.detail || '语音合成失败，请检查 TTS 配置')
+      fallbackToBrowser('云端语音不可用，已切换到系统语音', err.detail)
       return
     }
     const blob = await resp.blob()
     if (blob.size === 0) {
-      toast.warning('TTS 返回空音频')
+      fallbackToBrowser('云端语音不可用，已切换到系统语音', 'TTS 返回空音频')
       return
     }
-    const url = URL.createObjectURL(blob)
-    if (ttsAudio) { ttsAudio.pause(); ttsAudio = null }
-    ttsAudio = new Audio(url)
-    ttsAudio.onended = () => { URL.revokeObjectURL(url) }
-    ttsAudio.onerror = (e) => {
-      URL.revokeObjectURL(url)
-      toast.warning('音频播放失败')
+    if (run !== autoSpeechRun) return
+    ttsAudioUrl = URL.createObjectURL(blob)
+    ttsAudio = new Audio(ttsAudioUrl)
+    ttsAudio.onended = () => {
+      releaseAutoAudio()
+    }
+    ttsAudio.onerror = () => {
+      fallbackToBrowser('云端音频无法播放，已切换到系统语音', '音频播放失败')
     }
     try {
       await ttsAudio.play()
     } catch (e) {
-      toast.warning('浏览器阻止了自动播放，请先点击页面任意位置后再试')
+      fallbackToBrowser('自动音频播放受限，已切换到系统语音', e.message)
     }
   } catch (e) {
-    toast.error('TTS 请求失败: ' + e.message)
+    fallbackToBrowser('云端语音不可用，已切换到系统语音', e.message)
   }
 }
+
+function releaseAutoAudio() {
+  if (ttsAudio) {
+    ttsAudio.pause()
+    ttsAudio.onended = null
+    ttsAudio.onerror = null
+    ttsAudio = null
+  }
+  if (ttsAudioUrl) {
+    URL.revokeObjectURL(ttsAudioUrl)
+    ttsAudioUrl = ''
+  }
+}
+
+onBeforeUnmount(() => {
+  autoSpeechRun += 1
+  releaseAutoAudio()
+  if (autoBrowserUtterance) cancelBrowserSpeech()
+  autoBrowserUtterance = null
+})
 
 let autoTitleDone = false
 async function autoTitleIfNeeded() {
@@ -696,6 +836,41 @@ setTimeout(loadToolExpanded, 100)
   position: relative;
   overflow: hidden;
   /* transparent */
+}
+.workspace-toggle {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  z-index: 30;
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  color: var(--text-secondary);
+  background: var(--surface-control);
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 8px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.2);
+  cursor: pointer;
+  backdrop-filter: blur(12px);
+}
+.workspace-toggle:hover,
+.workspace-toggle.active {
+  color: var(--text-primary);
+  border-color: color-mix(in srgb, var(--primary) 65%, transparent);
+  background: color-mix(in srgb, var(--surface-control) 88%, var(--primary));
+}
+.workspace-panel-enter-active,
+.workspace-panel-leave-active {
+  transition: width var(--motion-base) var(--ease-emphasized), opacity var(--motion-fast) var(--ease-standard), transform var(--motion-base) var(--ease-emphasized);
+}
+.workspace-panel-enter-from,
+.workspace-panel-leave-to {
+  width: 0;
+  opacity: 0;
+  transform: translateX(20px);
 }
 .messages {
   flex: 1;

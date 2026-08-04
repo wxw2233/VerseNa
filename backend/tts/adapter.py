@@ -7,6 +7,17 @@ from db.database import db
 from api.log_api import log_info, log_error
 
 
+async def _post_with_network_fallback(url: str, timeout: float, **kwargs):
+    """代理不可用时重试直连，避免本机代理故障让 TTS 整体失效。"""
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            return await client.post(url, **kwargs)
+    except httpx.TransportError as exc:
+        log_info("TTS", f"代理或默认网络请求失败，尝试直连: {type(exc).__name__}")
+        async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
+            return await client.post(url, **kwargs)
+
+
 async def get_tts_config() -> dict | None:
     """从 active_models 读取 TTS 配置"""
     try:
@@ -150,27 +161,27 @@ async def synthesize(tts_config: dict, text: str, voice_id: str | None = None, p
     log_info("TTS", f"合成请求: provider={provider}, model={model}, base_url={base_url}, endpoint={tts_endpoint}, voice={voice}, text_len={len(text)}")
 
     try:
-        async with httpx.AsyncClient(timeout=60) as client:
-            resp = await client.post(
-                f"{base_url}{tts_endpoint}",
-                headers={
-                    "Authorization": f"Bearer {api_key[:8]}...",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": model,
-                    "input": text,
-                    "voice": voice,
-                    "response_format": "mp3",
-                },
-            )
-            if resp.status_code == 200:
-                log_info("TTS", f"合成成功，音频大小: {len(resp.content)} bytes")
-                return resp.content
-            else:
-                body = resp.text[:300]
-                log_error("TTS", f"API 返回 {resp.status_code}: {body}")
-                return None
+        resp = await _post_with_network_fallback(
+            f"{base_url}{tts_endpoint}",
+            timeout=60,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": model,
+                "input": text,
+                "voice": voice,
+                "response_format": "mp3",
+            },
+        )
+        if resp.status_code == 200:
+            log_info("TTS", f"合成成功，音频大小: {len(resp.content)} bytes")
+            return resp.content
+        else:
+            body = resp.text[:300]
+            log_error("TTS", f"API 返回 {resp.status_code}: {body}")
+            return None
     except Exception as e:
         log_error("TTS", f"请求异常: {e}")
         return None
@@ -180,22 +191,22 @@ async def _elevenlabs_tts(api_key: str, model: str, text: str, voice_id: str | N
     """ElevenLabs 专用 TTS"""
     vid = voice_id or "21m00Tcm4TlvDq8ikWAM"
     try:
-        async with httpx.AsyncClient(timeout=60) as client:
-            resp = await client.post(
-                f"https://api.elevenlabs.io/v1/text-to-speech/{vid}",
-                headers={
-                    "xi-api-key": api_key,
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "text": text,
-                    "model_id": model or "eleven_multilingual_v2",
-                    "voice_settings": {"stability": 0.5, "similarity_boost": 0.75},
-                },
-            )
-            if resp.status_code == 200:
-                return resp.content
-            return None
+        resp = await _post_with_network_fallback(
+            f"https://api.elevenlabs.io/v1/text-to-speech/{vid}",
+            timeout=60,
+            headers={
+                "xi-api-key": api_key,
+                "Content-Type": "application/json",
+            },
+            json={
+                "text": text,
+                "model_id": model or "eleven_multilingual_v2",
+                "voice_settings": {"stability": 0.5, "similarity_boost": 0.75},
+            },
+        )
+        if resp.status_code == 200:
+            return resp.content
+        return None
     except Exception:
         return None
 
@@ -236,39 +247,39 @@ async def _mimo_tts(api_key: str, base_url: str, model: str, text: str, pack_id:
     log_info("TTS/MiMo", f"合成: model={model}, text_len={len(text)}, audio_mime={mime_type}")
 
     try:
-        async with httpx.AsyncClient(timeout=120) as client:
-            resp = await client.post(
-                f"{base_url}/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
+        resp = await _post_with_network_fallback(
+            f"{base_url}/chat/completions",
+            timeout=120,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": model,
+                "messages": [
+                    {"role": "user", "content": ""},
+                    {"role": "assistant", "content": text},
+                ],
+                "audio": {
+                    "format": "wav",
+                    "voice": voice_str,
                 },
-                json={
-                    "model": model,
-                    "messages": [
-                        {"role": "user", "content": ""},
-                        {"role": "assistant", "content": text},
-                    ],
-                    "audio": {
-                        "format": "wav",
-                        "voice": voice_str,
-                    },
-                },
-            )
-            if resp.status_code != 200:
-                body = resp.text[:300]
-                log_error("TTS/MiMo", f"API 返回 {resp.status_code}: {body}")
-                return None
+            },
+        )
+        if resp.status_code != 200:
+            body = resp.text[:300]
+            log_error("TTS/MiMo", f"API 返回 {resp.status_code}: {body}")
+            return None
 
-            data = resp.json()
-            audio_data = data.get("choices", [{}])[0].get("message", {}).get("audio", {}).get("data", "")
-            if not audio_data:
-                log_error("TTS/MiMo", f"响应中无音频数据: {json.dumps(data, ensure_ascii=False)[:300]}")
-                return None
+        data = resp.json()
+        audio_data = data.get("choices", [{}])[0].get("message", {}).get("audio", {}).get("data", "")
+        if not audio_data:
+            log_error("TTS/MiMo", f"响应中无音频数据: {json.dumps(data, ensure_ascii=False)[:300]}")
+            return None
 
-            audio_bytes = base64.b64decode(audio_data)
-            log_info("TTS/MiMo", f"合成成功，音频大小: {len(audio_bytes)} bytes")
-            return audio_bytes
+        audio_bytes = base64.b64decode(audio_data)
+        log_info("TTS/MiMo", f"合成成功，音频大小: {len(audio_bytes)} bytes")
+        return audio_bytes
 
     except Exception as e:
         log_error("TTS/MiMo", f"请求异常: {e}")

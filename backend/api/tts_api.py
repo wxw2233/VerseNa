@@ -15,6 +15,18 @@ class TTSRequest(BaseModel):
     pack_id: str = ""  # 主题包 ID，用于查找参考音频和 voice_id
 
 
+def _audio_media_type(audio: bytes) -> str:
+    if audio.startswith(b"RIFF") and audio[8:12] == b"WAVE":
+        return "audio/wav"
+    if audio.startswith(b"OggS"):
+        return "audio/ogg"
+    if audio.startswith(b"fLaC"):
+        return "audio/flac"
+    if len(audio) >= 12 and audio[4:8] == b"ftyp":
+        return "audio/mp4"
+    return "audio/mpeg"
+
+
 @router.post("/api/tts/speak")
 async def tts_speak(req: TTSRequest):
     """文字转语音"""
@@ -36,7 +48,7 @@ async def tts_speak(req: TTSRequest):
     if not audio:
         raise HTTPException(500, f"语音合成失败 (provider={config['provider']}, model={config['model']})，请查看监控日志")
 
-    return Response(content=audio, media_type="audio/mpeg")
+    return Response(content=audio, media_type=_audio_media_type(audio))
 
 
 @router.post("/api/tts/clone")

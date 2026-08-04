@@ -20,18 +20,6 @@
       <div v-if="tools.length === 0" class="empty-hint">加载中...</div>
     </div>
 
-    <hr class="divider" />
-    <h3>信任模式</h3>
-    <div class="trust-mode-row">
-      <div class="trust-info">
-        <div class="trust-label">🔒 信任模式</div>
-        <div class="trust-desc">开启后，工具工作区内的文件变更无需确认；代码执行仍需逐次确认。</div>
-      </div>
-      <label class="toggle-switch">
-        <input type="checkbox" v-model="trustMode" @change="saveTrustMode" />
-        <span class="toggle-slider"></span>
-      </label>
-    </div>
   </div>
 </template>
 
@@ -39,7 +27,6 @@
 import { ref, onMounted } from 'vue'
 
 const tools = ref([])
-const trustMode = ref(false)
 const workspace = ref('')
 
 const toolIcons = {
@@ -59,14 +46,6 @@ async function loadTools() {
   } catch { tools.value = [] }
 }
 
-async function loadTrustMode() {
-  try {
-    const resp = await fetch('/api/config/trust_mode')
-    const data = await resp.json()
-    trustMode.value = data.enabled === true || data.enabled === 'true'
-  } catch { trustMode.value = false }
-}
-
 async function loadWorkspace() {
   try {
     const resp = await fetch('/api/tools/workspace')
@@ -75,19 +54,8 @@ async function loadWorkspace() {
   } catch { workspace.value = '' }
 }
 
-async function saveTrustMode() {
-  try {
-    await fetch('/api/config/trust_mode', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ enabled: trustMode.value })
-    })
-  } catch {}
-}
-
 onMounted(() => {
   loadTools()
-  loadTrustMode()
   loadWorkspace()
 })
 </script>
@@ -176,53 +144,4 @@ onMounted(() => {
   font-size: 14px;
 }
 
-.divider {
-  border: none;
-  box-shadow: 0 -1px 0 rgba(255, 255, 255, 0.04);
-  margin: 24px 0;
-  height: 1px;
-}
-
-.trust-mode-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 14px 18px;
-  background: rgba(20, 20, 40, 0.45);
-  border-radius: 10px;
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08);
-}
-.trust-label { font-size: 14px; font-weight: 600; color: var(--text-primary); }
-.trust-desc { font-size: 12px; color: var(--text-secondary); margin-top: 4px; }
-.toggle-switch {
-  position: relative;
-  width: 44px;
-  height: 24px;
-  flex-shrink: 0;
-}
-.toggle-switch input { opacity: 0; width: 0; height: 0; }
-.toggle-slider {
-  position: absolute;
-  cursor: pointer;
-  top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(255,255,255,0.12);
-  border-radius: 12px;
-  transition: 0.2s;
-}
-.toggle-slider::before {
-  content: '';
-  position: absolute;
-  height: 18px; width: 18px;
-  left: 3px; bottom: 3px;
-  background: white;
-  border-radius: 50%;
-  transition: 0.2s;
-}
-.toggle-switch input:checked + .toggle-slider { background: var(--primary); }
-.toggle-switch input:checked + .toggle-slider::before { transform: translateX(20px); }
-
-h3 {
-  font-size: 16px;
-  margin-bottom: 12px;
-}
 </style>

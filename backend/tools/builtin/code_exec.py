@@ -15,6 +15,8 @@ from tools.results import tool_confirm, tool_error, tool_result
 
 
 MAX_OUTPUT_BYTES = 12_000
+OUTPUT_HEAD_BYTES = 5_500
+OUTPUT_TAIL_BYTES = 5_500
 MAX_TIMEOUT_SECONDS = 120
 SENSITIVE_ENV_PARTS = ("KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL")
 
@@ -64,6 +66,7 @@ def _run_process(command: list[str], cwd: Path, timeout: int, stop_event=None) -
         start_new_session=os.name != "nt",
     )
     captured = bytearray()
+    tail = bytearray()
     output_size = 0
 
     def drain_output():
@@ -75,6 +78,9 @@ def _run_process(command: list[str], cwd: Path, timeout: int, stop_event=None) -
             output_size += len(chunk)
             if len(captured) < MAX_OUTPUT_BYTES:
                 captured.extend(chunk[:MAX_OUTPUT_BYTES - len(captured)])
+            tail.extend(chunk)
+            if len(tail) > OUTPUT_TAIL_BYTES:
+                del tail[:-OUTPUT_TAIL_BYTES]
 
     reader = threading.Thread(target=drain_output, daemon=True)
     reader.start()
@@ -96,12 +102,21 @@ def _run_process(command: list[str], cwd: Path, timeout: int, stop_event=None) -
         process.stdout.close()
         reader.join(timeout=1)
 
-    output = bytes(captured).decode("utf-8", errors="replace").rstrip()
+    truncated = output_size > MAX_OUTPUT_BYTES
+    if truncated:
+        omitted = max(0, output_size - OUTPUT_HEAD_BYTES - len(tail))
+        marker = f"\n\n[输出已截断：中间省略 {omitted} 字节；以下为末尾内容]\n\n".encode("utf-8")
+        output_bytes = bytes(captured[:OUTPUT_HEAD_BYTES]) + marker + bytes(tail)
+    else:
+        output_bytes = bytes(captured)
+    output = output_bytes.decode("utf-8", errors="replace").rstrip()
     return {
         "returncode": process.returncode,
         "output": output or "(无输出)",
-        "truncated": output_size > MAX_OUTPUT_BYTES,
+        "truncated": truncated,
         "output_bytes": output_size,
+        "captured_head_bytes": min(output_size, OUTPUT_HEAD_BYTES),
+        "captured_tail_bytes": len(tail) if truncated else 0,
         "timed_out": timed_out,
         "cancelled": cancelled,
     }
@@ -109,7 +124,10 @@ def _run_process(command: list[str], cwd: Path, timeout: int, stop_event=None) -
 
 class CodeExecTool(BaseTool):
     name = "code_exec"
-    description = "在受限工作目录中执行一次性的 Python 代码或 Shell 命令；每次执行都需要用户确认。"
+    description = (
+        "在所选工作目录中执行一次性的 Python 代码或 Shell 命令。不要用它分段读取文件，"
+        "文件读取和搜索应优先使用 file_manager。"
+    )
     parameters = {
         "type": "object",
         "properties": {
@@ -161,7 +179,7 @@ class CodeExecTool(BaseTool):
         except (TypeError, ValueError):
             return tool_error("INVALID_TIMEOUT", "timeout 必须是整数")
 
-        if not _confirmed:
+        if not _confirmed and not _context.trust_mode:
             preview = code.replace("\n", " ")[:160]
             return tool_confirm(
                 str(uuid.uuid4()),

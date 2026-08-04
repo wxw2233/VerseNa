@@ -118,9 +118,21 @@ class Database:
             CREATE TABLE IF NOT EXISTS session_metadata (
                 session_id TEXT PRIMARY KEY,
                 name TEXT DEFAULT '',
-                theme_pack_id TEXT DEFAULT 'default_pack'
+                theme_pack_id TEXT DEFAULT 'default_pack',
+                tool_workspace TEXT DEFAULT '',
+                approval_mode TEXT DEFAULT 'ask'
             )
         """)
+        session_columns = await self._db.execute("PRAGMA table_info(session_metadata)")
+        session_column_names = {row[1] for row in await session_columns.fetchall()}
+        if "tool_workspace" not in session_column_names:
+            await self._db.execute(
+                "ALTER TABLE session_metadata ADD COLUMN tool_workspace TEXT DEFAULT ''"
+            )
+        if "approval_mode" not in session_column_names:
+            await self._db.execute(
+                "ALTER TABLE session_metadata ADD COLUMN approval_mode TEXT DEFAULT 'ask'"
+            )
         await self._db.commit()
 
         # memories table
@@ -152,23 +164,55 @@ class Database:
 
     async def get_session_meta(self, session_id):
         cursor = await self._db.execute(
-            "SELECT session_id, name, theme_pack_id FROM session_metadata WHERE session_id = ?",
+            "SELECT session_id, name, theme_pack_id, tool_workspace, approval_mode "
+            "FROM session_metadata WHERE session_id = ?",
             (session_id,)
         )
         row = await cursor.fetchone()
         if row:
-            return {"session_id": row[0], "name": row[1], "theme_pack_id": row[2]}
-        return {"session_id": session_id, "name": "", "theme_pack_id": "default_pack"}
+            return {
+                "session_id": row[0],
+                "name": row[1],
+                "theme_pack_id": row[2],
+                "tool_workspace": row[3] or "",
+                "approval_mode": row[4] if row[4] in {"ask", "auto"} else "ask",
+            }
+        return {
+            "session_id": session_id,
+            "name": "",
+            "theme_pack_id": "default_pack",
+            "tool_workspace": "",
+            "approval_mode": "ask",
+        }
 
-    async def set_session_meta(self, session_id, name=None, theme_pack_id=None):
+    async def set_session_meta(
+        self,
+        session_id,
+        name=None,
+        theme_pack_id=None,
+        tool_workspace=None,
+        approval_mode=None,
+    ):
         meta = await self.get_session_meta(session_id)
         if name is not None:
             meta["name"] = name
         if theme_pack_id is not None:
             meta["theme_pack_id"] = theme_pack_id
+        if tool_workspace is not None:
+            meta["tool_workspace"] = tool_workspace
+        if approval_mode is not None:
+            meta["approval_mode"] = approval_mode
         await self._db.execute(
-            "INSERT OR REPLACE INTO session_metadata (session_id, name, theme_pack_id) VALUES (?, ?, ?)",
-            (session_id, meta["name"], meta["theme_pack_id"])
+            "INSERT OR REPLACE INTO session_metadata "
+            "(session_id, name, theme_pack_id, tool_workspace, approval_mode) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (
+                session_id,
+                meta["name"],
+                meta["theme_pack_id"],
+                meta["tool_workspace"],
+                meta["approval_mode"],
+            )
         )
         await self._db.commit()
 

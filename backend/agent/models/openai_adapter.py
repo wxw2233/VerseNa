@@ -48,7 +48,11 @@ class OpenAIAdapter(BaseModelAdapter):
         }
         if tools:
             payload["tools"] = tools
-        openai_reasoning = reasoning_enabled and self.provider_id == "openai"
+        openai_reasoning = (
+            reasoning_enabled
+            and self.reasoning_available
+            and self.provider_id == "openai"
+        )
         if temperature is not None and not openai_reasoning:
             payload["temperature"] = temperature
         if top_p is not None and not openai_reasoning:

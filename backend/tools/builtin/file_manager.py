@@ -53,7 +53,10 @@ def _atomic_write(path: Path, content: str, encoding: str) -> int:
 
 class FileManagerTool(BaseTool):
     name = "file_manager"
-    description = "在工具工作区内读取、列出、搜索和管理文件；所有写入类操作均需要用户确认，信任模式除外。"
+    description = (
+        "在工具工作区内读取、列出、搜索和管理文件。读取大文件时必须按返回的 "
+        "next_offset 继续，eof=true 后立即停止；不要用 code_exec 代替文件读取。"
+    )
     parameters = {
         "type": "object",
         "properties": {
@@ -72,8 +75,17 @@ class FileManagerTool(BaseTool):
             "src": {"type": "string", "description": "复制或移动的源路径"},
             "dst": {"type": "string", "description": "复制或移动的目标路径"},
             "encoding": {"type": "string", "description": "文本编码，默认 utf-8"},
-            "offset": {"type": "integer", "minimum": 0, "description": "读取起始字节"},
-            "max_size": {"type": "integer", "minimum": 1, "maximum": MAX_READ_BYTES},
+            "offset": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "读取起始字节；续读时必须原样使用上次返回的 next_offset",
+            },
+            "max_size": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": MAX_READ_BYTES,
+                "description": "单次读取字节数，默认 50000，最大 100000",
+            },
             "limit": {"type": "integer", "minimum": 1, "maximum": MAX_LIST_ITEMS},
         },
         "required": ["action"],
@@ -213,21 +225,31 @@ class FileManagerTool(BaseTool):
             return tool_error("FILE_NOT_FOUND", f"文件不存在: {path}")
         if path.is_dir():
             return tool_error("PATH_IS_DIRECTORY", f"路径是目录: {path}")
-        offset = max(0, int(offset))
-        max_size = max(1, min(int(max_size), MAX_READ_BYTES))
         size = path.stat().st_size
+        offset = min(max(0, int(offset)), size)
+        max_size = max(1, min(int(max_size), MAX_READ_BYTES))
         with path.open("rb") as file:
             file.seek(min(offset, size))
             raw = file.read(max_size)
         if b"\x00" in raw[:8192]:
             return tool_error("BINARY_FILE_NOT_SUPPORTED", "不支持读取二进制文件")
         text = raw.decode(encoding, errors="replace")
+        next_offset = offset + len(raw)
+        remaining_bytes = max(0, size - next_offset)
         return tool_result(True, data={
             "content": text,
             "offset": offset,
-            "next_offset": offset + len(raw),
-            "truncated": offset + len(raw) < size,
+            "bytes_read": len(raw),
+            "next_offset": next_offset,
+            "remaining_bytes": remaining_bytes,
+            "truncated": remaining_bytes > 0,
+            "eof": remaining_bytes == 0,
             "size": size,
+            "continuation": (
+                f"继续读取时必须设置 offset={next_offset}"
+                if remaining_bytes > 0
+                else "文件已读取完毕，请勿再次读取此文件"
+            ),
         })
 
     @staticmethod

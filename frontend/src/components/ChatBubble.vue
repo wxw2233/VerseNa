@@ -19,13 +19,17 @@
           <!-- 文本段 -->
           <div v-if="seg.type === 'text'" class="text-seg" v-html="renderText(seg.content)"></div>
 
-          <div v-if="seg.type === 'reasoning'" class="reasoning-seg" :data-status="seg.status">
+          <div
+            v-if="seg.type === 'reasoning' && i === firstReasoningIndex"
+            class="reasoning-seg"
+            :data-status="reasoningSummary.status"
+          >
             <button class="reasoning-header" type="button" @click="reasoningExpanded = !reasoningExpanded">
               <BrainCircuit :size="15" aria-hidden="true" />
-              <span>{{ reasoningLabel(seg) }}</span>
+              <span>{{ reasoningLabel(reasoningSummary) }}</span>
               <ChevronDown class="reasoning-arrow" :class="{ open: reasoningExpanded }" :size="14" aria-hidden="true" />
             </button>
-            <div v-if="reasoningExpanded && seg.content" class="reasoning-content">{{ seg.content }}</div>
+            <div v-if="reasoningExpanded && reasoningSummary.content" class="reasoning-content">{{ reasoningSummary.content }}</div>
           </div>
 
           <!-- 工具段时间线节点 -->
@@ -113,15 +117,18 @@
 </template>
 
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, computed, onBeforeUnmount, watch } from 'vue'
 import { marked } from 'marked'
 import { BrainCircuit, ChevronDown, ChevronRight, ChevronUp, FileText, Pencil, RefreshCcw, Volume1, Volume2, Wrench } from 'lucide-vue-next'
 import { useSessionStore } from '../stores/session'
 import { useThemeStore } from '../stores/theme'
+import { useToast } from '../composables/useToast'
+import { cancelBrowserSpeech, speakWithBrowser } from '../utils/browserSpeech'
 import { prepareTextForSpeech } from '../utils/ttsText'
 
 const sessionStore = useSessionStore()
 const themeStore = useThemeStore()
+const toast = useToast()
 
 // 配置 marked：安全渲染，不执行脚本
 marked.setOptions({
@@ -164,8 +171,31 @@ const hasAnswerText = computed(() =>
   props.msg.segments?.some(segment => segment.type === 'text' && segment.content?.trim()) || false
 )
 
+const firstReasoningIndex = computed(() =>
+  props.msg.segments?.findIndex(segment => segment.type === 'reasoning') ?? -1
+)
+
+const reasoningSummary = computed(() => {
+  const segments = props.msg.segments?.filter(segment => segment.type === 'reasoning') || []
+  const content = segments
+    .map(segment => segment.content?.trim())
+    .filter(Boolean)
+    .join('\n\n')
+  let status = 'done'
+  if (segments.some(segment => segment.status === 'running')) status = 'running'
+  else if (segments.some(segment => segment.status === 'error')) status = 'error'
+  else if (segments.some(segment => segment.status === 'stopped')) status = 'stopped'
+  else if (!content && segments.some(segment => segment.status === 'unavailable')) status = 'unavailable'
+  return {
+    type: 'reasoning',
+    status,
+    content,
+    duration_ms: segments.reduce((total, segment) => total + Number(segment.duration_ms || 0), 0),
+  }
+})
+
 const hasRunningReasoning = computed(() =>
-  props.msg.segments?.some(segment => segment.type === 'reasoning' && segment.status === 'running') || false
+  reasoningSummary.value.status === 'running'
 )
 
 watch(hasAnswerText, hasText => {
@@ -262,6 +292,9 @@ function summarizeArgs(args) {
 // --- TTS 语音播放 ---
 const isPlaying = ref(false)
 let audioEl = null
+let audioUrl = ''
+let browserUtterance = null
+let playbackRun = 0
 
 const hasTextContent = computed(() => {
   if (!props.msg.segments) return !!props.msg.content
@@ -282,12 +315,30 @@ async function speakText() {
   const text = getPlainText()
   if (!text) return
 
-  // 如果正在播放，停止
-  if (isPlaying.value && audioEl) {
-    audioEl.pause()
-    audioEl = null
-    isPlaying.value = false
+  if (isPlaying.value) {
+    stopSpeech()
     return
+  }
+
+  const run = ++playbackRun
+  let fallbackStarted = false
+  const fallbackToBrowser = (detail = '') => {
+    if (run !== playbackRun || fallbackStarted) return
+    fallbackStarted = true
+    releaseAudio()
+    browserUtterance = speakWithBrowser(text, {
+      onEnd: () => finishSpeech(run),
+      onError: () => {
+        finishSpeech(run)
+        toast.error('系统语音播放失败')
+      },
+    })
+    if (browserUtterance) {
+      toast.warning('云端语音不可用，已切换到系统语音')
+    } else {
+      finishSpeech(run)
+      toast.error(detail || '语音播放失败，当前设备不支持系统语音')
+    }
   }
 
   try {
@@ -303,26 +354,64 @@ async function speakText() {
     })
 
     if (!resp.ok) {
-      isPlaying.value = false
+      const error = await resp.json().catch(() => ({}))
+      fallbackToBrowser(error.detail)
       return
     }
 
     const blob = await resp.blob()
-    const url = URL.createObjectURL(blob)
-    audioEl = new Audio(url)
+    if (!blob.size) {
+      fallbackToBrowser('云端语音返回了空音频')
+      return
+    }
+    if (run !== playbackRun) return
+    audioUrl = URL.createObjectURL(blob)
+    audioEl = new Audio(audioUrl)
     audioEl.onended = () => {
-      isPlaying.value = false
-      URL.revokeObjectURL(url)
+      releaseAudio()
+      finishSpeech(run)
     }
     audioEl.onerror = () => {
-      isPlaying.value = false
-      URL.revokeObjectURL(url)
+      fallbackToBrowser('音频格式无法播放')
     }
-    audioEl.play()
-  } catch {
-    isPlaying.value = false
+    try {
+      await audioEl.play()
+    } catch (error) {
+      fallbackToBrowser(error.message)
+    }
+  } catch (error) {
+    fallbackToBrowser(error.message)
   }
 }
+
+function releaseAudio() {
+  if (audioEl) {
+    audioEl.pause()
+    audioEl.onended = null
+    audioEl.onerror = null
+    audioEl = null
+  }
+  if (audioUrl) {
+    URL.revokeObjectURL(audioUrl)
+    audioUrl = ''
+  }
+}
+
+function finishSpeech(run) {
+  if (run !== playbackRun) return
+  browserUtterance = null
+  isPlaying.value = false
+}
+
+function stopSpeech() {
+  playbackRun += 1
+  releaseAudio()
+  if (browserUtterance) cancelBrowserSpeech()
+  browserUtterance = null
+  isPlaying.value = false
+}
+
+onBeforeUnmount(stopSpeech)
 </script>
 
 <style scoped>

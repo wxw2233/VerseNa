@@ -11,10 +11,13 @@ class ToolContext:
     workspace: Path
     trust_mode_getter: Callable[[], bool] | None = None
     stop_event: Any = None
+    approval_mode: str = "ask"
 
     @property
     def trust_mode(self) -> bool:
-        return bool(self.trust_mode_getter and self.trust_mode_getter())
+        return self.approval_mode == "auto" or bool(
+            self.trust_mode_getter and self.trust_mode_getter()
+        )
 
 class BaseTool(ABC):
     name: str = ""

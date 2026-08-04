@@ -4,6 +4,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from config import settings
@@ -62,34 +63,39 @@ class SourceUpdater:
             "commit_short": "",
             "upstream": "",
             "dirty": False,
+            "dirty_paths": [],
             "ahead": 0,
             "behind": 0,
             "update_available": False,
+            "remote_commit": "",
+            "check_error": "",
             "pending": self.pending_file.is_file(),
             "restart_required": self.pending_file.is_file(),
             "message": "",
         }
         if not (self.project_root / ".git").exists():
-            base["message"] = "Source updates are only available in a Git checkout"
+            base["message"] = "仅 Git 源码目录支持在线更新"
             return base
         if not shutil.which("git"):
-            base["message"] = "Git is not installed or is not available on PATH"
+            base["message"] = "未安装 Git，或 Git 不在 PATH 中"
             return base
 
         branch = self._try_git(["symbolic-ref", "--quiet", "--short", "HEAD"])
         if not branch:
-            base["message"] = "Source updates require a checked-out branch"
+            base["message"] = "源码更新要求当前检出一个分支"
             return base
         upstream = self._try_git(
             ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"]
         )
         if not upstream:
             base.update({"branch": branch})
-            base["message"] = "The current branch has no upstream tracking branch"
+            base["message"] = "当前分支没有配置上游跟踪分支"
             return base
 
         commit = self._git(["rev-parse", "HEAD"])
-        dirty = bool(self._git(["status", "--porcelain", "--untracked-files=no"]))
+        dirty_output = self._git(["status", "--porcelain=v1", "--untracked-files=no"])
+        dirty_paths = [line[3:].strip() for line in dirty_output.splitlines() if len(line) > 3]
+        dirty = bool(dirty_paths)
         ahead, behind = self._commit_counts(upstream)
         base.update(
             {
@@ -99,46 +105,72 @@ class SourceUpdater:
                 "commit_short": commit[:7],
                 "upstream": upstream,
                 "dirty": dirty,
+                "dirty_paths": dirty_paths,
                 "ahead": ahead,
                 "behind": behind,
                 "update_available": behind > 0 and ahead == 0,
             }
         )
-        if dirty:
-            base["message"] = "The source tree has uncommitted tracked changes"
-        elif ahead and behind:
-            base["message"] = "The local and upstream branches have diverged"
+        if ahead and behind:
+            base["message"] = "本地分支与上游分支已经分叉"
         elif behind:
-            base["message"] = f"{behind} upstream commit(s) are available"
+            base["message"] = f"发现 {behind} 个上游提交"
         elif ahead:
-            base["message"] = f"The local branch is {ahead} commit(s) ahead"
+            base["message"] = f"本地分支领先上游 {ahead} 个提交"
         elif base["pending"]:
-            base["message"] = "The previous update needs to finish building"
+            base["message"] = "上次更新尚未完成构建"
+        elif dirty:
+            base["message"] = f"检测到 {len(dirty_paths)} 个未提交的源码修改；更新时会保留不冲突的修改"
         else:
-            base["message"] = "The source checkout is up to date"
+            base["message"] = "源码已是最新版本"
         return base
 
     def _check_sync(self) -> dict:
         status = self._status_sync()
         if not status["supported"]:
             return status
+
         try:
-            self._git(["fetch", "--quiet", "--prune"], timeout=180)
+            remote_commit = self._remote_commit(status["upstream"])
         except SourceUpdateError as exc:
-            raise SourceUpdateError(f"Unable to fetch source updates: {exc}", 502) from exc
-        return self._status_sync()
+            status["check_error"] = f"无法连接上游仓库: {exc}"
+            status["message"] = status["check_error"]
+            return status
+
+        status["remote_commit"] = remote_commit
+        if remote_commit == status["commit"]:
+            status["update_available"] = False
+            if status["dirty"]:
+                status["message"] = (
+                    f"源码已是最新版本；检测到 {len(status['dirty_paths'])} 个未提交修改"
+                )
+            else:
+                status["message"] = "源码已是最新版本"
+            return status
+
+        try:
+            self._fetch()
+        except SourceUpdateError as exc:
+            status["check_error"] = f"检测到远端提交，但无法刷新本地 Git 数据: {exc}"
+            status["message"] = status["check_error"]
+            if status["ahead"] == 0:
+                status["behind"] = max(1, status["behind"])
+                status["update_available"] = True
+            return status
+
+        refreshed = self._status_sync()
+        refreshed["remote_commit"] = remote_commit
+        return refreshed
 
     def _apply_sync(self) -> dict:
         status = self._check_sync()
         if not status["supported"]:
             raise SourceUpdateError(status["message"], 409)
-        if status["dirty"]:
-            raise SourceUpdateError(
-                "Commit or discard tracked source changes before updating", 409
-            )
+        if status.get("check_error"):
+            raise SourceUpdateError(status["check_error"], 502)
         if status["ahead"]:
             raise SourceUpdateError(
-                "The local branch contains commits that are not on the upstream branch", 409
+                "本地分支包含尚未推送到上游的提交，无法自动更新", 409
             )
 
         had_pending_update = self.pending_file.is_file()
@@ -158,11 +190,22 @@ class SourceUpdater:
         steps = []
 
         self.update_dir.mkdir(parents=True, exist_ok=True)
-        self.pending_file.write_text(status["commit"] + "\n", encoding="utf-8")
 
         if status["behind"]:
-            self._git(["merge", "--ff-only", status["upstream"]], timeout=180)
+            try:
+                self._git(["merge", "--ff-only", status["upstream"]], timeout=180)
+            except SourceUpdateError as exc:
+                if status["dirty"]:
+                    paths = "、".join(status["dirty_paths"][:5])
+                    raise SourceUpdateError(
+                        f"本地修改与上游更新冲突，请先处理这些文件: {paths}. Git 详情: {exc}",
+                        409,
+                    ) from exc
+                raise
             steps.append("source")
+
+        current_commit = self._git(["rev-parse", "HEAD"])
+        self.pending_file.write_text(current_commit + "\n", encoding="utf-8")
 
         requirements_changed = old_requirements_hash != self._file_hash(requirements)
         package_lock_changed = old_package_lock_hash != self._file_hash(package_lock)
@@ -189,7 +232,7 @@ class SourceUpdater:
                 "applied": True,
                 "steps": steps,
                 "restart_required": True,
-                "message": "Source update completed; restart VerseNa to load backend changes",
+                "message": "源码更新完成；请重启 VerseNa 以加载后端更新",
             }
         )
         return result
@@ -240,6 +283,35 @@ class SourceUpdater:
             return 0, 0
         left, right = output.split()
         return int(left), int(right)
+
+    def _remote_commit(self, upstream: str) -> str:
+        remote, separator, branch = upstream.partition("/")
+        if not separator or not remote or not branch:
+            raise SourceUpdateError(f"无法解析上游分支: {upstream}")
+
+        last_error = None
+        for attempt in range(2):
+            try:
+                output = self._git(
+                    ["ls-remote", "--exit-code", remote, f"refs/heads/{branch}"],
+                    timeout=180,
+                )
+                line = next((item for item in output.splitlines() if item.strip()), "")
+                commit = line.split()[0] if line else ""
+                if commit:
+                    return commit
+                raise SourceUpdateError(f"上游分支不存在: {upstream}")
+            except SourceUpdateError as exc:
+                last_error = exc
+                if attempt == 0:
+                    time.sleep(1)
+        raise last_error
+
+    def _fetch(self) -> None:
+        self._git(
+            ["fetch", "--quiet", "--prune", "--no-write-fetch-head"],
+            timeout=180,
+        )
 
     @staticmethod
     def _file_hash(path: Path) -> str:

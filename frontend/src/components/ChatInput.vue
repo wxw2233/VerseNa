@@ -33,6 +33,36 @@
       >
         <BrainCircuit :size="17" aria-hidden="true" />
       </button>
+      <div ref="approvalRef" class="approval-control">
+        <button
+          class="approval-btn"
+          :class="{ auto: approvalMode === 'auto' }"
+          :disabled="submitting || isStreaming"
+          @click="approvalMenuOpen = !approvalMenuOpen"
+          :title="approvalMode === 'auto' ? '工具审批：自动审批' : '工具审批：请求批准'"
+          :aria-label="approvalMode === 'auto' ? '自动审批工具操作' : '工具操作请求批准'"
+          :aria-expanded="approvalMenuOpen"
+        >
+          <ShieldCheck v-if="approvalMode === 'auto'" :size="17" aria-hidden="true" />
+          <ShieldAlert v-else :size="17" aria-hidden="true" />
+        </button>
+        <div v-if="approvalMenuOpen" class="approval-menu">
+          <button
+            :class="{ selected: approvalMode === 'ask' }"
+            @click="selectApprovalMode('ask')"
+          >
+            <ShieldAlert :size="16" aria-hidden="true" />
+            <span><strong>请求批准</strong><small>执行前逐次确认</small></span>
+          </button>
+          <button
+            :class="{ selected: approvalMode === 'auto' }"
+            @click="selectApprovalMode('auto')"
+          >
+            <ShieldCheck :size="16" aria-hidden="true" />
+            <span><strong>自动审批</strong><small>本会话直接执行</small></span>
+          </button>
+        </div>
+      </div>
       <textarea
         v-model="text"
         @keydown.enter.exact.prevent="send"
@@ -90,8 +120,8 @@
 </template>
 
 <script setup>
-import { ref, watch, nextTick, onMounted } from 'vue'
-import { BrainCircuit, FileText, LoaderCircle, Mic, Paperclip, Send, Square, Volume2, VolumeX, X } from 'lucide-vue-next'
+import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
+import { BrainCircuit, FileText, LoaderCircle, Mic, Paperclip, Send, ShieldAlert, ShieldCheck, Square, Volume2, VolumeX, X } from 'lucide-vue-next'
 import { useToast } from '../composables/useToast'
 
 const props = defineProps({
@@ -99,8 +129,9 @@ const props = defineProps({
   isStreaming: { type: Boolean, default: false },
   isStopping: { type: Boolean, default: false },
   connected: { type: Boolean, default: false },
+  approvalMode: { type: String, default: 'ask' },
 })
-const emit = defineEmits(['send', 'toggle-tts', 'stop'])
+const emit = defineEmits(['send', 'toggle-tts', 'stop', 'update:approval-mode'])
 const text = ref('')
 const textareaRef = ref(null)
 const fileInput = ref(null)
@@ -109,6 +140,17 @@ const pendingImage = ref(null)
 const pendingFile = ref(null) // 非图片附件
 const submitting = ref(false)
 const reasoningEnabled = ref(localStorage.getItem('reasoning-enabled') === 'true')
+const approvalMenuOpen = ref(false)
+const approvalRef = ref(null)
+
+function selectApprovalMode(mode) {
+  approvalMenuOpen.value = false
+  if (mode !== props.approvalMode) emit('update:approval-mode', mode)
+}
+
+function closeApprovalMenu(event) {
+  if (!approvalRef.value?.contains(event.target)) approvalMenuOpen.value = false
+}
 
 function toggleReasoning() {
   reasoningEnabled.value = !reasoningEnabled.value
@@ -276,11 +318,16 @@ watch(text, () => {
 // 组件挂载时恢复草稿
 onMounted(() => {
   restoreDraft()
+  document.addEventListener('pointerdown', closeApprovalMenu)
 })
+
+onUnmounted(() => document.removeEventListener('pointerdown', closeApprovalMenu))
 </script>
 
 <style scoped>
 .input-wrapper {
+  position: relative;
+  z-index: 20;
   width: min(100%, var(--chat-content-width));
   padding: 0 var(--chat-gutter) 12px;
   margin-inline: auto;
@@ -388,6 +435,7 @@ textarea:focus {
 
 .attach-btn,
 .reasoning-btn,
+.approval-btn,
 .mic-btn {
   width: var(--control-height);
   height: var(--control-height);
@@ -406,6 +454,7 @@ textarea:focus {
 }
 .attach-btn:hover,
 .reasoning-btn:hover,
+.approval-btn:hover,
 .mic-btn:hover {
   color: var(--text-primary);
   box-shadow: 0 0 0 1px rgba(255,255,255,0.20);
@@ -416,6 +465,51 @@ textarea:focus {
   background: rgba(124, 92, 252, 0.15);
   box-shadow: 0 0 0 1px var(--primary);
 }
+.approval-control {
+  position: relative;
+  flex-shrink: 0;
+}
+.approval-btn.auto {
+  color: #34d399;
+  background: rgba(16, 185, 129, 0.12);
+  box-shadow: 0 0 0 1px rgba(52, 211, 153, 0.55);
+}
+.approval-menu {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 10px);
+  z-index: 40;
+  width: 214px;
+  padding: 6px;
+  background: var(--surface-modal);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.34);
+  backdrop-filter: blur(16px);
+}
+.approval-menu button {
+  width: 100%;
+  min-height: 50px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  text-align: left;
+  cursor: pointer;
+}
+.approval-menu button:hover,
+.approval-menu button.selected {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.08);
+}
+.approval-menu button.selected { box-shadow: inset 2px 0 0 var(--primary); }
+.approval-menu span { display: flex; flex-direction: column; min-width: 0; }
+.approval-menu strong { font-size: 13px; font-weight: 600; }
+.approval-menu small { margin-top: 2px; color: var(--text-secondary); font-size: 11px; }
 .mic-btn.recording {
   background: rgba(239, 68, 68, 0.2);
   color: #ef4444;
@@ -535,7 +629,7 @@ textarea:focus {
 
   .input-bar {
     display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(6, minmax(0, 1fr));
     gap: 6px;
     padding: 8px;
   }
@@ -547,13 +641,15 @@ textarea:focus {
 
   .attach-btn { grid-column: 1; grid-row: 2; }
   .reasoning-btn { grid-column: 2; grid-row: 2; }
-  .mic-btn { grid-column: 3; grid-row: 2; }
-  .tts-btn { grid-column: 4; grid-row: 2; }
+  .approval-control { grid-column: 3; grid-row: 2; }
+  .mic-btn { grid-column: 4; grid-row: 2; }
+  .tts-btn { grid-column: 5; grid-row: 2; }
   .send-btn,
-  .stop-btn { grid-column: 5; grid-row: 2; }
+  .stop-btn { grid-column: 6; grid-row: 2; }
 
   .attach-btn,
   .reasoning-btn,
+  .approval-btn,
   .mic-btn,
   .tts-btn,
   .send-btn,

@@ -18,14 +18,21 @@ class ToolRegistry:
     def get_tools(self) -> list[dict]:
         return [t.to_openai_tool() for t in self._tools.values()]
 
-    def create_context(self, session_id: str, *, stop_event=None) -> ToolContext:
-        workspace = settings.TOOL_WORKSPACE
+    def create_context(
+        self,
+        session_id: str,
+        *,
+        workspace: Path | str | None = None,
+        approval_mode: str = "ask",
+        stop_event=None,
+    ) -> ToolContext:
+        workspace = Path(workspace or settings.TOOL_WORKSPACE).expanduser().resolve()
         workspace.mkdir(parents=True, exist_ok=True)
         return ToolContext(
             session_id=session_id,
             workspace=workspace,
-            trust_mode_getter=lambda: bool(getattr(settings, "TRUST_MODE", False)),
             stop_event=stop_event,
+            approval_mode=approval_mode if approval_mode in {"ask", "auto"} else "ask",
         )
 
     async def execute(

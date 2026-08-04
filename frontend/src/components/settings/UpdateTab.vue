@@ -31,10 +31,23 @@
       </div>
 
       <div class="update-state" :class="stateClass">
-        <CircleAlert v-if="isBlocked" :size="18" />
+        <CircleAlert v-if="isBlocked || hasLocalChanges || status.check_error" :size="18" />
         <CircleCheck v-else-if="isCurrent" :size="18" />
         <Download v-else :size="18" />
         <span>{{ stateMessage }}</span>
+      </div>
+
+      <div v-if="hasLocalChanges" class="local-changes">
+        <div class="local-changes-title">
+          <FileWarning :size="16" aria-hidden="true" />
+          <span>本地修改不会被自动删除；如与上游冲突，更新会安全中止。</span>
+        </div>
+        <ul v-if="status.dirty_paths?.length">
+          <li v-for="path in status.dirty_paths.slice(0, 6)" :key="path" class="mono">{{ path }}</li>
+        </ul>
+        <span v-if="status.dirty_paths?.length > 6" class="more-paths">
+          另有 {{ status.dirty_paths.length - 6 }} 个文件
+        </span>
       </div>
 
       <div class="update-actions">
@@ -52,6 +65,7 @@
           type="button"
           class="action-button primary"
           :disabled="Boolean(action) || !canApply"
+          :title="applyDisabledReason"
           @click="applyUpdate"
         >
           <LoaderCircle v-if="action === 'apply'" class="spin" :size="17" />
@@ -74,6 +88,7 @@ import {
   CircleAlert,
   CircleCheck,
   Download,
+  FileWarning,
   GitBranch,
   LoaderCircle,
   Power,
@@ -88,9 +103,9 @@ const action = ref('')
 
 const isBlocked = computed(() => (
   !status.value?.supported
-  || status.value?.dirty
   || Number(status.value?.ahead) > 0
 ))
+const hasLocalChanges = computed(() => Boolean(status.value?.dirty))
 const isCurrent = computed(() => (
   status.value?.supported
   && !status.value?.update_available
@@ -99,14 +114,20 @@ const isCurrent = computed(() => (
 ))
 const canApply = computed(() => (
   status.value?.supported
-  && !status.value?.dirty
   && Number(status.value?.ahead) === 0
   && (status.value?.update_available || status.value?.pending)
 ))
+const applyDisabledReason = computed(() => {
+  if (!status.value?.supported) return status.value?.message || '当前源码不支持在线更新'
+  if (Number(status.value?.ahead) > 0) return '本地分支含有上游没有的提交，无法自动更新'
+  if (!status.value?.update_available && !status.value?.pending) return '当前没有可安装的更新'
+  return ''
+})
 const stateClass = computed(() => ({
   blocked: isBlocked.value,
   current: isCurrent.value,
-  available: !isBlocked.value && !isCurrent.value,
+  warning: !isBlocked.value && (hasLocalChanges.value || Boolean(status.value?.check_error)),
+  available: !isBlocked.value && !isCurrent.value && !hasLocalChanges.value && !status.value?.check_error,
 }))
 const stateMessage = computed(() => status.value?.message || '无法读取更新状态')
 
@@ -132,7 +153,8 @@ async function checkUpdates() {
   action.value = 'check'
   try {
     status.value = await request('/api/update/check', 'POST')
-    if (status.value.update_available) toast.success('发现源码更新')
+    if (status.value.check_error) toast.warning(status.value.check_error)
+    else if (status.value.update_available) toast.success('发现源码更新')
     else toast.success('当前源码已是最新版本')
   } catch (error) {
     toast.error(`检查更新失败: ${error.message}`)
@@ -143,7 +165,10 @@ async function checkUpdates() {
 
 async function applyUpdate() {
   if (!canApply.value) return
-  if (!window.confirm('更新会拉取源码、补充依赖并重建前端。完成后需要重启 VerseNa，是否继续？')) return
+  const localChangeNotice = hasLocalChanges.value
+    ? '检测到本地源码修改。更新会保留不冲突的修改，发生冲突时会中止且不会删除文件。\n\n'
+    : ''
+  if (!window.confirm(`${localChangeNotice}更新会拉取源码、补充依赖并重建前端。完成后需要重启 VerseNa，是否继续？`)) return
   action.value = 'apply'
   try {
     status.value = await request('/api/update/apply', 'POST')
@@ -234,7 +259,39 @@ onMounted(loadStatus)
 
 .update-state.current { color: #79d69a; }
 .update-state.available { color: var(--primary); }
+.update-state.warning { color: #f5bf68; }
 .update-state.blocked { color: #ff9caa; }
+
+.local-changes {
+  margin-top: 12px;
+  padding: 10px 12px;
+  color: var(--text-secondary);
+  background: rgba(245, 191, 104, 0.07);
+  border-left: 3px solid #f5bf68;
+  font-size: 12px;
+}
+
+.local-changes-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-primary);
+}
+
+.local-changes ul {
+  margin: 8px 0 0;
+  padding: 0 0 0 24px;
+}
+
+.local-changes li {
+  margin: 3px 0;
+  overflow-wrap: anywhere;
+}
+
+.more-paths {
+  display: block;
+  margin: 6px 0 0 24px;
+}
 
 .update-actions {
   display: flex;
