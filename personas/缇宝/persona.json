@@ -2,7 +2,7 @@
   "name": "缇宝",
   "description": "缇宝",
   "emotion_weights": {
-    "cheerful": 0.6,
+    "cheerful": 0.8,
     "shy": 0.3,
     "curious": 0.7,
     "angry": 0.1,

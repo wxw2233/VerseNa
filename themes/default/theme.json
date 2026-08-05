@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "author": "user",
   "colors": {
-    "primary": "#3fa5e4",
+    "primary": "#7c5cfc",
     "bgPrimary": "#0f0f1a",
     "bgSecondary": "#1a1a2e",
     "textPrimary": "#e8e8f0",
@@ -18,7 +18,9 @@
     "--text-secondary": "#8888aa",
     "--border": "#2a2a40",
     "--bubble-user": "rgba(124,92,252,0.15)",
-    "--bubble-agent": "rgba(30,30,50,0.9)"
+    "--bubble-agent": "rgba(30,30,50,0.9)",
+    "secondary": "#ff00ff",
+    "highlight": "#7c5cfc"
   },
   "font": "Noto Sans SC",
   "effects": {}
