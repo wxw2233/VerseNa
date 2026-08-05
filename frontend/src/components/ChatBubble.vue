@@ -20,16 +20,24 @@
           <div v-if="seg.type === 'text'" class="text-seg" v-html="renderText(seg.content)"></div>
 
           <div
-            v-if="seg.type === 'reasoning'"
+            v-if="seg.type === 'reasoning' && i === firstReasoningIndex"
             class="reasoning-seg"
-            :data-status="seg.status"
+            :data-status="reasoningSummary.status"
           >
-            <button class="reasoning-header" type="button" @click="toggleReasoning(seg, i)">
+            <button class="reasoning-header" type="button" @click="toggleReasoning">
               <BrainCircuit :size="15" aria-hidden="true" />
-              <span>{{ reasoningLabel(seg) }}</span>
-              <ChevronDown class="reasoning-arrow" :class="{ open: isReasoningExpanded(seg, i) }" :size="14" aria-hidden="true" />
+              <span>{{ reasoningLabel(reasoningSummary) }}</span>
+              <ChevronDown class="reasoning-arrow" :class="{ open: reasoningExpanded }" :size="14" aria-hidden="true" />
             </button>
-            <div v-if="isReasoningExpanded(seg, i) && seg.content" class="reasoning-content">{{ seg.content }}</div>
+            <div v-if="reasoningExpanded && reasoningEntries.length" class="reasoning-content">
+              <div v-for="(entry, entryIndex) in reasoningEntries" :key="entry.reasoning_id || entryIndex" class="reasoning-entry">
+                <div class="reasoning-entry-header">
+                  <span>思考片段 {{ entryIndex + 1 }}</span>
+                  <span v-if="entry.duration_ms">{{ (Number(entry.duration_ms) / 1000).toFixed(Number(entry.duration_ms) >= 10000 ? 0 : 1) }} 秒</span>
+                </div>
+                <div v-if="entry.content" class="reasoning-entry-text">{{ entry.content }}</div>
+              </div>
+            </div>
           </div>
 
           <!-- 工具段时间线节点 -->
@@ -143,7 +151,7 @@ function renderText(content) {
 
 const props = defineProps({ msg: Object })
 const emit = defineEmits(['retry', 'edit'])
-const expandedReasoning = ref({})
+const reasoningExpanded = ref(Boolean(props.msg.streaming))
 
 // 编辑模式
 const isEditing = ref(false)
@@ -171,32 +179,38 @@ const hasAnswerText = computed(() =>
   props.msg.segments?.some(segment => segment.type === 'text' && segment.content?.trim()) || false
 )
 
+const firstReasoningIndex = computed(() =>
+  props.msg.segments?.findIndex(segment => segment.type === 'reasoning') ?? -1
+)
+
+const reasoningEntries = computed(() =>
+  props.msg.segments?.filter(segment => segment.type === 'reasoning') || []
+)
+
+const reasoningSummary = computed(() => {
+  const segments = reasoningEntries.value
+  let status = 'done'
+  if (segments.some(segment => segment.status === 'running')) status = 'running'
+  else if (segments.some(segment => segment.status === 'error')) status = 'error'
+  else if (segments.some(segment => segment.status === 'stopped')) status = 'stopped'
+  else if (!segments.some(segment => segment.content?.trim()) && segments.some(segment => segment.status === 'unavailable')) status = 'unavailable'
+  return {
+    type: 'reasoning',
+    status,
+    duration_ms: segments.reduce((total, segment) => total + Number(segment.duration_ms || 0), 0),
+  }
+})
+
 const hasRunningReasoning = computed(() =>
   props.msg.segments?.some(segment => segment.type === 'reasoning' && segment.status === 'running') || false
 )
 
 watch(hasAnswerText, hasText => {
-  if (hasText) expandedReasoning.value = {}
+  if (hasText) reasoningExpanded.value = false
 })
 
-function reasoningKey(segment, index) {
-  return segment.reasoning_id || `reasoning-${index}`
-}
-
-function isReasoningExpanded(segment, index) {
-  const key = reasoningKey(segment, index)
-  if (Object.prototype.hasOwnProperty.call(expandedReasoning.value, key)) {
-    return expandedReasoning.value[key]
-  }
-  return props.msg.streaming && segment.status === 'running'
-}
-
-function toggleReasoning(segment, index) {
-  const key = reasoningKey(segment, index)
-  expandedReasoning.value = {
-    ...expandedReasoning.value,
-    [key]: !isReasoningExpanded(segment, index),
-  }
+function toggleReasoning() {
+  reasoningExpanded.value = !reasoningExpanded.value
 }
 
 function reasoningLabel(segment) {
@@ -538,6 +552,20 @@ onBeforeUnmount(stopSpeech)
   white-space: pre-wrap;
   word-break: break-word;
 }
+.reasoning-entry + .reasoning-entry {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+.reasoning-entry-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 4px;
+  color: var(--text-tertiary, var(--text-secondary));
+  font-size: 11px;
+}
+.reasoning-entry-text { white-space: pre-wrap; }
 .reasoning-seg[data-status="running"] { color: var(--primary); }
 .reasoning-seg[data-status="unavailable"],
 .reasoning-seg[data-status="error"] { color: #f59e0b; }
