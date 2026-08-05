@@ -151,7 +151,11 @@ function renderText(content) {
 
 const props = defineProps({ msg: Object })
 const emit = defineEmits(['retry', 'edit'])
-const reasoningExpanded = ref(Boolean(props.msg.streaming))
+const reasoningExpanded = ref(false)
+const reasoningClock = ref(Date.now())
+let reasoningTimer = null
+let activeReasoningId = null
+let activeReasoningStartedAt = 0
 
 // 编辑模式
 const isEditing = ref(false)
@@ -187,6 +191,51 @@ const reasoningEntries = computed(() =>
   props.msg.segments?.filter(segment => segment.type === 'reasoning') || []
 )
 
+const completedReasoningMs = computed(() =>
+  reasoningEntries.value.reduce((total, segment) => {
+    if (segment.status === 'running') return total
+    return total + Number(segment.duration_ms || 0)
+  }, 0)
+)
+
+const reasoningDurationMs = computed(() => {
+  const active = reasoningEntries.value.find(segment => segment.status === 'running')
+  if (!active || !activeReasoningStartedAt) return completedReasoningMs.value
+  return completedReasoningMs.value + Math.max(0, reasoningClock.value - activeReasoningStartedAt)
+})
+
+function stopReasoningClock() {
+  if (reasoningTimer) {
+    clearInterval(reasoningTimer)
+    reasoningTimer = null
+  }
+  activeReasoningId = null
+  activeReasoningStartedAt = 0
+}
+
+function syncReasoningClock(entries) {
+  const active = entries.find(segment => segment.status === 'running')
+  if (!active) {
+    stopReasoningClock()
+    return
+  }
+
+  const activeId = active.reasoning_id || active
+  if (activeReasoningId !== activeId) {
+    activeReasoningId = activeId
+    activeReasoningStartedAt = Date.now() - Number(active.duration_ms || 0)
+  }
+
+  reasoningClock.value = Date.now()
+  if (!reasoningTimer) {
+    reasoningTimer = setInterval(() => {
+      reasoningClock.value = Date.now()
+    }, 200)
+  }
+}
+
+watch(reasoningEntries, syncReasoningClock, { deep: true, immediate: true })
+
 const reasoningSummary = computed(() => {
   const segments = reasoningEntries.value
   let status = 'done'
@@ -197,7 +246,7 @@ const reasoningSummary = computed(() => {
   return {
     type: 'reasoning',
     status,
-    duration_ms: segments.reduce((total, segment) => total + Number(segment.duration_ms || 0), 0),
+    duration_ms: reasoningDurationMs.value,
   }
 })
 
@@ -213,14 +262,21 @@ function toggleReasoning() {
   reasoningExpanded.value = !reasoningExpanded.value
 }
 
+function formatReasoningDuration(duration) {
+  const seconds = duration / 1000
+  return `${seconds.toFixed(duration >= 10000 ? 0 : 1)} 秒`
+}
+
 function reasoningLabel(segment) {
   if (segment.status === 'unavailable') return '当前模型不支持深度思考'
   if (segment.status === 'error') return '思考中断'
   if (segment.status === 'stopped') return '思考已停止'
-  if (segment.status === 'running') return '思考中'
   const duration = Number(segment.duration_ms || 0)
+  if (segment.status === 'running') {
+    return duration ? `思考中 · ${formatReasoningDuration(duration)}` : '思考中'
+  }
   if (!duration) return '思考完成'
-  return `思考完成 · ${(duration / 1000).toFixed(duration >= 10000 ? 0 : 1)} 秒`
+  return `思考完成 · ${formatReasoningDuration(duration)}`
 }
 
 const usesWideLayout = computed(() => {
@@ -423,7 +479,10 @@ function stopSpeech() {
   isPlaying.value = false
 }
 
-onBeforeUnmount(stopSpeech)
+onBeforeUnmount(() => {
+  stopReasoningClock()
+  stopSpeech()
+})
 </script>
 
 <style scoped>
