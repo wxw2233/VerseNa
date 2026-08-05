@@ -12,7 +12,9 @@
     <main v-else class="main-content">
       <router-view v-slot="{ Component, route }">
         <Transition :name="transitionName" mode="out-in">
-          <component :is="Component" :key="route.path" />
+          <KeepAlive>
+            <component :is="Component" :key="route.path" />
+          </KeepAlive>
         </Transition>
       </router-view>
     </main>
