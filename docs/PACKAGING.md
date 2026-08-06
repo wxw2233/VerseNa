@@ -9,6 +9,16 @@ These package formats do not currently receive automatic updates. The maintained
 
 ## Windows
 
+### 本地开发启动
+
+源码模式运行 Electron 桌面客户端：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/start-electron.ps1
+```
+
+它会启动前端开发服务器，再启动 Electron。开发完成后需要通过 VerseNa 托盘菜单的“退出”结束应用，脚本随后会清理由它启动的 Vite 进程。
+
 Build an unpacked desktop package:
 
 ```powershell

@@ -78,6 +78,33 @@ npm run dev
 
 浏览器访问 `http://localhost:5173`
 
+### Electron 桌面开发模式
+
+Windows 源码开发可以使用一键脚本启动 Vite 和 Electron：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/start-electron.ps1
+```
+
+脚本会自动安装缺失的前端/Electron 依赖，检查 Electron 二进制，然后启动桌面客户端。也可以手动运行：
+
+```powershell
+cd frontend
+npm run dev
+
+# 新开一个 PowerShell
+cd electron
+npm start
+```
+
+Electron 依赖的安装脚本需要下载约 100 MB 的运行时。如果出现 `Electron failed to install correctly`，先在 `electron` 目录执行：
+
+```powershell
+npm rebuild electron --foreground-scripts
+```
+
+如果仍然失败，删除 `electron/node_modules/electron` 后重新执行一键脚本。
+
 后端默认只监听 `127.0.0.1:8002`。生产构建完成后也可直接访问 `http://127.0.0.1:8002`，由 FastAPI 托管前端。
 
 局域网模式使用访问令牌保护 REST、资源文件和 WebSocket：
