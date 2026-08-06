@@ -9,6 +9,16 @@
         <button @click="handleNew" class="new-btn" title="新建对话" aria-label="新建对话">
           <Plus :size="17" aria-hidden="true" />
         </button>
+        <button
+          v-if="desktopPetAvailable"
+          class="pet-btn"
+          type="button"
+          title="打开桌宠"
+          aria-label="打开桌宠"
+          @click="openPet"
+        >
+          <PawPrint :size="16" aria-hidden="true" />
+        </button>
         <router-link to="/settings" class="settings-btn" title="设置" aria-label="设置">
           <Settings :size="16" aria-hidden="true" />
         </router-link>
@@ -188,18 +198,24 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
-import { ChevronRight, LoaderCircle, Pencil, Plus, RefreshCcw, Settings, Trash2, TriangleAlert, X } from 'lucide-vue-next'
+import { ChevronRight, LoaderCircle, PawPrint, Pencil, Plus, RefreshCcw, Settings, Trash2, TriangleAlert, X } from 'lucide-vue-next'
 import { useToast } from '../composables/useToast'
 import { useSessionStore } from '../stores/session'
 import { useChatStore } from '../stores/chat'
 import { usePersonaStore } from '../stores/persona'
 import { useThemeStore } from '../stores/theme'
+import { isDesktopPetAvailable, openDesktopPet } from '../utils/pet'
 
 const sessionStore = useSessionStore()
 const chatStore = useChatStore()
 const personaStore = usePersonaStore()
 const themeStore = useThemeStore()
 const toast = useToast()
+const desktopPetAvailable = isDesktopPetAvailable()
+
+function openPet() {
+  openDesktopPet()
+}
 
 const renamingId = ref('')
 const newName = ref('')
@@ -506,7 +522,8 @@ async function saveEdit() {
   white-space: nowrap;
 }
 
-.settings-btn {
+.settings-btn,
+.pet-btn {
   width: var(--control-icon-size);
   height: var(--control-icon-size);
   display: flex;
@@ -521,7 +538,8 @@ async function saveEdit() {
   transition: color var(--motion-fast) var(--ease-standard), background var(--motion-fast) var(--ease-standard), transform var(--motion-fast) var(--ease-standard);
 }
 
-.settings-btn:hover {
+.settings-btn:hover,
+.pet-btn:hover {
   background: rgba(255, 255, 255, 0.1);
   color: var(--text-primary);
   transform: translateY(-1px);

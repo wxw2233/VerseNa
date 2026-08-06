@@ -133,6 +133,7 @@ import { useThemeStore } from '../stores/theme'
 import { useToast } from '../composables/useToast'
 import { cancelBrowserSpeech, speakWithBrowser } from '../utils/browserSpeech'
 import { prepareTextForSpeech } from '../utils/ttsText'
+import { setDesktopPetState } from '../utils/pet'
 
 const sessionStore = useSessionStore()
 const themeStore = useThemeStore()
@@ -411,6 +412,7 @@ async function speakText() {
 
   try {
     isPlaying.value = true
+    setDesktopPetState('speaking', themeStore.current)
     const currentSession = sessionStore.currentSessionId
     const session = sessionStore.sessions.find(s => s.id === currentSession)
     const packId = session?.theme_pack_id || themeStore.current || ''
@@ -469,6 +471,7 @@ function finishSpeech(run) {
   if (run !== playbackRun) return
   browserUtterance = null
   isPlaying.value = false
+  setDesktopPetState('idle', themeStore.current)
 }
 
 function stopSpeech() {
@@ -477,6 +480,7 @@ function stopSpeech() {
   if (browserUtterance) cancelBrowserSpeech()
   browserUtterance = null
   isPlaying.value = false
+  setDesktopPetState('idle', themeStore.current)
 }
 
 onBeforeUnmount(() => {

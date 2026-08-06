@@ -1,7 +1,7 @@
 <template>
   <div id="app-root">
-    <ParticleBg color="#7c5cfc" :count="40" :speed="0.3" />
-    <div class="bg-layer" :style="bgStyle" :class="{ 'bg-visible': bgReady }"></div>
+    <ParticleBg v-if="!isPetRoute" color="#7c5cfc" :count="40" :speed="0.3" />
+    <div v-if="!isPetRoute" class="bg-layer" :style="bgStyle" :class="{ 'bg-visible': bgReady }"></div>
     <div v-if="authChecking" class="auth-loading" aria-label="正在验证访问状态">
       <LoaderCircle :size="24" />
     </div>
@@ -9,7 +9,7 @@
       v-else-if="authRequired && !authenticated"
       @authenticated="handleAuthenticated"
     />
-    <main v-else class="main-content">
+    <main v-else class="main-content" :class="{ 'pet-main': isPetRoute }">
       <router-view v-slot="{ Component, route }">
         <Transition :name="transitionName" mode="out-in">
           <KeepAlive>
@@ -41,6 +41,7 @@ const personaStore = usePersonaStore()
 const sessionStore = useSessionStore()
 const themeStore = useThemeStore()
 const { update: updateBrightness } = useBrightness()
+const isPetRoute = computed(() => route.path === '/pet')
 
 const bgReady = ref(true)
 const authChecking = ref(true)
@@ -177,6 +178,7 @@ onUnmounted(() => removeAuthListener?.())
   overflow: hidden;
   position: relative;
 }
+.pet-main { background: transparent; }
 
 .auth-loading {
   position: relative;

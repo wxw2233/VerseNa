@@ -26,6 +26,7 @@
 - 🧠 **记忆系统** — 自动提取 + 手动管理，支持分类和搜索
 - 📡 **QQ 机器人** — WebSocket 模式，支持私聊和群聊
 - 🎨 **主题定制** — 4 色配置 + 背景图 + 自适应亮度
+- 🐾 **桌宠模式** — Windows Electron 桌面端支持独立透明桌宠和状态动画帧
 
 ## 📦 技术栈
 
@@ -142,6 +143,20 @@ Windows 安装包和旧 Termux 压缩包不使用该更新通道。已有源码�
 - `theme.json` — 角色人设 + 主题配色
 - `variables.css` — CSS 变量
 - `assets/` — 图标/背景/参考音频
+
+Windows Electron 桌宠会按当前主题读取可选动画帧，文件放在主题的 `assets/` 目录，命名格式为：
+
+```text
+pet-idle-01.png
+pet-idle-02.png
+pet-thinking-01.png
+pet-tool-01.png
+pet-speaking-01.png
+pet-done-01.png
+pet-error-01.png
+```
+
+每个状态可以提供多帧图片；缺少对应素材时会显示内置占位角色。桌宠通过 Electron 主窗口的桌宠按钮或系统托盘打开，浏览器和 Termux 部署不启用该入口。
 
 支持导入/导出 ZIP 格式。
 

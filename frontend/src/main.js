@@ -4,6 +4,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import App from './App.vue'
 import ChatView from './views/ChatView.vue'
 import SettingsView from './views/SettingsView.vue'
+import PetView from './views/PetView.vue'
 import './styles/default.css'
 import './assets/theme-base.css'
 import './styles/design-system.css'
@@ -17,6 +18,7 @@ const router = createRouter({
   routes: [
     { path: '/', component: ChatView },
     { path: '/settings', component: SettingsView },
+    { path: '/pet', component: PetView },
   ]
 })
 

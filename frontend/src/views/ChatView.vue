@@ -150,6 +150,7 @@ import { useSessionStore } from '../stores/session'
 import { useThemeStore } from '../stores/theme'
 import { cancelBrowserSpeech, speakWithBrowser } from '../utils/browserSpeech'
 import { prepareTextForSpeech } from '../utils/ttsText'
+import { setDesktopPetState } from '../utils/pet'
 import ChatBubble from '../components/ChatBubble.vue'
 import ChatInput from '../components/ChatInput.vue'
 import SessionList from '../components/SessionList.vue'
@@ -253,6 +254,24 @@ let ttsAudio = null
 let ttsAudioUrl = ''
 let autoBrowserUtterance = null
 let autoSpeechRun = 0
+let petDoneTimer = null
+
+const petState = computed(() => {
+  if (store.isStopping) return 'stopping'
+  if (!store.isStreaming) return 'idle'
+
+  const assistant = [...store.messages].reverse().find(message => message.role === 'assistant' && message.streaming)
+  const segments = assistant?.segments || []
+  if (segments.some(segment => segment.type === 'tool' && segment.status === 'running')) return 'tool'
+  if (segments.some(segment => segment.type === 'reasoning' && segment.status === 'running')) return 'thinking'
+  return 'working'
+})
+
+function syncPetState() {
+  setDesktopPetState(petState.value, themeStore.current)
+}
+
+watch([petState, () => themeStore.current], syncPetState, { immediate: true })
 
 
 
@@ -442,6 +461,9 @@ onMounted(() => {
     } else if (msg.type === 'done') {
       applied = store.finishStreaming(msg.emoji, msg.generation_id)
       if (!applied) return
+      setDesktopPetState('done', themeStore.current)
+      if (petDoneTimer) clearTimeout(petDoneTimer)
+      petDoneTimer = setTimeout(syncPetState, 1400)
       // 首条消息自动命名
       autoTitleIfNeeded()
       // 保存展开状态
@@ -452,6 +474,11 @@ onMounted(() => {
       }
     } else if (msg.type === 'error') {
       applied = store.handleError(msg.content || msg.message || '未知错误', msg.generation_id)
+      if (applied) {
+        setDesktopPetState('error', themeStore.current)
+        if (petDoneTimer) clearTimeout(petDoneTimer)
+        petDoneTimer = setTimeout(syncPetState, 1400)
+      }
     }
 
     if (!applied) return
@@ -681,14 +708,21 @@ async function autoSpeakLast() {
     releaseAutoAudio()
     autoBrowserUtterance = speakWithBrowser(text, {
       onEnd: () => {
-        if (run === autoSpeechRun) autoBrowserUtterance = null
+        if (run === autoSpeechRun) {
+          autoBrowserUtterance = null
+          syncPetState()
+        }
       },
       onError: () => {
-        if (run === autoSpeechRun) autoBrowserUtterance = null
+        if (run === autoSpeechRun) {
+          autoBrowserUtterance = null
+          syncPetState()
+        }
         toast.warning('系统语音播放失败')
       },
     })
     if (autoBrowserUtterance) {
+      setDesktopPetState('speaking', themeStore.current)
       const reason = detail ? `：${String(detail).slice(0, 120)}` : ''
       toast.warning(`${message}${reason}`)
     } else {
@@ -720,12 +754,14 @@ async function autoSpeakLast() {
     ttsAudio = new Audio(ttsAudioUrl)
     ttsAudio.onended = () => {
       releaseAutoAudio()
+      syncPetState()
     }
     ttsAudio.onerror = () => {
       fallbackToBrowser('云端音频无法播放，已切换到系统语音', '音频播放失败')
     }
     try {
       await ttsAudio.play()
+      setDesktopPetState('speaking', themeStore.current)
     } catch (e) {
       fallbackToBrowser('自动音频播放受限，已切换到系统语音', e.message)
     }

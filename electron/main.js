@@ -4,9 +4,11 @@ const { spawn } = require('child_process')
 const fs = require('fs')
 
 let mainWindow = null
+let petWindow = null
 let tray = null
 let backendProcess = null
 let isQuitting = false
+let latestPetState = { state: 'idle', theme: '' }
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock()
 if (!hasSingleInstanceLock) {
@@ -178,6 +180,11 @@ function waitForBackend(maxWait = 15000) {
 
 // ========== 窗口管理 ==========
 
+function getFrontendUrl(route = '/') {
+  const baseUrl = app.isPackaged ? 'http://127.0.0.1:8002' : 'http://localhost:5173'
+  return `${baseUrl}${route}`
+}
+
 function createWindow() {
   const iconPath = path.join(__dirname, 'icon.png')
   mainWindow = new BrowserWindow({
@@ -199,10 +206,10 @@ function createWindow() {
   const isDev = !app.isPackaged
 
   if (isDev) {
-    mainWindow.loadURL('http://localhost:5173')
+    mainWindow.loadURL(getFrontendUrl('/'))
     mainWindow.webContents.openDevTools()
   } else {
-    mainWindow.loadURL('http://127.0.0.1:8002')
+    mainWindow.loadURL(getFrontendUrl('/'))
   }
 
   // 窗口准备好后显示
@@ -222,6 +229,72 @@ function createWindow() {
   mainWindow.on('closed', () => {
     mainWindow = null
   })
+}
+
+function createPetWindow() {
+  if (petWindow && !petWindow.isDestroyed()) {
+    petWindow.showInactive()
+    return petWindow
+  }
+
+  petWindow = new BrowserWindow({
+    width: 190,
+    height: 230,
+    minWidth: 120,
+    minHeight: 140,
+    maxWidth: 420,
+    maxHeight: 500,
+    title: 'VerseNa 桌宠',
+    transparent: true,
+    frame: false,
+    resizable: true,
+    movable: true,
+    minimizable: false,
+    maximizable: false,
+    closable: true,
+    skipTaskbar: true,
+    hasShadow: false,
+    alwaysOnTop: false,
+    show: false,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      nodeIntegration: false,
+      contextIsolation: true,
+    },
+  })
+
+  petWindow.setMenu(null)
+  petWindow.loadURL(getFrontendUrl('/pet'))
+  petWindow.once('ready-to-show', () => {
+    if (!petWindow || petWindow.isDestroyed()) return
+    petWindow.showInactive()
+    petWindow.webContents.send('pet-state', latestPetState)
+  })
+  petWindow.webContents.on('context-menu', (event) => {
+    event.preventDefault()
+    const menu = Menu.buildFromTemplate([
+      {
+        label: '显示 VerseNa',
+        click: () => {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.show()
+            mainWindow.focus()
+          }
+        },
+      },
+      { type: 'separator' },
+      {
+        label: '关闭桌宠',
+        click: () => petWindow?.hide(),
+      },
+    ])
+    menu.popup({ window: petWindow })
+  })
+  petWindow.on('closed', () => {
+    petWindow = null
+  })
+
+  return petWindow
 }
 
 // ========== 系统托盘 ==========
@@ -248,6 +321,10 @@ function createTray() {
           mainWindow.focus()
         }
       },
+    },
+    {
+      label: '显示桌宠',
+      click: () => createPetWindow(),
     },
     { type: 'separator' },
     {
@@ -286,6 +363,31 @@ function createTray() {
 
 ipcMain.handle('get-platform', () => process.platform)
 ipcMain.handle('get-version', () => app.getVersion())
+ipcMain.handle('show-main', () => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.show()
+    mainWindow.focus()
+  }
+  return true
+})
+ipcMain.handle('open-pet', () => {
+  createPetWindow()
+  return true
+})
+ipcMain.handle('close-pet', () => {
+  if (petWindow && !petWindow.isDestroyed()) petWindow.hide()
+  return true
+})
+ipcMain.on('pet-state', (_event, state) => {
+  if (!state || typeof state !== 'object') return
+  latestPetState = {
+    state: typeof state.state === 'string' ? state.state : 'idle',
+    theme: typeof state.theme === 'string' ? state.theme : '',
+  }
+  if (petWindow && !petWindow.isDestroyed() && !petWindow.webContents.isLoading()) {
+    petWindow.webContents.send('pet-state', latestPetState)
+  }
+})
 
 // ========== 应用生命周期 ==========
 
@@ -319,6 +421,7 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   isQuitting = true
+  if (petWindow && !petWindow.isDestroyed()) petWindow.destroy()
   stopBackend()
 })
 
