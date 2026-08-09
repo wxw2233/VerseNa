@@ -15,68 +15,93 @@
 
       <!-- 新消息 segments 渲染 -->
       <template v-else>
-        <template v-for="(seg, i) in msg.segments" :key="i">
-          <!-- 文本段 -->
-          <div v-if="seg.type === 'text'" class="text-seg" v-html="renderText(seg.content)"></div>
-
-          <div
-            v-if="seg.type === 'reasoning' && i === firstReasoningIndex"
-            class="reasoning-seg"
-            :data-status="reasoningSummary.status"
+        <section v-if="workSegments.length" class="agent-work" :data-status="workStatus">
+          <button
+            class="agent-work-header"
+            type="button"
+            :aria-expanded="workExpanded"
+            :disabled="msg.streaming"
+            @click="toggleWork"
           >
-            <button class="reasoning-header" type="button" @click="toggleReasoning">
-              <BrainCircuit :size="15" aria-hidden="true" />
-              <span>{{ reasoningLabel(reasoningSummary) }}</span>
-              <ChevronDown class="reasoning-arrow" :class="{ open: reasoningExpanded }" :size="14" aria-hidden="true" />
-            </button>
-            <div v-if="reasoningExpanded && reasoningEntries.length" class="reasoning-content">
-              <div v-for="(entry, entryIndex) in reasoningEntries" :key="entry.reasoning_id || entryIndex" class="reasoning-entry">
-                <div class="reasoning-entry-header">
-                  <span>思考片段 {{ entryIndex + 1 }}</span>
-                  <span v-if="entry.duration_ms">{{ (Number(entry.duration_ms) / 1000).toFixed(Number(entry.duration_ms) >= 10000 ? 0 : 1) }} 秒</span>
+            <BrainCircuit :size="15" aria-hidden="true" />
+            <span class="agent-work-label">{{ workLabel }}</span>
+            <span v-if="workMeta" class="agent-work-meta">{{ workMeta }}</span>
+            <ChevronDown class="agent-work-arrow" :class="{ open: workExpanded }" :size="14" aria-hidden="true" />
+          </button>
+
+          <div v-if="workExpanded" class="agent-work-content">
+            <template v-for="entry in workEntries" :key="entry.key">
+              <div v-if="entry.segment.type === 'reasoning'" class="work-reasoning" :data-status="entry.segment.status">
+                <button
+                  type="button"
+                  class="work-entry-header"
+                  :aria-expanded="reasoningExpanded(entry.segment, entry.reasoningNumber)"
+                  @click.stop="toggleReasoning(entry.segment, entry.reasoningNumber)"
+                >
+                  <span>思考片段 {{ entry.reasoningNumber }}</span>
+                  <span v-if="entry.segment.duration_ms">{{ formatReasoningDuration(Number(entry.segment.duration_ms)) }}</span>
+                  <ChevronDown
+                    class="work-entry-arrow"
+                    :class="{ open: reasoningExpanded(entry.segment, entry.reasoningNumber) }"
+                    :size="13"
+                    aria-hidden="true"
+                  />
+                </button>
+                <div
+                  v-if="reasoningExpanded(entry.segment, entry.reasoningNumber) && entry.segment.content"
+                  class="work-reasoning-text"
+                >{{ entry.segment.content }}</div>
+              </div>
+
+              <div
+                v-else-if="entry.segment.type === 'text'"
+                class="work-text text-seg"
+                v-html="renderText(entry.segment.content)"
+              ></div>
+
+              <div
+                v-else-if="entry.segment.type === 'tool'"
+                class="tool-seg"
+                :data-status="entry.segment.status"
+                @click="entry.segment.result_detail ? toggleExpand(entry.segment.tool_call_id) : null"
+              >
+                <div class="tool-header">
+                  <span class="tool-icon">{{ toolIcon(entry.segment.tool_name) }}</span>
+                  <span class="tool-name">{{ entry.segment.tool_name }}</span>
+                  <span class="tool-args">{{ summarizeArgs(entry.segment.tool_args) }}</span>
+                  <span class="tool-status">
+                    <span v-if="entry.segment.status === 'running'" class="spinner">⏳</span>
+                    <span v-if="entry.segment.status === 'done'">✅</span>
+                    <span v-if="entry.segment.status === 'error'">❌</span>
+                  </span>
+                  <ChevronDown
+                    v-if="entry.segment.result_detail"
+                    class="tool-arrow"
+                    :class="{ open: expanded(entry.segment.tool_call_id) }"
+                    :size="14"
+                    aria-hidden="true"
+                  />
+                  <button v-if="entry.segment.status === 'error'" class="tool-retry" @click.stop="$emit('retry')">重试</button>
                 </div>
-                <div v-if="entry.content" class="reasoning-entry-text">{{ entry.content }}</div>
+                <div v-if="entry.segment.result_summary && !expanded(entry.segment.tool_call_id)" class="tool-summary">
+                  {{ entry.segment.result_summary }}
+                </div>
+                <div v-if="expanded(entry.segment.tool_call_id)" class="tool-detail">
+                  <pre v-if="entry.segment.tool_name === 'code_exec'"><code>{{ entry.segment.result_detail }}</code></pre>
+                  <div v-else-if="entry.segment.tool_name === 'web_search'" v-html="formatSearchResults(entry.segment.result_detail)"></div>
+                  <pre v-else>{{ entry.segment.result_detail }}</pre>
+                </div>
               </div>
-            </div>
+            </template>
           </div>
+        </section>
 
-          <!-- 工具段时间线节点 -->
-          <template v-if="seg.type === 'tool'">
-            <!-- 输出完成后折叠状态：显示小提示 -->
-            <div v-if="!msg.streaming && toolsCollapsed && i === firstToolIndex" class="tools-collapsed-hint" @click.stop="toggleToolsCollapse">
-              <Wrench :size="14" aria-hidden="true" />
-              <span>调用了 {{ toolCount }} 个工具</span>
-              <ChevronRight :size="14" aria-hidden="true" />
-            </div>
-            <!-- 正常显示工具 -->
-            <div v-if="msg.streaming || !toolsCollapsed" class="tool-seg" :data-status="seg.status" @click="seg.result_detail ? toggleExpand(seg.tool_call_id) : null">
-              <div class="tool-header">
-                <span class="tool-icon">{{ toolIcon(seg.tool_name) }}</span>
-                <span class="tool-name">{{ seg.tool_name }}</span>
-                <span class="tool-args">{{ summarizeArgs(seg.tool_args) }}</span>
-                <span class="tool-status">
-                  <span v-if="seg.status === 'running'" class="spinner">⏳</span>
-                  <span v-if="seg.status === 'done'">✅</span>
-                  <span v-if="seg.status === 'error'">❌</span>
-                </span>
-                <ChevronDown v-if="seg.result_detail" class="tool-arrow" :class="{ open: expanded(seg.tool_call_id) }" :size="14" aria-hidden="true" />
-                <button v-if="seg.status === 'error'" class="tool-retry" @click.stop="$emit('retry')">重试</button>
-              </div>
-              <div class="tool-summary" v-if="seg.result_summary && !expanded(seg.tool_call_id)">{{ seg.result_summary }}</div>
-              <div class="tool-detail" v-if="expanded(seg.tool_call_id)">
-                <pre v-if="seg.tool_name === 'code_exec'"><code>{{ seg.result_detail }}</code></pre>
-                <div v-else-if="seg.tool_name === 'web_search'" v-html="formatSearchResults(seg.result_detail)"></div>
-                <pre v-else>{{ seg.result_detail }}</pre>
-              </div>
-            </div>
-
-            <!-- 展开时显示折叠按钮 -->
-            <div v-if="!msg.streaming && !toolsCollapsed && i === lastToolIndex" class="tools-collapse-btn" @click.stop="toggleToolsCollapse">
-              <span>收起工具</span>
-              <ChevronUp :size="14" aria-hidden="true" />
-            </div>
-          </template>
-        </template>
+        <div
+          v-for="(seg, index) in answerSegments"
+          :key="'answer-' + index"
+          class="text-seg"
+          v-html="renderText(seg.content)"
+        ></div>
       </template>
 
       <span v-if="msg.emoji" class="emoji">{{ msg.emoji }}</span>
@@ -125,15 +150,16 @@
 </template>
 
 <script setup>
-import { ref, computed, onBeforeUnmount, watch } from 'vue'
+import { ref, reactive, computed, onBeforeUnmount, watch } from 'vue'
 import { marked } from 'marked'
-import { BrainCircuit, ChevronDown, ChevronRight, ChevronUp, FileText, Pencil, RefreshCcw, Volume1, Volume2, Wrench } from 'lucide-vue-next'
+import { BrainCircuit, ChevronDown, FileText, Pencil, RefreshCcw, Volume1, Volume2 } from 'lucide-vue-next'
 import { useSessionStore } from '../stores/session'
 import { useThemeStore } from '../stores/theme'
 import { useToast } from '../composables/useToast'
 import { cancelBrowserSpeech, speakWithBrowser } from '../utils/browserSpeech'
 import { prepareTextForSpeech } from '../utils/ttsText'
 import { setDesktopPetState } from '../utils/pet'
+import { finalAnswerText, splitAgentSegments } from '../utils/agentTimeline'
 
 const sessionStore = useSessionStore()
 const themeStore = useThemeStore()
@@ -152,7 +178,8 @@ function renderText(content) {
 
 const props = defineProps({ msg: Object })
 const emit = defineEmits(['retry', 'edit'])
-const reasoningExpanded = ref(false)
+const workExpanded = ref(Boolean(props.msg.streaming))
+const expandedReasoning = reactive({})
 const reasoningClock = ref(Date.now())
 let reasoningTimer = null
 let activeReasoningId = null
@@ -176,21 +203,26 @@ function confirmEdit() {
   isEditing.value = false
 }
 
-const hasTools = computed(() =>
-  props.msg.segments?.some(s => s.type === 'tool')
-)
-
-const hasAnswerText = computed(() =>
-  props.msg.segments?.some(segment => segment.type === 'text' && segment.content?.trim()) || false
-)
-
-const firstReasoningIndex = computed(() =>
-  props.msg.segments?.findIndex(segment => segment.type === 'reasoning') ?? -1
-)
+const segmentGroups = computed(() => splitAgentSegments(props.msg.segments || []))
+const workSegments = computed(() => segmentGroups.value.work)
+const answerSegments = computed(() => segmentGroups.value.answer.filter(segment => segment.type === 'text'))
+const hasTools = computed(() => workSegments.value.some(segment => segment.type === 'tool'))
 
 const reasoningEntries = computed(() =>
-  props.msg.segments?.filter(segment => segment.type === 'reasoning') || []
+  workSegments.value.filter(segment => segment.type === 'reasoning')
 )
+
+const workEntries = computed(() => {
+  let reasoningNumber = 0
+  return workSegments.value.map((segment, index) => {
+    if (segment.type === 'reasoning') reasoningNumber += 1
+    return {
+      segment,
+      reasoningNumber,
+      key: segment.reasoning_id || segment.tool_call_id || `work-${index}`,
+    }
+  })
+})
 
 const completedReasoningMs = computed(() =>
   reasoningEntries.value.reduce((total, segment) => {
@@ -237,48 +269,42 @@ function syncReasoningClock(entries) {
 
 watch(reasoningEntries, syncReasoningClock, { deep: true, immediate: true })
 
-const reasoningSummary = computed(() => {
-  const segments = reasoningEntries.value
-  let status = 'done'
-  if (segments.some(segment => segment.status === 'running')) status = 'running'
-  else if (segments.some(segment => segment.status === 'error')) status = 'error'
-  else if (segments.some(segment => segment.status === 'stopped')) status = 'stopped'
-  else if (!segments.some(segment => segment.content?.trim()) && segments.some(segment => segment.status === 'unavailable')) status = 'unavailable'
-  return {
-    type: 'reasoning',
-    status,
-    duration_ms: reasoningDurationMs.value,
-  }
+const workStatus = computed(() => {
+  if (workSegments.value.some(segment => segment.status === 'running')) return 'running'
+  if (workSegments.value.some(segment => segment.status === 'error')) return 'error'
+  if (workSegments.value.some(segment => segment.status === 'stopped')) return 'stopped'
+  return props.msg.streaming ? 'running' : 'done'
 })
 
 const hasRunningReasoning = computed(() =>
-  props.msg.segments?.some(segment => segment.type === 'reasoning' && segment.status === 'running') || false
+  reasoningEntries.value.some(segment => segment.status === 'running')
 )
 
-watch(hasAnswerText, hasText => {
-  if (hasText) reasoningExpanded.value = false
-})
+const toolCount = computed(() =>
+  workSegments.value.filter(segment => segment.type === 'tool').length
+)
 
-function toggleReasoning() {
-  reasoningExpanded.value = !reasoningExpanded.value
-}
+const workLabel = computed(() => {
+  if (workStatus.value === 'error') return '工作中断'
+  if (workStatus.value === 'stopped') return '工作已停止'
+  if (workStatus.value === 'running') return '正在工作'
+  return '工作完成'
+})
 
 function formatReasoningDuration(duration) {
   const seconds = duration / 1000
   return `${seconds.toFixed(duration >= 10000 ? 0 : 1)} 秒`
 }
 
-function reasoningLabel(segment) {
-  if (segment.status === 'unavailable') return '当前模型不支持深度思考'
-  if (segment.status === 'error') return '思考中断'
-  if (segment.status === 'stopped') return '思考已停止'
-  const duration = Number(segment.duration_ms || 0)
-  if (segment.status === 'running') {
-    return duration ? `思考中 · ${formatReasoningDuration(duration)}` : '思考中'
+const workMeta = computed(() => {
+  const parts = []
+  if (reasoningEntries.value.length) {
+    const duration = reasoningDurationMs.value
+    parts.push(duration ? `思考 ${formatReasoningDuration(duration)}` : `${reasoningEntries.value.length} 段思考`)
   }
-  if (!duration) return '思考完成'
-  return `思考完成 · ${formatReasoningDuration(duration)}`
-}
+  if (toolCount.value) parts.push(`${toolCount.value} 个工具`)
+  return parts.join(' · ')
+})
 
 const usesWideLayout = computed(() => {
   if (hasTools.value) return true
@@ -290,57 +316,39 @@ const usesWideLayout = computed(() => {
   return /```|<pre[\s>]|<table[\s>]|^\s*\|.+\|\s*$/im.test(text)
 })
 
-const toolCount = computed(() => {
-  return props.msg.segments?.filter(s => s.type === 'tool').length || 0
-})
-
-const firstToolIndex = computed(() => {
-  return props.msg.segments?.findIndex(s => s.type === 'tool') ?? -1
-})
-
-const lastToolIndex = computed(() => {
-  if (!props.msg.segments) return -1
-  for (let i = props.msg.segments.length - 1; i >= 0; i--) {
-    if (props.msg.segments[i].type === 'tool') return i
-  }
-  return -1
-})
-
-// 工具调用折叠状态
-const toolsCollapsed = ref(true)
-
-// 切换折叠状态
-function toggleToolsCollapse() {
-  toolsCollapsed.value = !toolsCollapsed.value
-}
-
-// 消息完成时自动折叠
 watch(() => props.msg.streaming, (newVal, oldVal) => {
+  if (newVal === true) workExpanded.value = true
   if (oldVal === true && newVal === false) {
-    toolsCollapsed.value = true
+    workExpanded.value = false
+    Object.keys(expandedReasoning).forEach(key => delete expandedReasoning[key])
   }
 })
 
-const allExpanded = computed(() => {
-  if (!props.msg.segments) return false
-  const tools = props.msg.segments.filter(s => s.type === 'tool')
-  return tools.length > 0 && tools.every(t => props.msg.expandedTools?.[t.tool_call_id])
-})
+function toggleWork() {
+  if (props.msg.streaming) return
+  workExpanded.value = !workExpanded.value
+}
 
 function expanded(toolCallId) {
   return props.msg.expandedTools?.[toolCallId] || false
 }
 
+function reasoningKey(segment, number) {
+  return segment.reasoning_id || `reasoning-${number}`
+}
+
+function reasoningExpanded(segment, number) {
+  return expandedReasoning[reasoningKey(segment, number)] || false
+}
+
+function toggleReasoning(segment, number) {
+  const key = reasoningKey(segment, number)
+  expandedReasoning[key] = !expandedReasoning[key]
+}
+
 function toggleExpand(toolCallId) {
   if (!props.msg.expandedTools) props.msg.expandedTools = {}
   props.msg.expandedTools[toolCallId] = !props.msg.expandedTools[toolCallId]
-}
-
-function toggleAll() {
-  if (!props.msg.expandedTools) props.msg.expandedTools = {}
-  const tools = props.msg.segments.filter(s => s.type === 'tool')
-  const expand = !allExpanded.value
-  tools.forEach(t => { props.msg.expandedTools[t.tool_call_id] = expand })
 }
 
 function toolIcon(name) {
@@ -366,15 +374,12 @@ let playbackRun = 0
 
 const hasTextContent = computed(() => {
   if (!props.msg.segments) return !!props.msg.content
-  return props.msg.segments.some(s => s.type === 'text' && s.content?.trim())
+  return Boolean(finalAnswerText(props.msg.segments).trim())
 })
 
 function getPlainText() {
   const text = props.msg.segments
-    ? props.msg.segments
-      .filter(s => s.type === 'text')
-      .map(s => s.content)
-      .join('')
+    ? finalAnswerText(props.msg.segments)
     : props.msg.content || ''
   return prepareTextForSpeech(text)
 }
@@ -583,15 +588,18 @@ onBeforeUnmount(() => {
 .text-seg :deep(em) { font-style: italic; }
 .text-seg :deep(del) { text-decoration: line-through; color: var(--text-secondary); }
 
-.reasoning-seg {
+.agent-work {
   margin: 2px 0 8px;
   color: var(--text-secondary);
   font-size: 12px;
+  border: 1px solid rgba(124, 92, 252, 0.22);
+  border-radius: 6px;
+  background: rgba(124, 92, 252, 0.06);
 }
-.reasoning-header {
+.agent-work-header {
   width: 100%;
-  min-height: 28px;
-  padding: 2px 0;
+  min-height: 30px;
+  padding: 4px 9px;
   display: flex;
   align-items: center;
   gap: 7px;
@@ -601,37 +609,61 @@ onBeforeUnmount(() => {
   cursor: pointer;
   text-align: left;
 }
-.reasoning-header span { flex: 1; }
-.reasoning-arrow { transition: transform var(--motion-fast) var(--ease-standard); }
-.reasoning-arrow.open { transform: rotate(180deg); }
-.reasoning-content {
-  max-height: 280px;
-  margin: 4px 0 6px 7px;
-  padding: 4px 0 4px 14px;
+.agent-work-header:hover { color: var(--primary); }
+.agent-work-header:disabled { cursor: default; }
+.agent-work-header:disabled:hover { color: inherit; }
+.agent-work-label { color: var(--text-primary); font-weight: 600; }
+.agent-work-meta { color: var(--text-secondary); font-size: 11px; }
+.agent-work-arrow { margin-left: auto; transition: transform var(--motion-fast) var(--ease-standard); }
+.agent-work-arrow.open { transform: rotate(180deg); }
+.agent-work[data-status="running"] .agent-work-header { color: var(--primary); }
+.agent-work[data-status="error"] .agent-work-header,
+.agent-work[data-status="stopped"] .agent-work-header { color: #f59e0b; }
+.agent-work-content {
+  max-height: 520px;
+  margin: 0 8px 8px;
+  padding: 6px 0 4px 12px;
   overflow: auto;
   border-left: 1px solid rgba(255, 255, 255, 0.16);
-  color: var(--text-secondary);
   line-height: 1.65;
+}
+.work-reasoning {
+  padding: 4px 0 8px;
+  color: var(--text-secondary);
   white-space: pre-wrap;
   word-break: break-word;
 }
-.reasoning-entry + .reasoning-entry {
-  margin-top: 12px;
-  padding-top: 10px;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-}
-.reasoning-entry-header {
+.work-reasoning + .work-reasoning,
+.work-reasoning + .work-text,
+.work-reasoning + .tool-seg,
+.work-text + .work-reasoning,
+.work-text + .tool-seg,
+.tool-seg + .work-reasoning,
+.tool-seg + .work-text { margin-top: 10px; }
+.work-reasoning[data-status="running"] { color: var(--primary); }
+.work-reasoning[data-status="unavailable"],
+.work-reasoning[data-status="error"] { color: #f59e0b; }
+.work-entry-header {
+  width: 100%;
+  padding: 0;
   display: flex;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 4px;
   color: var(--text-tertiary, var(--text-secondary));
+  background: transparent;
+  border: none;
+  cursor: pointer;
   font-size: 11px;
+  text-align: left;
 }
-.reasoning-entry-text { white-space: pre-wrap; }
-.reasoning-seg[data-status="running"] { color: var(--primary); }
-.reasoning-seg[data-status="unavailable"],
-.reasoning-seg[data-status="error"] { color: #f59e0b; }
+.work-entry-header:hover { color: var(--primary); }
+.work-entry-header span:first-child { flex: 1; }
+.work-entry-arrow { flex: 0 0 auto; transition: transform var(--motion-fast) var(--ease-standard); }
+.work-entry-arrow.open { transform: rotate(180deg); }
+.work-reasoning-text { white-space: pre-wrap; }
+.work-text { color: var(--text-secondary); }
 
 .tool-actions-bar { display: flex; justify-content: flex-end; margin-bottom: 4px; }
 .tool-toggle-all { background: none; border: none; color: var(--text-secondary); cursor: pointer; font-size: 11px; }
@@ -661,46 +693,6 @@ onBeforeUnmount(() => {
 .tool-seg[data-status="done"] + .tool-seg::before { background: #22c55e; }
 .tool-seg[data-status="error"] { border-left-color: #ef4444; background: rgba(239, 68, 68, 0.06); }
 .tool-seg[data-status="error"] + .tool-seg::before { background: #ef4444; }
-
-/* 工具折叠提示（原位） */
-.tools-collapsed-hint {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
-  margin: 4px 0;
-  background: rgba(124, 92, 252, 0.08);
-  border: 1px solid rgba(124, 92, 252, 0.2);
-  border-radius: 6px;
-  cursor: pointer;
-  transition: background 180ms ease, border-color 180ms ease, color 180ms ease;
-  font-size: 12px;
-  color: var(--text-secondary);
-}
-.tools-collapsed-hint:hover {
-  background: rgba(124, 92, 252, 0.15);
-  border-color: rgba(124, 92, 252, 0.3);
-}
-
-/* 工具折叠按钮（展开时显示） */
-.tools-collapse-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
-  margin: 4px 0;
-  background: rgba(124, 92, 252, 0.06);
-  border: 1px solid rgba(124, 92, 252, 0.15);
-  border-radius: 6px;
-  cursor: pointer;
-  transition: background 180ms ease, border-color 180ms ease, color 180ms ease;
-  font-size: 12px;
-  color: var(--text-secondary);
-}
-.tools-collapse-btn:hover {
-  background: rgba(124, 92, 252, 0.12);
-  border-color: rgba(124, 92, 252, 0.25);
-}
 
 /* 打字指示器 */
 .typing-indicator {

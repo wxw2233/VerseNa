@@ -8,8 +8,115 @@ from pydantic import BaseModel
 from typing import Any, Optional
 from themepacks.manager import pack_manager
 from config import settings
+from pet_config import PET_ACTIONS, read_pet_config, validate_pet_animations, validate_pet_placements
 
 router = APIRouter()
+PET_IMAGE_EXTENSIONS = {".png", ".webp", ".jpg", ".jpeg", ".gif"}
+PET_ZIP_MAX_COMPRESSED_BYTES = 100 * 1024 * 1024
+PET_ZIP_MAX_UNCOMPRESSED_BYTES = 200 * 1024 * 1024
+PET_ZIP_MAX_FRAME_BYTES = 12 * 1024 * 1024
+PET_ZIP_MAX_FRAMES = 999
+
+
+def _pack_theme_id(pack_dir: Path, pack_id: str) -> str:
+    pack_json = pack_dir / "pack.json"
+    if not pack_json.exists():
+        return pack_id
+    try:
+        return json.loads(pack_json.read_text(encoding="utf-8")).get("theme_ref") or pack_id
+    except (json.JSONDecodeError, OSError):
+        return pack_id
+
+
+def _sync_pet_asset(pack_dir: Path, pack_id: str, filename: str, content: Optional[bytes]):
+    theme_id = _pack_theme_id(pack_dir, pack_id)
+    targets = {theme_id, pack_id}
+    for target_id in targets:
+        assets_dir = settings.CONTENT_DIR / "themes" / target_id / "assets"
+        if content is None:
+            (assets_dir / filename).unlink(missing_ok=True)
+        else:
+            assets_dir.mkdir(parents=True, exist_ok=True)
+            (assets_dir / filename).write_bytes(content)
+
+
+def _replace_pet_action_frames(pack_dir: Path, pack_id: str, action: str, frames):
+    assets_dir = pack_dir / "assets"
+    assets_dir.mkdir(parents=True, exist_ok=True)
+    for existing in assets_dir.glob(f"pet-{action}-*"):
+        if existing.is_file():
+            existing.unlink()
+
+    theme_id = _pack_theme_id(pack_dir, pack_id)
+    runtime_dirs = [
+        settings.CONTENT_DIR / "themes" / target_id / "assets"
+        for target_id in {theme_id, pack_id}
+    ]
+    for runtime_dir in runtime_dirs:
+        if runtime_dir.exists():
+            for existing in runtime_dir.glob(f"pet-{action}-*"):
+                if existing.is_file():
+                    existing.unlink()
+
+    for filename, content in frames:
+        (assets_dir / filename).write_bytes(content)
+        for runtime_dir in runtime_dirs:
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            (runtime_dir / filename).write_bytes(content)
+
+
+def _read_pet_zip_frames(content: bytes, action: str):
+    if len(content) > PET_ZIP_MAX_COMPRESSED_BYTES:
+        raise HTTPException(400, "ZIP file must not exceed 100 MB")
+    try:
+        archive = zipfile.ZipFile(io.BytesIO(content))
+    except zipfile.BadZipFile:
+        raise HTTPException(400, "Invalid ZIP file")
+
+    with archive:
+        entries = []
+        total_size = 0
+        for info in archive.infolist():
+            if info.is_dir():
+                continue
+            normalized = info.filename.replace("\\", "/")
+            filename = normalized.rsplit("/", 1)[-1]
+            if not filename or filename.startswith(".") or "__MACOSX" in normalized.split("/"):
+                continue
+            suffix = Path(filename).suffix.lower()
+            if suffix not in PET_IMAGE_EXTENSIONS:
+                continue
+            if len(filename) < 4 or not filename[:3].isdigit() or filename[:3] == "000":
+                raise HTTPException(400, f"Frame '{filename}' must start with a three-digit sequence such as 001")
+            if info.flag_bits & 0x1:
+                raise HTTPException(400, "Encrypted ZIP entries are not supported")
+            if info.file_size > PET_ZIP_MAX_FRAME_BYTES:
+                raise HTTPException(400, f"Frame '{filename}' exceeds 12 MB")
+            total_size += info.file_size
+            if total_size > PET_ZIP_MAX_UNCOMPRESSED_BYTES:
+                raise HTTPException(400, "Uncompressed animation frames must not exceed 200 MB")
+            entries.append((int(filename[:3]), suffix, info))
+        if len(entries) > PET_ZIP_MAX_FRAMES:
+            raise HTTPException(400, "A ZIP file can contain at most 999 animation frames")
+
+        if not entries:
+            raise HTTPException(400, "ZIP file does not contain supported animation frames")
+        entries.sort(key=lambda item: item[0])
+        sequences = [item[0] for item in entries]
+        if len(sequences) != len(set(sequences)):
+            raise HTTPException(400, "Animation frame sequence numbers must be unique")
+        expected = list(range(1, len(entries) + 1))
+        if sequences != expected:
+            missing = next((number for number in expected if number not in sequences), 1)
+            raise HTTPException(400, f"Animation frame sequence must be continuous from 001; missing {missing:03d}")
+
+        try:
+            return [
+                (f"pet-{action}-{sequence:03d}{suffix}", archive.read(info))
+                for sequence, suffix, info in entries
+            ]
+        except (OSError, RuntimeError, zipfile.BadZipFile) as error:
+            raise HTTPException(400, f"Unable to read ZIP animation frames: {error}")
 
 class PackCreate(BaseModel):
     id: str
@@ -21,6 +128,12 @@ class PackUpdate(BaseModel):
     name: Optional[str] = None
     character: Optional[dict] = None
     theme: Optional[dict] = None
+
+
+class PetConfigUpdate(BaseModel):
+    scale: Optional[float] = None
+    animations: Optional[dict] = None
+    placements: Optional[dict] = None
 
 @router.get("/api/themepacks")
 async def list_packs():
@@ -55,6 +168,143 @@ async def get_pack(pack_id: str):
     if assets_dir.exists():
         result["assets_list"] = [f.name for f in assets_dir.iterdir() if f.is_file()]
     return result
+
+
+@router.get("/api/themepacks/{pack_id}/pet-assets")
+async def list_pack_pet_assets(pack_id: str):
+    pack_dir = pack_manager.get_pack_dir(pack_id)
+    if not pack_dir.exists():
+        raise HTTPException(404, f"Pack '{pack_id}' not found")
+    assets_dir = pack_dir / "assets"
+    result = {action: [] for action in PET_ACTIONS}
+    if assets_dir.exists():
+        for action in PET_ACTIONS:
+            result[action] = sorted(
+                file.name for file in assets_dir.glob(f"pet-{action}-*") if file.is_file()
+            )
+    return result
+
+
+@router.get("/api/themepacks/{pack_id}/pet-config")
+async def get_pack_pet_config(pack_id: str):
+    pack_dir = pack_manager.get_pack_dir(pack_id)
+    if not pack_dir.exists():
+        raise HTTPException(404, f"Pack '{pack_id}' not found")
+    theme_id = _pack_theme_id(pack_dir, pack_id)
+    theme_json = pack_dir / "theme.json"
+    return {"theme_id": theme_id, **read_pet_config(theme_json)}
+
+
+@router.put("/api/themepacks/{pack_id}/pet-config")
+async def update_pack_pet_config(pack_id: str, req: PetConfigUpdate):
+    if req.scale is not None and not 0.6 <= req.scale <= 1.8:
+        raise HTTPException(400, "Pet scale must be between 0.6 and 1.8")
+    try:
+        animations = validate_pet_animations(req.animations) if req.animations is not None else None
+        placements = validate_pet_placements(req.placements) if req.placements is not None else None
+    except ValueError as error:
+        raise HTTPException(400, str(error))
+    pack_dir = pack_manager.get_pack_dir(pack_id)
+    if not pack_dir.exists():
+        raise HTTPException(404, f"Pack '{pack_id}' not found")
+
+    theme_id = _pack_theme_id(pack_dir, pack_id)
+    targets = [pack_dir / "theme.json"]
+    targets.extend(
+        settings.CONTENT_DIR / "themes" / target_id / "theme.json"
+        for target_id in {theme_id, pack_id}
+    )
+    for target in targets:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        data = {}
+        if target.exists():
+            try:
+                data = json.loads(target.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                data = {}
+        if req.scale is not None:
+            data["pet_scale"] = req.scale
+        if animations is not None:
+            data["pet_animations"] = animations
+        if placements is not None:
+            data["pet_placements"] = placements
+            data.pop("pet_layout", None)
+        target.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {"status": "ok", "theme_id": theme_id, **read_pet_config(pack_dir / "theme.json")}
+
+
+@router.post("/api/themepacks/{pack_id}/pet-assets/{action}")
+async def upload_pack_pet_asset(pack_id: str, action: str, file: UploadFile = File(...)):
+    if action not in PET_ACTIONS:
+        raise HTTPException(400, "Unsupported pet action")
+    pack_dir = pack_manager.get_pack_dir(pack_id)
+    if not pack_dir.exists():
+        raise HTTPException(404, f"Pack '{pack_id}' not found")
+
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix not in PET_IMAGE_EXTENSIONS:
+        raise HTTPException(400, "Pet frames must be PNG, WebP, JPG, or GIF images")
+
+    assets_dir = pack_dir / "assets"
+    assets_dir.mkdir(parents=True, exist_ok=True)
+    indexes = []
+    for existing in assets_dir.glob(f"pet-{action}-*"):
+        try:
+            indexes.append(int(existing.stem.rsplit("-", 1)[-1]))
+        except ValueError:
+            continue
+    filename = f"pet-{action}-{max(indexes, default=0) + 1:03d}{suffix}"
+    content = await file.read()
+    (assets_dir / filename).write_bytes(content)
+    _sync_pet_asset(pack_dir, pack_id, filename, content)
+    return {"status": "ok", "filename": filename, "size": len(content)}
+
+
+@router.post("/api/themepacks/{pack_id}/pet-assets/{action}/zip")
+async def replace_pack_pet_assets_from_zip(pack_id: str, action: str, file: UploadFile = File(...)):
+    if action not in PET_ACTIONS:
+        raise HTTPException(400, "Unsupported pet action")
+    if Path(file.filename or "").suffix.lower() != ".zip":
+        raise HTTPException(400, "Animation archive must be a ZIP file")
+    pack_dir = pack_manager.get_pack_dir(pack_id)
+    if not pack_dir.exists():
+        raise HTTPException(404, f"Pack '{pack_id}' not found")
+
+    frames = _read_pet_zip_frames(await file.read(), action)
+    _replace_pet_action_frames(pack_dir, pack_id, action, frames)
+    return {
+        "status": "ok",
+        "action": action,
+        "count": len(frames),
+        "filenames": [filename for filename, _content in frames],
+    }
+
+
+@router.delete("/api/themepacks/{pack_id}/pet-assets/{action}/all")
+async def delete_pack_pet_action_frames(pack_id: str, action: str):
+    if action not in PET_ACTIONS:
+        raise HTTPException(400, "Unsupported pet action")
+    pack_dir = pack_manager.get_pack_dir(pack_id)
+    if not pack_dir.exists():
+        raise HTTPException(404, f"Pack '{pack_id}' not found")
+
+    assets_dir = pack_dir / "assets"
+    deleted = sum(1 for path in assets_dir.glob(f"pet-{action}-*") if path.is_file()) if assets_dir.exists() else 0
+    _replace_pet_action_frames(pack_dir, pack_id, action, [])
+    return {"status": "ok", "action": action, "deleted": deleted}
+
+
+@router.delete("/api/themepacks/{pack_id}/pet-assets/{filename}")
+async def delete_pack_pet_asset(pack_id: str, filename: str):
+    if Path(filename).name != filename or not filename.startswith("pet-"):
+        raise HTTPException(400, "Invalid pet frame filename")
+    pack_dir = pack_manager.get_pack_dir(pack_id)
+    target = pack_dir / "assets" / filename
+    if not target.exists():
+        raise HTTPException(404, f"Pet frame '{filename}' not found")
+    target.unlink()
+    _sync_pet_asset(pack_dir, pack_id, filename, None)
+    return {"status": "ok"}
 
 @router.post("/api/themepacks")
 async def create_pack(req: PackCreate):

@@ -18,6 +18,10 @@
         </Transition>
       </router-view>
     </main>
+    <PetOverlay
+      v-if="showWebPet"
+      :theme="themeStore.current"
+    />
     <Toast />
   </div>
 </template>
@@ -33,7 +37,9 @@ import { useBrightness } from './composables/useBrightness'
 import Toast from './components/Toast.vue'
 import ParticleBg from './components/ParticleBg.vue'
 import LoginScreen from './components/LoginScreen.vue'
+import PetOverlay from './components/pet/PetOverlay.vue'
 import { getAuthStatus, onAuthenticationRequired } from './utils/auth'
+import { isDesktopPetAvailable } from './utils/pet'
 
 const route = useRoute()
 const router = useRouter()
@@ -42,11 +48,18 @@ const sessionStore = useSessionStore()
 const themeStore = useThemeStore()
 const { update: updateBrightness } = useBrightness()
 const isPetRoute = computed(() => route.path === '/pet')
+const desktopPetAvailable = isDesktopPetAvailable()
 
 const bgReady = ref(true)
 const authChecking = ref(true)
 const authRequired = ref(false)
 const authenticated = ref(false)
+const showWebPet = computed(() => (
+  !isPetRoute.value
+  && !desktopPetAvailable
+  && !authChecking.value
+  && (!authRequired.value || authenticated.value)
+))
 let currentBgUrl = ''
 let coreInitialized = false
 let removeAuthListener = null

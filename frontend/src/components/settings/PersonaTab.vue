@@ -144,7 +144,11 @@
 
       <!-- 素材标签 -->
       <div v-if="editorTab === 'assets'" class="tab-panel">
-        <AssetUploader :pack-id="editingPackId" @icon-uploaded="$emit('pack-changed')" />
+        <AssetUploader
+          :pack-id="editingPackId"
+          :theme-id="editingPack.themeRef || editingPackId"
+          @icon-uploaded="$emit('pack-changed')"
+        />
       </div>
 
       <div class="actions">
@@ -291,6 +295,7 @@ function normalizePack(data) {
   return {
     id: data.id || '',
     name: data.name || data.id || '',
+    themeRef: data.theme_ref || data.id || '',
     character: {
       name: data.character?.name || '',
       description: data.character?.description || '',

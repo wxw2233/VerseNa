@@ -253,6 +253,53 @@ async def test_identical_tool_call_reuses_result_without_second_execution(tmp_pa
 
 
 @pytest.mark.asyncio
+async def test_intermediate_text_is_kept_out_of_saved_final_answer():
+    tool_call = {
+        "id": "call_intermediate",
+        "type": "function",
+        "function": {"name": "counter", "arguments": '{"value": 1}'},
+    }
+
+    class StagedAdapter(BaseModelAdapter):
+        def __init__(self):
+            self.calls = 0
+
+        async def chat(self, messages, tools=None, stream=True, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                yield ModelResponse(content="阶段性说明", tool_calls=[tool_call])
+            else:
+                yield ModelResponse(content="最终总结")
+
+        async def list_models(self):
+            return ["staged-model"]
+
+    class Registry:
+        def create_context(self, session_id, **kwargs):
+            return object()
+
+        async def execute(self, name, arguments, **kwargs):
+            return json.dumps({"success": True, "data": {"value": arguments["value"]}})
+
+    events = [event async for event in ReActAgent(
+        StagedAdapter(),
+        MemoryManager(),
+        tool_registry=Registry(),
+    ).run("staged-session", "执行", tools=[{}])]
+
+    text = "".join(
+        event["segment"].get("content", "")
+        for event in events
+        if event.get("segment", {}).get("type") == "text"
+    )
+    assert text == "阶段性说明最终总结"
+
+    history = await db.get_history("staged-session")
+    assistant = next(message for message in history if message["role"] == "assistant")
+    assert assistant["content"] == "最终总结"
+
+
+@pytest.mark.asyncio
 async def test_stop_cancels_active_tool_and_skips_remaining_calls():
     tool_calls = [
         {

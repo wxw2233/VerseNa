@@ -51,14 +51,18 @@
       </div>
       <input type="file" ref="audioInput" @change="handleAudioUpload" accept="audio/*" hidden />
     </div>
+
+    <PetAssetEditor :pack-id="packId" :theme-id="themeId" />
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted, watch } from 'vue'
+import PetAssetEditor from './pet/PetAssetEditor.vue'
 
 const props = defineProps({
-  packId: { type: String, required: true }
+  packId: { type: String, required: true },
+  themeId: { type: String, default: '' },
 })
 
 const emit = defineEmits(['icon-uploaded'])

@@ -26,7 +26,7 @@
 - 🧠 **记忆系统** — 自动提取 + 手动管理，支持分类和搜索
 - 📡 **QQ 机器人** — WebSocket 模式，支持私聊和群聊
 - 🎨 **主题定制** — 4 色配置 + 背景图 + 自适应亮度
-- 🐾 **桌宠模式** — Windows Electron 桌面端支持独立透明桌宠和状态动画帧
+- 🐾 **桌宠模式** — WebUI 与 Windows Electron 桌面端支持主题动画帧，Electron 可显示独立透明桌宠
 
 ## 📦 技术栈
 
@@ -171,19 +171,35 @@ Windows 安装包和旧 Termux 压缩包不使用该更新通道。已有源码�
 - `variables.css` — CSS 变量
 - `assets/` — 图标/背景/参考音频
 
-Windows Electron 桌宠会按当前主题读取可选动画帧，文件放在主题的 `assets/` 目录，命名格式为：
+桌宠会按当前主题读取可选动画帧，文件放在主题的 `assets/` 目录，命名格式为：
 
 ```text
-pet-idle-01.png
-pet-idle-02.png
-pet-thinking-01.png
-pet-tool-01.png
-pet-speaking-01.png
-pet-done-01.png
-pet-error-01.png
+pet-idle-001.png
+pet-idle-002.png
+pet-blink-001.png
+pet-thinking-001.png
+pet-tool-001.png
+pet-working-001.png
+pet-walk-001.png
+pet-jump-001.png
+pet-wave-001.png
 ```
 
-每个状态可以提供多帧图片；缺少对应素材时会显示内置占位角色。桌宠通过 Electron 主窗口的桌宠按钮或系统托盘打开，浏览器和 Termux 部署不启用该入口。
+每个状态可以提供多帧图片；缺少对应素材时会显示内置占位角色。WebUI 可在页面内显示桌宠，Electron 还可通过主窗口按钮或系统托盘打开独立、始终置顶的透明桌宠窗口。
+
+桌宠会根据实时消息流自动切换活动动画：深度思考使用 `thinking`，工具执行和等待批准使用 `tool`，生成正文回复使用 `working`。旧主题缺少这些状态素材时会自动回退到 `walk`，不会中断播放。
+
+素材编辑器支持为单个动作上传 ZIP 并整组覆盖旧帧。ZIP 内的图片可以放在子目录中，文件名必须以连续的三位序号开头，序号后的名称不作限制，例如：
+
+```text
+001.png
+002闭眼.webp
+003-wave-frame.jpg
+```
+
+序号必须从 `001` 开始连续递增且不能重复。支持 PNG、WebP、JPG、JPEG 和 GIF；上传前会完成全部校验，校验失败不会删除已有动画帧。
+
+每个动作都可以单独调整显示位置和缩放。点击 ZIP 上传按钮旁的移动图标，会以该动作的 `001` 帧打开九宫格预览；拖动图片调整位置，使用滑杆或鼠标滚轮调整大小。保存后的参数会统一应用到该动作的全部帧，并在 WebUI 与 Electron 桌宠中同步生效。配置保存在 `theme.json` 的 `pet_placements` 字段中。
 
 支持导入/导出 ZIP 格式。
 

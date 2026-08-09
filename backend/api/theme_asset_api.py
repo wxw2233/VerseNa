@@ -3,6 +3,7 @@ from api.log_api import log_info, log_error
 from fastapi import APIRouter, UploadFile, File, HTTPException
 from fastapi.responses import FileResponse
 from config import settings
+from pet_config import read_pet_config
 
 router = APIRouter()
 
@@ -22,6 +23,26 @@ async def rename_asset(theme_id: str, filename: str, to: str = ""):
         return {"status": "ok"}
     return {"status": "not_found"}
 THEMES_DIR = settings.CONTENT_DIR / "themes"
+PET_ACTIONS = ("idle", "blink", "walk", "jump", "wave", "thinking", "tool", "speaking", "working", "stopping", "done", "error")
+
+
+@router.get("/api/themes/{theme_id}/pet-config")
+async def get_pet_config(theme_id: str):
+    return {"theme_id": theme_id, **read_pet_config(THEMES_DIR / theme_id / "theme.json")}
+
+@router.get("/api/themes/{theme_id}/pet-assets")
+async def list_pet_assets(theme_id: str):
+    """Return ordered desktop-pet frames available for a theme."""
+    assets_dir = THEMES_DIR / theme_id / "assets"
+    result = {action: [] for action in PET_ACTIONS}
+    if not assets_dir.exists():
+        return result
+
+    for action in PET_ACTIONS:
+        result[action] = sorted(
+            file.name for file in assets_dir.glob(f"pet-{action}-*") if file.is_file()
+        )
+    return result
 
 @router.post("/api/themes/{theme_id}/upload")
 async def upload_asset(theme_id: str, file: UploadFile = File(...)):

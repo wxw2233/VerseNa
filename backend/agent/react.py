@@ -92,6 +92,7 @@ class ReActAgent:
                     break
 
         full_response = ""
+        final_response = ""
         loops = 0
         tool_seq = 0  # 工具调用序号
         generation_stopped = False
@@ -278,6 +279,7 @@ class ReActAgent:
                     break
 
                 if not tool_calls:
+                    final_response = chunk_content
                     break
 
                 # 验证 tool_calls 的 arguments 是有效 JSON
@@ -410,14 +412,15 @@ class ReActAgent:
             message_metadata["reasoning_available"] = reasoning_available
 
         # done 事件
+        assistant_response = final_response or full_response
         await self.memory.add_message(
             session_id,
             "assistant",
-            full_response,
+            assistant_response,
             persona=persona,
             metadata=message_metadata,
         )
-        await self.memory.post_conversation(session_id, user_message, full_response)
+        await self.memory.post_conversation(session_id, user_message, assistant_response)
 
         emotion = persona_manager.get_emotion_engine(persona) if hasattr(self, '_persona_manager') else None
         emoji = ""

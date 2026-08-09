@@ -10,7 +10,6 @@
           <Plus :size="17" aria-hidden="true" />
         </button>
         <button
-          v-if="desktopPetAvailable"
           class="pet-btn"
           type="button"
           title="打开桌宠"
@@ -204,15 +203,13 @@ import { useSessionStore } from '../stores/session'
 import { useChatStore } from '../stores/chat'
 import { usePersonaStore } from '../stores/persona'
 import { useThemeStore } from '../stores/theme'
-import { isDesktopPetAvailable, openDesktopPet } from '../utils/pet'
+import { openDesktopPet } from '../utils/pet'
 
 const sessionStore = useSessionStore()
 const chatStore = useChatStore()
 const personaStore = usePersonaStore()
 const themeStore = useThemeStore()
 const toast = useToast()
-const desktopPetAvailable = isDesktopPetAvailable()
-
 function openPet() {
   openDesktopPet()
 }
@@ -477,12 +474,12 @@ async function saveEdit() {
   z-index: 2;
 }
 .session-header {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  width: 85%;
+  width: calc(100% - 20px);
   margin: 12px 10px 8px;
-  padding: 6px 8px 6px 12px;
+  padding: 6px;
   box-sizing: border-box;
   border: 1px solid rgba(255, 255, 255, 0.10);
   border-radius: 999px;
@@ -500,13 +497,14 @@ async function saveEdit() {
   align-items: center;
   gap: 8px;
   min-width: 0;
+  overflow: hidden;
 }
 
 .header-right {
   display: flex;
   align-items: center;
   flex-shrink: 0;
-  gap: 6px;
+  gap: 2px;
 }
 
 .logo {
@@ -514,12 +512,17 @@ async function saveEdit() {
   font-weight: bold;
   text-decoration: none;
   letter-spacing: 1px;
+  white-space: nowrap;
 }
 
 .header-title {
   font-size: 14px;
   color: var(--text-secondary);
   white-space: nowrap;
+}
+
+@media (max-width: 1440px) {
+  .header-title { display: none; }
 }
 
 .settings-btn,
@@ -919,6 +922,7 @@ async function saveEdit() {
 
 @media (min-width: 768px) and (max-width: 1024px) {
   .session-panel { width: 200px; }
+  .logo { font-size: 16px; }
 }
 
 @media (min-width: 1441px) {

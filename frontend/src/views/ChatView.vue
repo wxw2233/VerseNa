@@ -150,7 +150,8 @@ import { useSessionStore } from '../stores/session'
 import { useThemeStore } from '../stores/theme'
 import { cancelBrowserSpeech, speakWithBrowser } from '../utils/browserSpeech'
 import { prepareTextForSpeech } from '../utils/ttsText'
-import { setDesktopPetState } from '../utils/pet'
+import { detectAgentPetState, setDesktopPetState } from '../utils/pet'
+import { finalAnswerText } from '../utils/agentTimeline'
 import ChatBubble from '../components/ChatBubble.vue'
 import ChatInput from '../components/ChatInput.vue'
 import SessionList from '../components/SessionList.vue'
@@ -257,14 +258,11 @@ let autoSpeechRun = 0
 let petDoneTimer = null
 
 const petState = computed(() => {
-  if (store.isStopping) return 'stopping'
-  if (!store.isStreaming) return 'idle'
-
-  const assistant = [...store.messages].reverse().find(message => message.role === 'assistant' && message.streaming)
-  const segments = assistant?.segments || []
-  if (segments.some(segment => segment.type === 'tool' && segment.status === 'running')) return 'tool'
-  if (segments.some(segment => segment.type === 'reasoning' && segment.status === 'running')) return 'thinking'
-  return 'working'
+  return detectAgentPetState({
+    isStopping: store.isStopping,
+    isStreaming: store.isStreaming,
+    messages: store.messages,
+  })
 })
 
 function syncPetState() {
@@ -276,7 +274,7 @@ watch([petState, () => themeStore.current], syncPetState, { immediate: true })
 
 
 
-const BOTTOM_THRESHOLD = 80
+const BOTTOM_THRESHOLD = 12
 
 function resetUnreadState() {
   unreadCount.value = 0
@@ -330,9 +328,10 @@ function scrollToBottom(smooth = false) {
   })
 }
 
-watch(() => store.messages.length, (newLen, oldLen) => {
-  if (newLen > oldLen && isAtBottom.value) scrollToBottom()
-})
+// 消息内容在同一个流式消息内持续变化，等待 DOM 完成更新后再保持底部锁定。
+watch(() => store.messages, () => {
+  if (isAtBottom.value) scrollToBottom()
+}, { deep: true, flush: 'post' })
 
 // 会话切换后滚动到底部
 watch(() => sessionStore.currentSessionId, () => {
@@ -689,7 +688,7 @@ async function autoSpeakLast() {
   if (!last || last.role !== 'assistant') return
   let text = ''
   if (last.segments) {
-    text = last.segments.filter(s => s.type === 'text').map(s => s.content).join('')
+    text = finalAnswerText(last.segments)
   } else {
     text = last.content || ''
   }
@@ -807,9 +806,8 @@ async function autoTitleIfNeeded() {
       body: JSON.stringify({
         user_message: userMsg.content,
         assistant_message: assistantMsg.segments
-          ?.filter(segment => segment.type === 'text')
-          .map(segment => segment.content || '')
-          .join('') || assistantMsg.content || '',
+          ? finalAnswerText(assistantMsg.segments)
+          : assistantMsg.content || '',
       })
     })
     const data = await resp.json()

@@ -9,6 +9,7 @@ let tray = null
 let backendProcess = null
 let isQuitting = false
 let latestPetState = { state: 'idle', theme: '' }
+const PET_BASE_SIZE = { width: 190, height: 230 }
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock()
 if (!hasSingleInstanceLock) {
@@ -238,10 +239,10 @@ function createPetWindow() {
   }
 
   petWindow = new BrowserWindow({
-    width: 190,
-    height: 230,
-    minWidth: 120,
-    minHeight: 140,
+    width: PET_BASE_SIZE.width,
+    height: PET_BASE_SIZE.height,
+    minWidth: Math.round(PET_BASE_SIZE.width * 0.6),
+    minHeight: Math.round(PET_BASE_SIZE.height * 0.6),
     maxWidth: 420,
     maxHeight: 500,
     title: 'VerseNa 桌宠',
@@ -254,7 +255,7 @@ function createPetWindow() {
     closable: true,
     skipTaskbar: true,
     hasShadow: false,
-    alwaysOnTop: false,
+    alwaysOnTop: true,
     show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -262,6 +263,8 @@ function createPetWindow() {
       contextIsolation: true,
     },
   })
+
+  petWindow.setAlwaysOnTop(true, 'floating')
 
   petWindow.setMenu(null)
   petWindow.loadURL(getFrontendUrl('/pet'))
@@ -378,6 +381,20 @@ ipcMain.handle('close-pet', () => {
   if (petWindow && !petWindow.isDestroyed()) petWindow.hide()
   return true
 })
+ipcMain.handle('resize-pet', (_event, scale) => {
+  if (!petWindow || petWindow.isDestroyed()) return false
+  const numericScale = Number(scale)
+  if (!Number.isFinite(numericScale)) return false
+  const clamped = Math.min(1.8, Math.max(0.6, numericScale))
+  petWindow.setSize(
+    Math.round(PET_BASE_SIZE.width * clamped),
+    Math.round(PET_BASE_SIZE.height * clamped),
+  )
+  if (!petWindow.webContents.isLoading()) {
+    petWindow.webContents.send('pet-scale', clamped)
+  }
+  return true
+})
 ipcMain.on('pet-state', (_event, state) => {
   if (!state || typeof state !== 'object') return
   latestPetState = {
@@ -386,6 +403,12 @@ ipcMain.on('pet-state', (_event, state) => {
   }
   if (petWindow && !petWindow.isDestroyed() && !petWindow.webContents.isLoading()) {
     petWindow.webContents.send('pet-state', latestPetState)
+  }
+})
+ipcMain.on('pet-config', (_event, config) => {
+  if (!config || typeof config !== 'object') return
+  if (petWindow && !petWindow.isDestroyed() && !petWindow.webContents.isLoading()) {
+    petWindow.webContents.send('pet-config', config)
   }
 })
 

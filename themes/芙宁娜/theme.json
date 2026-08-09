@@ -20,5 +20,90 @@
     "--bubble-agent": "rgba(0,0,20,0.9)",
     "secondary": "#f20202",
     "highlight": "#00558a"
+  },
+  "pet_scale": 1.0,
+  "pet_animations": {
+    "idle": {
+      "fps": 15.0,
+      "mode": "loop",
+      "after": "idle"
+    },
+    "blink": {
+      "fps": 20.0,
+      "mode": "once",
+      "after": "idle"
+    },
+    "thinking": {
+      "fps": 20.0,
+      "mode": "loop",
+      "after": "idle"
+    },
+    "tool": {
+      "fps": 20.0,
+      "mode": "loop",
+      "after": "idle"
+    },
+    "working": {
+      "fps": 20.0,
+      "mode": "loop",
+      "after": "idle"
+    },
+    "walk": {
+      "fps": 20.0,
+      "mode": "loop",
+      "after": "idle"
+    },
+    "jump": {
+      "fps": 12.0,
+      "mode": "once",
+      "after": "idle"
+    },
+    "wave": {
+      "fps": 27.0,
+      "mode": "loop",
+      "after": "idle"
+    }
+  },
+  "pet_placements": {
+    "idle": {
+      "x": 0.007500076293945312,
+      "y": -0.05200004577636719,
+      "scale": 0.92
+    },
+    "blink": {
+      "x": 0.125,
+      "y": -0.06600006103515625,
+      "scale": 1.0
+    },
+    "thinking": {
+      "x": 0.0,
+      "y": 0.0,
+      "scale": 1.0
+    },
+    "tool": {
+      "x": 0.0,
+      "y": 0.0,
+      "scale": 1.0
+    },
+    "working": {
+      "x": 0.0,
+      "y": 0.0,
+      "scale": 1.0
+    },
+    "walk": {
+      "x": 0.0,
+      "y": 0.0,
+      "scale": 1.0
+    },
+    "jump": {
+      "x": 0.0,
+      "y": 0.0,
+      "scale": 1.0
+    },
+    "wave": {
+      "x": 0.0,
+      "y": 0.0,
+      "scale": 1.0
+    }
   }
 }

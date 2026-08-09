@@ -17,9 +17,9 @@
           </div>
         </div>
         <div class="tp-actions">
-          <button class="btn-sm" @click="exportPack(pack.id)" title="导出">📦</button>
-          <button class="btn-sm" @click="applyPack(pack.id)" title="一键更新关联会话">⚡</button>
-          <button class="btn-sm btn-sm-danger" @click="deletePack(pack.id)" title="删除">🗑</button>
+          <button class="btn-sm" @click="exportPack(pack.id)" title="导出"><Package :size="15" /></button>
+          <button class="btn-sm" @click="applyPack(pack.id)" title="一键更新关联会话"><Zap :size="15" /></button>
+          <button class="btn-sm btn-sm-danger" @click="deletePack(pack.id)" title="删除"><Trash2 :size="15" /></button>
         </div>
       </div>
       <div v-if="themePacks.length === 0" class="empty-hint">暂无主题包</div>
@@ -35,7 +35,7 @@
 </template>
 
 <script setup>
-import { useThemeStore } from '../../stores/theme'
+import { Package, Trash2, Zap } from 'lucide-vue-next'
 import { useToast } from '../../composables/useToast'
 
 const props = defineProps({
@@ -44,12 +44,12 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['pack-changed'])
-const themeStore = useThemeStore()
 const toast = useToast()
 
 function packIconUrl(packId) {
   return props.packIcons[packId] || null
 }
+
 
 async function exportPack(packId) {
   try {
@@ -176,6 +176,7 @@ async function importPack(e) {
 }
 .tp-actions { display: flex; gap: 4px; }
 
+
 .btn-sm {
   width: 36px;
   height: 36px;
@@ -234,5 +235,11 @@ async function importPack(e) {
   padding: 24px;
   color: var(--text-secondary);
   font-size: 14px;
+}
+
+@media (max-width: 640px) {
+  .tp-card { padding: 10px; gap: 8px; }
+  .tp-actions { gap: 2px; }
+  .btn-sm { width: 32px; height: 32px; }
 }
 </style>
