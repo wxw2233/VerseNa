@@ -29,7 +29,12 @@
             <ChevronDown class="agent-work-arrow" :class="{ open: workExpanded }" :size="14" aria-hidden="true" />
           </button>
 
-          <div v-if="workExpanded" class="agent-work-content">
+          <div
+            v-if="workExpanded"
+            ref="workContentRef"
+            class="agent-work-content"
+            @scroll="handleWorkScroll"
+          >
             <template v-for="entry in workEntries" :key="entry.key">
               <div v-if="entry.segment.type === 'reasoning'" class="work-reasoning" :data-status="entry.segment.status">
                 <button
@@ -96,12 +101,72 @@
           </div>
         </section>
 
-        <div
-          v-for="(seg, index) in answerSegments"
-          :key="'answer-' + index"
-          class="text-seg"
-          v-html="renderText(seg.content)"
-        ></div>
+        <template v-for="(seg, index) in answerSegments" :key="seg.choice_id || 'answer-' + index">
+          <div
+            v-if="seg.type === 'text'"
+            class="text-seg"
+            v-html="renderText(seg.content)"
+          ></div>
+          <div
+            v-else-if="seg.type === 'choice'"
+            class="choice-seg"
+            :class="{ resolved: choiceResolved }"
+          >
+            <div v-if="!choiceResolved" class="choice-attention">
+              <MousePointerClick :size="14" aria-hidden="true" />
+              <span>请选择一个选项</span>
+            </div>
+            <div class="choice-question">{{ seg.question }}</div>
+            <div class="choice-options">
+              <button
+                v-for="option in seg.options"
+                :key="option.id"
+                type="button"
+                class="choice-option"
+                :disabled="choiceResolved || msg.streaming"
+                @click="emit('choose', { choice: seg, option })"
+              >
+                <span class="choice-key">{{ option.id }}</span>
+                <span class="choice-copy">
+                  <strong>{{ option.label }}</strong>
+                  <small v-if="option.description">{{ option.description }}</small>
+                </span>
+              </button>
+              <button
+                type="button"
+                class="choice-option choice-other"
+                :disabled="choiceResolved || msg.streaming"
+                @click="openOtherChoice(seg)"
+              >
+                <span class="choice-key"><MessageSquareText :size="14" aria-hidden="true" /></span>
+                <span class="choice-copy">
+                  <strong>其他选项</strong>
+                  <small>输入你自己的想法</small>
+                </span>
+              </button>
+            </div>
+            <div v-if="otherChoiceOpen[seg.choice_id] && !choiceResolved" class="choice-other-editor">
+              <input
+                v-model="otherChoiceText[seg.choice_id]"
+                type="text"
+                maxlength="500"
+                autofocus
+                placeholder="输入你的想法"
+                @keydown.enter.prevent="submitOtherChoice(seg)"
+              />
+              <button
+                type="button"
+                :disabled="!otherChoiceText[seg.choice_id]?.trim()"
+                title="发送其他选项"
+                aria-label="发送其他选项"
+                @click="submitOtherChoice(seg)"
+              >
+                <Send :size="14" aria-hidden="true" />
+              </button>
+            </div>
+            <div v-if="choiceResolved" class="choice-resolved">已选择</div>
+          </div>
+        </template>
       </template>
 
       <span v-if="msg.emoji" class="emoji">{{ msg.emoji }}</span>
@@ -150,16 +215,16 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onBeforeUnmount, watch } from 'vue'
+import { ref, reactive, computed, nextTick, onBeforeUnmount, watch } from 'vue'
 import { marked } from 'marked'
-import { BrainCircuit, ChevronDown, FileText, Pencil, RefreshCcw, Volume1, Volume2 } from 'lucide-vue-next'
+import { BrainCircuit, ChevronDown, FileText, MessageSquareText, MousePointerClick, Pencil, RefreshCcw, Send, Volume1, Volume2 } from 'lucide-vue-next'
 import { useSessionStore } from '../stores/session'
 import { useThemeStore } from '../stores/theme'
 import { useToast } from '../composables/useToast'
 import { cancelBrowserSpeech, speakWithBrowser } from '../utils/browserSpeech'
 import { prepareTextForSpeech } from '../utils/ttsText'
 import { setDesktopPetState } from '../utils/pet'
-import { finalAnswerText, splitAgentSegments } from '../utils/agentTimeline'
+import { finalAnswerText, inferTextChoice, splitAgentSegments } from '../utils/agentTimeline'
 
 const sessionStore = useSessionStore()
 const themeStore = useThemeStore()
@@ -176,11 +241,18 @@ function renderText(content) {
   return marked.parse(content)
 }
 
-const props = defineProps({ msg: Object })
-const emit = defineEmits(['retry', 'edit'])
+const props = defineProps({
+  msg: Object,
+  choiceResolved: { type: Boolean, default: false },
+})
+const emit = defineEmits(['retry', 'edit', 'choose'])
 const workExpanded = ref(Boolean(props.msg.streaming))
 const expandedReasoning = reactive({})
+const otherChoiceOpen = reactive({})
+const otherChoiceText = reactive({})
 const reasoningClock = ref(Date.now())
+const workContentRef = ref(null)
+const workFollowsBottom = ref(true)
 let reasoningTimer = null
 let activeReasoningId = null
 let activeReasoningStartedAt = 0
@@ -205,7 +277,16 @@ function confirmEdit() {
 
 const segmentGroups = computed(() => splitAgentSegments(props.msg.segments || []))
 const workSegments = computed(() => segmentGroups.value.work)
-const answerSegments = computed(() => segmentGroups.value.answer.filter(segment => segment.type === 'text'))
+const answerSegments = computed(() => {
+  if (props.msg.streaming) return segmentGroups.value.answer
+  const inferred = inferTextChoice(segmentGroups.value.answer)
+  if (!inferred) return segmentGroups.value.answer
+  return [
+    ...(inferred.before ? [{ type: 'text', content: inferred.before }] : []),
+    inferred.choice,
+    ...(inferred.after ? [{ type: 'text', content: inferred.after }] : []),
+  ]
+})
 const hasTools = computed(() => workSegments.value.some(segment => segment.type === 'tool'))
 
 const reasoningEntries = computed(() =>
@@ -268,6 +349,34 @@ function syncReasoningClock(entries) {
 }
 
 watch(reasoningEntries, syncReasoningClock, { deep: true, immediate: true })
+
+const WORK_SCROLL_THRESHOLD = 12
+
+function workIsAtBottom(element) {
+  return element.scrollHeight - element.scrollTop - element.clientHeight <= WORK_SCROLL_THRESHOLD
+}
+
+function handleWorkScroll(event) {
+  workFollowsBottom.value = workIsAtBottom(event.currentTarget)
+}
+
+function scrollWorkToBottom() {
+  const element = workContentRef.value
+  if (!element || !workFollowsBottom.value) return
+  element.scrollTop = element.scrollHeight
+}
+
+// 工作段持续追加时，只在用户仍位于底部的情况下跟随；手动上移后保持用户视口。
+watch(workEntries, async () => {
+  await nextTick()
+  scrollWorkToBottom()
+}, { deep: true, flush: 'post' })
+
+watch(workExpanded, async (expanded) => {
+  if (!expanded) return
+  await nextTick()
+  scrollWorkToBottom()
+})
 
 const workStatus = computed(() => {
   if (workSegments.value.some(segment => segment.status === 'running')) return 'running'
@@ -382,6 +491,20 @@ function getPlainText() {
     ? finalAnswerText(props.msg.segments)
     : props.msg.content || ''
   return prepareTextForSpeech(text)
+}
+
+function openOtherChoice(segment) {
+  if (props.choiceResolved || props.msg.streaming) return
+  otherChoiceOpen[segment.choice_id] = true
+}
+
+function submitOtherChoice(segment) {
+  const value = otherChoiceText[segment.choice_id]?.trim()
+  if (!value || props.choiceResolved || props.msg.streaming) return
+  emit('choose', {
+    choice: segment,
+    option: { id: '其他', label: value, custom: true },
+  })
 }
 
 async function speakText() {
@@ -588,6 +711,168 @@ onBeforeUnmount(() => {
 .text-seg :deep(em) { font-style: italic; }
 .text-seg :deep(del) { text-decoration: line-through; color: var(--text-secondary); }
 
+.choice-seg {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid rgba(124, 92, 252, 0.34);
+  border-radius: 7px;
+  background: rgba(124, 92, 252, 0.055);
+  animation: choice-attention-pulse 1.15s ease-in-out 4;
+}
+
+.choice-seg.resolved {
+  animation: none;
+}
+
+.choice-attention {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 7px;
+  color: var(--primary);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.choice-question {
+  margin-bottom: 8px;
+  color: var(--text-primary);
+  font-size: var(--font-size-base);
+  line-height: var(--line-height);
+}
+
+.choice-options {
+  display: grid;
+  gap: 7px;
+}
+
+.choice-option {
+  width: 100%;
+  min-height: 46px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.045);
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color var(--motion-fast) var(--ease-standard), background var(--motion-fast) var(--ease-standard), transform var(--motion-fast) var(--ease-standard);
+}
+
+.choice-option:hover:not(:disabled) {
+  color: var(--text-primary);
+  background: rgba(124, 92, 252, 0.1);
+  border-color: rgba(124, 92, 252, 0.55);
+  transform: translateY(-1px);
+}
+
+.choice-option:disabled {
+  cursor: default;
+  opacity: 0.52;
+}
+
+.choice-key {
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 26px;
+  color: var(--primary);
+  background: rgba(124, 92, 252, 0.12);
+  border: 1px solid rgba(124, 92, 252, 0.28);
+  border-radius: 5px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.choice-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.choice-copy strong {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.choice-copy small {
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.choice-resolved {
+  margin-top: 6px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.choice-other-editor {
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 8px;
+}
+
+.choice-other-editor input {
+  min-width: 0;
+  height: 38px;
+  flex: 1;
+  padding: 0 10px;
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.055);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 6px;
+  outline: none;
+}
+
+.choice-other-editor input:focus {
+  border-color: var(--primary);
+}
+
+.choice-other-editor button {
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 38px;
+  color: white;
+  background: var(--primary);
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.choice-other-editor button:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+@keyframes choice-attention-pulse {
+  0%, 100% {
+    border-color: rgba(124, 92, 252, 0.34);
+    box-shadow: 0 0 0 0 rgba(124, 92, 252, 0);
+  }
+  50% {
+    border-color: rgba(124, 92, 252, 0.78);
+    box-shadow: 0 0 0 3px rgba(124, 92, 252, 0.12), 0 0 18px rgba(124, 92, 252, 0.18);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .choice-seg { animation: none; }
+}
+
 .agent-work {
   margin: 2px 0 8px;
   color: var(--text-secondary);
@@ -624,6 +909,7 @@ onBeforeUnmount(() => {
   margin: 0 8px 8px;
   padding: 6px 0 4px 12px;
   overflow: auto;
+  overscroll-behavior: contain;
   border-left: 1px solid rgba(255, 255, 255, 0.16);
   line-height: 1.65;
 }

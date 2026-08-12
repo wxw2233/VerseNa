@@ -20,6 +20,27 @@ def test_health(client):
     resp = client.get("/health")
     assert resp.status_code == 200
     assert resp.json()["status"] == "ok"
+    assert resp.json()["service"] == "VerseNa"
+    assert "instance_id" in resp.json()
+
+
+def test_skill_commands_api(client, monkeypatch):
+    commands = [{
+        "command": "brainstorming",
+        "name": "brainstorming",
+        "description": "Explore the idea first.",
+        "skill_id": "superpowers",
+        "skill_name": "Superpowers",
+        "source": "installed",
+        "aliases": ["superpowers:brainstorming"],
+    }]
+    monkeypatch.setattr("api.skill_api.skill_manager.list_commands", lambda: commands)
+
+    response = client.get("/api/skills/commands")
+
+    assert response.status_code == 200
+    assert response.json()[1:] == commands
+    assert response.json()[0]["command"] == "compact"
 
 
 def test_backend_defaults_to_localhost():
@@ -46,7 +67,6 @@ def test_agent_config_can_be_saved_and_loaded(client, monkeypatch):
 
     payload = {
         "max_steps": 24,
-        "max_history": 80,
         "max_context": 64000,
         "max_tokens": 4096,
         "reasoning_effort": "high",
@@ -56,6 +76,11 @@ def test_agent_config_can_be_saved_and_loaded(client, monkeypatch):
 
     assert response.status_code == 200
     assert client.get("/api/config/agent").json() == payload
+
+    # 老客户端仍可发送该字段，但它不再保存或影响上下文。
+    legacy_response = client.post("/api/config/agent", json={"max_history": 80})
+    assert legacy_response.status_code == 200
+    assert "max_history" not in client.get("/api/config/agent").json()
 
 
 def test_model_dump_supports_pydantic_v1(monkeypatch):

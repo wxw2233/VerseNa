@@ -13,10 +13,58 @@ from api.log_api import log_info, log_error
 from db.database import db
 from models.providers import get_provider, model_supports_reasoning
 from auth import SESSION_COOKIE_NAME, auth_manager, is_allowed_origin
+from agent.environment import collect_environment_facts, format_environment_facts
+from agent.checkpoint import decode_checkpoint, format_checkpoint
 
 router = APIRouter()
 
 MAX_PERSISTED_REASONING_CHARS = 50000
+MAX_ACTIVE_SKILL_ARGUMENTS = 4000
+
+
+def _skill_state_payload(command, arguments=""):
+    if not command:
+        return {"active": False, "command": "", "arguments": ""}
+    return {
+        "active": True,
+        "command": command["command"],
+        "skill_id": command["skill_id"],
+        "skill_name": command["skill_name"],
+        "description": command.get("description", ""),
+        "arguments": arguments or "",
+    }
+
+
+def _skill_command_system_prompt(
+    content: str,
+    manager,
+    active_command: str = "",
+    active_arguments: str = "",
+) -> str:
+    invoked_command = manager.resolve_slash_command(content)
+    command = invoked_command or manager.get_command(active_command)
+    if not command:
+        return ""
+    command_context = manager.get_command_context(command["command"])
+    command_arguments = ((
+        invoked_command.get("arguments", "") if invoked_command else active_arguments
+    ) or "（未附加初始参数，请结合当前对话确认目标。）")[:MAX_ACTIVE_SKILL_ARGUMENTS]
+    activation = "用户本轮显式调用" if invoked_command else "当前会话持续启用"
+    return f"""
+
+## 当前活动技能指令
+{activation} `/{command['command']}`，来源技能为 `{command['skill_name']}`。
+该指令已经由系统加载并会跨轮保持，不要再次调用 load_skill 加载它，也不要怀疑或讨论它是否已加载。
+请严格按下面的指令继续当前工作流。除非用户明确要求，或指令内容明确要求切换到下一技能，否则不要枚举、比较或加载其他技能。
+如果指令明确要求转入另一技能，直接调用 load_skill 加载指定目标；不要在多个候选技能之间反复讨论。
+只有系统明确标记为已加载，或 load_skill 返回 success=true 时，才能声称某技能已加载。
+
+### 初始参数
+{command_arguments}
+
+### 指令上下文
+{command_context}
+"""
 
 
 def _append_response_segment(segments: list[dict], segment: dict) -> None:
@@ -371,6 +419,53 @@ async def websocket_chat(ws: WebSocket):
             active_generation_id = generation_id
             await db.update_chat_request_status(generation_id, "running")
 
+            if content.strip().lower() == "/compact":
+                try:
+                    await send_event(
+                        {
+                            "type": "context_compaction",
+                            "mode": "manual",
+                            "phase": "start",
+                            "reason": "user_request",
+                        },
+                        generation_id,
+                    )
+                    result = await agent.memory.compact_session(session_id)
+                    if result.get("compressed"):
+                        message = (
+                            f"已压缩 {result['message_count']} 条旧上下文，"
+                            f"保留最近 {result['remaining_messages']} 条工作记录。"
+                        )
+                    else:
+                        message = result.get("reason", "当前没有需要压缩的旧上下文。")
+                    await send_event(
+                        {
+                            "type": "context_compaction",
+                            "mode": "manual",
+                            "phase": "done",
+                            "message": message,
+                            **result,
+                        },
+                        generation_id,
+                    )
+                    await send_event({"type": "done", "compaction": result}, generation_id)
+                    await db.update_chat_request_status(generation_id, "completed")
+                except Exception as exc:
+                    await send_event(
+                        {
+                            "type": "context_compaction",
+                            "mode": "manual",
+                            "phase": "error",
+                            "message": str(exc),
+                        },
+                        generation_id,
+                    )
+                    await send_event({"type": "error", "content": str(exc)}, generation_id)
+                    await db.update_chat_request_status(generation_id, "error")
+                finally:
+                    active_generation_id = None
+                continue
+
             if content.strip().startswith("/skill install"):
                 url = content.strip().replace("/skill install", "").strip()
                 if url:
@@ -400,13 +495,52 @@ async def websocket_chat(ws: WebSocket):
             if approval_mode not in {"ask", "auto"}:
                 approval_mode = "ask"
 
+            from skills.manager import skill_manager
+            invoked_skill_command = skill_manager.resolve_slash_command(content)
+            if invoked_skill_command:
+                skill_arguments = invoked_skill_command.get("arguments", "")[:MAX_ACTIVE_SKILL_ARGUMENTS]
+                await db.set_session_meta(
+                    session_id,
+                    active_skill_command=invoked_skill_command["command"],
+                    active_skill_arguments=skill_arguments,
+                )
+                session_meta["active_skill_command"] = invoked_skill_command["command"]
+                session_meta["active_skill_arguments"] = skill_arguments
+            active_skill_command = skill_manager.get_command(
+                session_meta.get("active_skill_command", "")
+            )
+            if session_meta.get("active_skill_command") and not active_skill_command:
+                await db.set_session_meta(
+                    session_id,
+                    active_skill_command="",
+                    active_skill_arguments="",
+                )
+                session_meta["active_skill_arguments"] = ""
+            if invoked_skill_command:
+                await send_event(
+                    {
+                        "type": "skill_state",
+                        "state": _skill_state_payload(
+                            active_skill_command,
+                            session_meta.get("active_skill_arguments", ""),
+                        ),
+                    },
+                    generation_id,
+                )
+
             system_prompt = persona_manager.get_system_prompt(persona_name)
 
             # 注入技能列表（Agent 自动选择）
-            from skills.manager import skill_manager
-            skill_prompt = skill_manager.get_skill_prompt()
+            skill_prompt = "" if active_skill_command else skill_manager.get_skill_prompt()
             if skill_prompt:
                 system_prompt += f"\n\n{skill_prompt}"
+
+            system_prompt += _skill_command_system_prompt(
+                content,
+                skill_manager,
+                active_command=session_meta.get("active_skill_command", ""),
+                active_arguments=session_meta.get("active_skill_arguments", ""),
+            )
 
             tool_desc = "\n".join(f"- {t['function']['name']}: {t['function']['description']}" for t in tool_registry.get_tools())
             system_prompt += f"""\n\n## 可用工具
@@ -422,10 +556,36 @@ async def websocket_chat(ws: WebSocket):
 - 读取、搜索文件必须优先使用 file_manager，不要用 code_exec 编写切片脚本读取文件
 - file_manager 返回 truncated=true 时，下一次读取必须原样使用 next_offset；返回 eof=true 后禁止继续读取
 - 相同工具与相同参数不要重复调用；工具返回成功后直接利用结果继续任务
+- 当需要用户从 2 到 6 个明确选项中选择时，必须调用 ask_user_choice 展示可点击选项；不要在普通文本中要求用户手动回复 A/B/C/D
+- 技能指令中出现“给出选项”“A/B/C/D”或类似要求时，也必须转换为 ask_user_choice 调用，不能照抄成纯文字列表
+- ask_user_choice 每次只能提出一个问题，调用后立即等待用户选择，不要同时继续回答
 - 先用 list/search 定位目标，再读取必要内容，避免无目的读取整个大文件
 - 如果用户只是让你「看」「读」「理解」某个内容，用 file_manager 读取即可，不要做额外操作
 - 只有确实需要运行程序或命令时才使用 code_exec
 - 完成所需工具调用后直接给出结论"""
+            environment_facts = collect_environment_facts(tool_workspace)
+            system_prompt += f"""\n\n## 已验证的执行环境
+以下信息由 VerseNa 在本轮请求前读取，不要凭操作系统或仓库位置猜测：
+{format_environment_facts(environment_facts)}
+
+## 开发任务质量门槛
+- 涉及代码、网页、游戏或第三方库时，静态检查和单元测试不是完成条件；必须执行一次真实运行冒烟，并验证关键路径确实发生。
+- 引入不熟悉的第三方库时，先用最小探针验证关键运行时行为，再把结论固定进实现或集成测试，不要凭 API 直觉推断。
+- 实现前列出至少三个边界场景：空状态、满/极限状态、快速重复操作或异常输入，并在实现后实际验证能否安全结束。
+- 修改文件后优先读取或运行验证结果；不要把“写入成功”当成“功能完成”。
+- UI、Canvas、物理、音频等用户可见功能必须验证真实运行结果；如果当前环境无法完成动态验证，要明确告诉用户尚未验证，不要声称已完成。
+- 服务启动后优先使用 runtime_smoke 的 http 模式确认端口响应确实属于 VerseNa；不要只因 HTTP 200 就认定服务正确。
+- 涉及网页交互时，若项目存在 Puppeteer/Chromium，使用 runtime_smoke 的 browser 模式检查关键选择器、点击路径和控制台错误；没有浏览器依赖时必须明确记录未完成动态验证。
+- 验证命令若必须重复执行，使用新的参数或 runtime_smoke，不要凭工具缓存结果判断刚才的改动已经生效。
+- Git 批量操作前必须确认仓库根目录和 `git status`；只暂存明确的目标路径，禁止使用 `git add -A`、`git add --all` 或无范围的 `git add .`。
+- 每次报告完成时，列出实际执行过的验证命令和结果，并区分“已验证”和“推断”。"""
+            checkpoint = decode_checkpoint(session_meta.get("task_checkpoint"))
+            system_prompt += f"""\n\n## 长任务检查点
+{format_checkpoint(checkpoint)}
+
+- 长任务开始、完成一个阶段、启动或停止服务、完成一次真实验证后，使用 task_checkpoint 更新进度。
+- 更新内容必须包含实际状态，不要把计划当成已完成；中断后先依据检查点恢复，再继续执行。
+- 用户要求结束任务时，清除已无关的检查点，避免后续对话继承过时状态。"""
             system_prompt += "\n\n## 重要：你必须始终使用中文回复，不要使用英文。"
 
             available_tools = tool_registry.get_tools()
@@ -495,6 +655,7 @@ async def websocket_chat(ws: WebSocket):
                     agent_config=agent_config,
                     persist_user=False,
                     generation_id=generation_id,
+                    progress_callback=lambda event: send_event(event, generation_id),
                 ):
                     if event.get("type") == "done":
                         done_metadata = {

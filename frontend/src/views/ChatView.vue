@@ -34,10 +34,12 @@
             v-for="(msg, i) in store.messages"
             :key="sessionStore.currentSessionId + '_' + i"
             :msg="msg"
+            :choice-resolved="isChoiceResolved(i)"
             class="msg-item"
             :style="{ animationDelay: Math.min(i * 30, 200) + 'ms' }"
             @retry="handleRetry(i)"
             @edit="(newContent) => handleEdit(i, newContent)"
+            @choose="payload => handleChoice(i, payload)"
           />
           <EmptyState
             v-if="store.messages.length === 0"
@@ -87,6 +89,21 @@
           </button>
         </div>
       </Transition>
+      <Transition name="context-compaction">
+        <div
+          v-if="contextCompaction.visible"
+          class="context-compaction-status"
+          :class="contextCompaction.phase"
+          role="status"
+          aria-live="polite"
+        >
+          <LoaderCircle v-if="contextCompaction.phase === 'start'" class="context-compaction-spinner" :size="14" aria-hidden="true" />
+          <Check v-else-if="contextCompaction.phase === 'done'" :size="14" aria-hidden="true" />
+          <TriangleAlert v-else :size="14" aria-hidden="true" />
+          <span>{{ contextCompaction.message }}</span>
+          <span v-if="contextCompaction.phase === 'start'" class="context-compaction-dots" aria-hidden="true">...</span>
+        </div>
+      </Transition>
       <ChatInput
         @send="handleSend"
         @stop="handleStop"
@@ -95,7 +112,9 @@
         :is-stopping="store.isStopping"
         :connected="connected"
         :approval-mode="toolSettings.approval_mode"
+        :active-skill="activeSkill"
         @update:approval-mode="updateApprovalMode"
+        @clear-active-skill="clearActiveSkill"
         @toggle-tts="autoTTS = !autoTTS; localStorage.setItem('auto-tts', autoTTS)"
       />
     </div>
@@ -140,7 +159,7 @@
 
 <script setup>
 import { ref, reactive, computed, nextTick, onBeforeUnmount, onMounted, watch } from 'vue'
-import { ArrowDown, FolderCog, LoaderCircle, PanelLeftClose, PanelLeftOpen, RefreshCcw, TriangleAlert, WifiOff } from 'lucide-vue-next'
+import { ArrowDown, Check, FolderCog, LoaderCircle, PanelLeftClose, PanelLeftOpen, RefreshCcw, TriangleAlert, WifiOff } from 'lucide-vue-next'
 import { useToast } from '../composables/useToast'
 import { useKeyboard } from '../composables/useKeyboard'
 import { useChatStore } from '../stores/chat'
@@ -170,6 +189,13 @@ const isAutoScrolling = ref(false)
 let autoScrollTimer = null
 const toast = useToast()
 const workspacePanelOpen = ref(false)
+const contextCompaction = reactive({
+  visible: false,
+  phase: 'start',
+  mode: 'automatic',
+  message: '正在整理上下文',
+})
+let contextCompactionTimer = null
 const toolSettingsSaving = ref(false)
 const toolSettings = reactive({
   tool_workspace: '',
@@ -177,6 +203,7 @@ const toolSettings = reactive({
   approval_mode: 'ask',
   is_default: true,
 })
+const activeSkill = ref({ active: false, command: '', arguments: '' })
 const {
   connected,
   status: connectionStatus,
@@ -339,7 +366,39 @@ watch(() => sessionStore.currentSessionId, () => {
   resetUnreadState()
   nextTick(() => scrollToBottom())
   loadToolSettings()
+  loadSkillState()
 }, { immediate: true })
+
+async function loadSkillState() {
+  const sessionId = sessionStore.currentSessionId
+  try {
+    const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/skill-state`)
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+    const data = await response.json()
+    if (sessionStore.currentSessionId === sessionId) activeSkill.value = data
+  } catch {
+    if (sessionStore.currentSessionId === sessionId) {
+      activeSkill.value = { active: false, command: '', arguments: '' }
+    }
+  }
+}
+
+async function clearActiveSkill() {
+  const sessionId = sessionStore.currentSessionId
+  try {
+    const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/skill-state`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ active_command: '' }),
+    })
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok) throw new Error(data.detail || `HTTP ${response.status}`)
+    if (sessionStore.currentSessionId === sessionId) activeSkill.value = data
+    toast.info('已关闭当前技能')
+  } catch (error) {
+    toast.error(error.message || '关闭技能失败')
+  }
+}
 
 async function loadToolSettings() {
   const sessionId = sessionStore.currentSessionId
@@ -457,6 +516,28 @@ onMounted(() => {
       confirmDialog.file_count = data.file_count
       confirmDialog.dir_count = data.dir_count
       confirmDialog.visible = true
+    } else if (msg.type === 'skill_state') {
+      activeSkill.value = msg.state || { active: false, command: '', arguments: '' }
+    } else if (msg.type === 'context_compaction') {
+      if (
+        msg.generation_id
+        && store.activeGenerationId
+        && msg.generation_id !== store.activeGenerationId
+      ) return
+      if (contextCompactionTimer) clearTimeout(contextCompactionTimer)
+      contextCompaction.mode = msg.mode || 'automatic'
+      contextCompaction.phase = msg.phase || 'start'
+      contextCompaction.message = msg.phase === 'done'
+        ? (msg.message || '上下文整理完成')
+        : msg.phase === 'error'
+          ? `上下文整理失败：${msg.message || '未知错误'}`
+          : '正在整理上下文'
+      contextCompaction.visible = true
+      if (msg.phase !== 'start') {
+        contextCompactionTimer = setTimeout(() => {
+          contextCompaction.visible = false
+        }, msg.phase === 'error' ? 2400 : 1200)
+      }
     } else if (msg.type === 'done') {
       applied = store.finishStreaming(msg.emoji, msg.generation_id)
       if (!applied) return
@@ -467,6 +548,7 @@ onMounted(() => {
       autoTitleIfNeeded()
       // 保存展开状态
       saveToolExpanded()
+      loadSkillState()
       // 自动 TTS
       if (autoTTS.value) {
         autoSpeakLast()
@@ -577,6 +659,12 @@ async function handleSend(content, acknowledge = () => {}) {
       return
     }
 
+    if (typeof content === 'string' && content.trim().toLowerCase() === '/compact') {
+      retainedSendRequest = null
+      acknowledge(true)
+      return
+    }
+
     if (typeof content === 'object' && content.image) {
       store.messages.push({
         role: 'user',
@@ -609,6 +697,23 @@ async function handleSend(content, acknowledge = () => {}) {
     toast.warning(error.message || '发送失败，消息已保留')
     if (!connected.value) reconnect()
   }
+}
+
+function isChoiceResolved(messageIndex) {
+  const message = store.messages[messageIndex]
+  if (message?.choicePending) return true
+  return store.messages.slice(messageIndex + 1).some(item => item.role === 'user')
+}
+
+function handleChoice(messageIndex, payload) {
+  const message = store.messages[messageIndex]
+  const option = payload?.option
+  if (!message || message.choicePending || !option || isChoiceResolved(messageIndex)) return
+  message.choicePending = true
+  const response = option.custom ? `其他：${option.label}` : `${option.id}：${option.label}`
+  handleSend(response, success => {
+    if (!success) message.choicePending = false
+  })
 }
 
 async function handleRetry(msgIndex) {
@@ -787,6 +892,7 @@ onBeforeUnmount(() => {
   releaseAutoAudio()
   if (autoBrowserUtterance) cancelBrowserSpeech()
   autoBrowserUtterance = null
+  if (contextCompactionTimer) clearTimeout(contextCompactionTimer)
 })
 
 let autoTitleDone = false
@@ -995,6 +1101,38 @@ setTimeout(loadToolExpanded, 100)
   -webkit-backdrop-filter: blur(12px);
   font-size: 12px;
 }
+
+.context-compaction-status {
+  position: absolute;
+  left: 50%;
+  bottom: 86px;
+  z-index: 16;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: min(460px, calc(100% - 32px));
+  padding: 7px 11px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  background: rgba(24, 24, 32, 0.88);
+  box-shadow: 0 5px 18px rgba(0, 0, 0, 0.18);
+  color: var(--text-secondary);
+  font-size: 12px;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+.context-compaction-status.done { color: var(--success, #62c78a); }
+.context-compaction-status.error { color: var(--danger, #ef7d7d); }
+.context-compaction-spinner { animation: spin 0.9s linear infinite; }
+.context-compaction-dots { width: 18px; overflow: hidden; animation: compaction-dots 1.2s steps(4, end) infinite; }
+@keyframes compaction-dots {
+  0% { width: 0; }
+  100% { width: 18px; }
+}
+.context-compaction-enter-active,
+.context-compaction-leave-active { transition: opacity 0.18s ease, transform 0.18s ease; }
+.context-compaction-enter-from,
+.context-compaction-leave-to { opacity: 0; transform: translate(-50%, 6px); }
 .connection-status.disconnected {
   color: #fca5a5;
   border-color: rgba(248, 113, 113, 0.28);
@@ -1218,6 +1356,10 @@ setTimeout(loadToolExpanded, 100)
 
   .connection-status {
     left: 16px;
+    bottom: 92px;
+  }
+
+  .context-compaction-status {
     bottom: 92px;
   }
 

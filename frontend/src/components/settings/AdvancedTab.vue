@@ -13,20 +13,11 @@
         <input type="number" v-model.number="config.max_steps" :min="1" :max="100" class="num-input" />
       </div>
 
-      <!-- 记忆轮次 -->
-      <div class="config-item">
-        <div class="config-label">
-          <span class="label-title">🧠 最大记忆轮次</span>
-          <span class="label-desc">上下文中保留的对话轮次（每轮 = 用户 + 回复）</span>
-        </div>
-        <input type="number" v-model.number="config.max_history" :min="1" :max="500" class="num-input" />
-      </div>
-
       <!-- 上下文长度 -->
       <div class="config-item">
         <div class="config-label">
           <span class="label-title">📏 上下文长度 (Token)</span>
-          <span class="label-desc">发送给模型的最大 Token 数，超出部分会被裁剪</span>
+          <span class="label-desc">发送给模型的最大 Token 数，接近上限时会自动压缩较早的上下文</span>
         </div>
         <input type="number" v-model.number="config.max_context" :min="1000" :max="200000" :step="1000" class="num-input" />
       </div>
@@ -86,7 +77,6 @@ const toast = useToast()
 
 const config = reactive({
   max_steps: 15,
-  max_history: 30,
   max_context: 4096,
   max_tokens: 4096,
   reasoning_effort: 'medium',
@@ -104,7 +94,6 @@ const saving = ref(false)
 
 const numericFields = {
   max_steps: [1, 100],
-  max_history: [5, 500],
   max_context: [2000, 1000000],
   max_tokens: [256, 65536],
 }

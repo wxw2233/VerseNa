@@ -8,7 +8,10 @@ import os
 import string
 import uuid
 
+from skills.manager import skill_manager
+
 router = APIRouter()
+MAX_ACTIVE_SKILL_ARGUMENTS = 4000
 
 class SessionCreate(BaseModel):
     name: str = ""
@@ -48,6 +51,11 @@ class ToolSettingsUpdate(BaseModel):
     approval_mode: str = None
 
 
+class SkillStateUpdate(BaseModel):
+    active_command: str = None
+    arguments: str = None
+
+
 class DirectoryCreate(BaseModel):
     parent: str
     name: str
@@ -78,6 +86,9 @@ async def rename_session(session_id: str, req: SessionRename):
         theme_pack_id=meta["theme_pack_id"],
         tool_workspace=meta["tool_workspace"],
         approval_mode=meta["approval_mode"],
+        active_skill_command=meta["active_skill_command"],
+        active_skill_arguments=meta["active_skill_arguments"],
+        task_checkpoint=meta["task_checkpoint"],
     )
     # 删除旧元数据
     await db._db.execute("DELETE FROM session_metadata WHERE session_id = ?", (session_id,))
@@ -132,6 +143,59 @@ async def update_session_tool_settings(session_id: str, req: ToolSettingsUpdate)
         updates["approval_mode"] = req.approval_mode
     await db.set_session_meta(session_id, **updates)
     return await get_session_tool_settings(session_id)
+
+
+def _skill_state_payload(command_name: str, arguments: str = ""):
+    command = skill_manager.get_command(command_name)
+    if not command:
+        return {"active": False, "command": "", "arguments": ""}
+    return {
+        "active": True,
+        "command": command["command"],
+        "skill_id": command["skill_id"],
+        "skill_name": command["skill_name"],
+        "description": command.get("description", ""),
+        "arguments": arguments or "",
+    }
+
+
+@router.get("/api/sessions/{session_id}/skill-state")
+async def get_session_skill_state(session_id: str):
+    meta = await db.get_session_meta(session_id)
+    state = _skill_state_payload(
+        meta.get("active_skill_command", ""),
+        meta.get("active_skill_arguments", ""),
+    )
+    if meta.get("active_skill_command") and not state["active"]:
+        await db.set_session_meta(
+            session_id,
+            active_skill_command="",
+            active_skill_arguments="",
+        )
+    return state
+
+
+@router.put("/api/sessions/{session_id}/skill-state")
+async def update_session_skill_state(session_id: str, req: SkillStateUpdate):
+    command_name = (req.active_command or "").strip().lstrip("/")
+    arguments = (req.arguments or "").strip()[:MAX_ACTIVE_SKILL_ARGUMENTS]
+    if not command_name:
+        await db.set_session_meta(
+            session_id,
+            active_skill_command="",
+            active_skill_arguments="",
+        )
+        return _skill_state_payload("")
+
+    command = skill_manager.get_command(command_name)
+    if not command:
+        raise HTTPException(404, "技能指令不存在或已被移除")
+    await db.set_session_meta(
+        session_id,
+        active_skill_command=command["command"],
+        active_skill_arguments=arguments,
+    )
+    return _skill_state_payload(command["command"], arguments)
 
 
 @router.get("/api/tools/directories")
@@ -195,6 +259,7 @@ async def create_tool_directory(req: DirectoryCreate):
 async def delete_session(session_id: str):
     """删除指定会话"""
     await db._db.execute("DELETE FROM conversations WHERE session_id = ?", (session_id,))
+    await db._db.execute("DELETE FROM session_metadata WHERE session_id = ?", (session_id,))
     await db._db.commit()
     return {"status": "ok"}
 

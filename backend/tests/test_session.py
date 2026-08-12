@@ -90,11 +90,47 @@ def test_get_session_history(client):
     assert history[1]["role"] == "assistant"
 
 
+def test_session_skill_state_can_be_saved_and_cleared(client, monkeypatch):
+    import api.session_api as session_api
+
+    command = {
+        "command": "brainstorming",
+        "skill_id": "superpowers",
+        "skill_name": "Superpowers",
+        "description": "Explore the idea first.",
+    }
+    monkeypatch.setattr(
+        session_api.skill_manager,
+        "get_command",
+        lambda name: command if str(name).strip().lstrip("/") == "brainstorming" else None,
+    )
+
+    saved = client.put(
+        "/api/sessions/skill-session/skill-state",
+        json={"active_command": "/brainstorming", "arguments": "build a plotter"},
+    )
+    loaded = client.get("/api/sessions/skill-session/skill-state")
+    cleared = client.put(
+        "/api/sessions/skill-session/skill-state",
+        json={"active_command": ""},
+    )
+
+    assert saved.status_code == 200
+    assert saved.json()["command"] == "brainstorming"
+    assert saved.json()["arguments"] == "build a plotter"
+    assert loaded.json() == saved.json()
+    assert cleared.json() == {"active": False, "command": "", "arguments": ""}
+
+
 def test_delete_session(client):
     import api.session_api as sm
     import asyncio
     loop = asyncio.new_event_loop()
     loop.run_until_complete(sm.db.save_message("del_session", "user", "bye"))
+    loop.run_until_complete(sm.db.set_session_meta(
+        "del_session",
+        active_skill_command="brainstorming",
+    ))
 
     resp = client.delete("/api/sessions/del_session")
     assert resp.status_code == 200
@@ -104,3 +140,5 @@ def test_delete_session(client):
     resp = client.get("/api/sessions")
     sessions = resp.json()
     assert all(s["id"] != "del_session" for s in sessions)
+    meta = loop.run_until_complete(sm.db.get_session_meta("del_session"))
+    assert meta["active_skill_command"] == ""

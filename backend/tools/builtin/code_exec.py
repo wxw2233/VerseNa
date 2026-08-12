@@ -7,6 +7,7 @@ import sys
 import threading
 import time
 import uuid
+import re
 from pathlib import Path
 
 from tools.base import BaseTool, ToolContext
@@ -19,6 +20,7 @@ OUTPUT_HEAD_BYTES = 5_500
 OUTPUT_TAIL_BYTES = 5_500
 MAX_TIMEOUT_SECONDS = 120
 SENSITIVE_ENV_PARTS = ("KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL")
+BROAD_GIT_STAGE_PATTERN = re.compile(r"\bgit\s+add\s+(?:-A|--all|\.)(?:\s|$)", re.IGNORECASE)
 
 
 def _safe_environment() -> dict[str, str]:
@@ -28,7 +30,19 @@ def _safe_environment() -> dict[str, str]:
             continue
         environment[key] = value
     environment["PYTHONIOENCODING"] = "utf-8"
+    environment["PYTHONUTF8"] = "1"
+    if os.name != "nt":
+        environment["LC_ALL"] = "C.UTF-8"
+        environment["LANG"] = "C.UTF-8"
     return environment
+
+
+def _decode_output(output_bytes: bytes) -> str:
+    utf8 = output_bytes.decode("utf-8", errors="replace")
+    if "�" not in utf8:
+        return utf8
+    legacy = output_bytes.decode("gb18030", errors="replace")
+    return legacy if legacy.count("�") < utf8.count("�") else utf8
 
 
 def _terminate_process_tree(process: subprocess.Popen) -> None:
@@ -109,7 +123,7 @@ def _run_process(command: list[str], cwd: Path, timeout: int, stop_event=None) -
         output_bytes = bytes(captured[:OUTPUT_HEAD_BYTES]) + marker + bytes(tail)
     else:
         output_bytes = bytes(captured)
-    output = output_bytes.decode("utf-8", errors="replace").rstrip()
+    output = _decode_output(output_bytes).rstrip()
     return {
         "returncode": process.returncode,
         "output": output or "(无输出)",
@@ -166,6 +180,11 @@ class CodeExecTool(BaseTool):
             return tool_error("EMPTY_CODE", "没有提供要执行的代码")
         if not _context:
             return tool_error("MISSING_CONTEXT", "工具执行上下文不可用")
+        if language == "shell" and BROAD_GIT_STAGE_PATTERN.search(code):
+            return tool_error(
+                "BROAD_REPO_STAGE_BLOCKED",
+                "禁止使用 git add -A、git add --all 或无范围的 git add .；请先确认仓库根目录，再暂存明确的文件路径",
+            )
 
         try:
             workdir = resolve_tool_path(_context, cwd).check_path

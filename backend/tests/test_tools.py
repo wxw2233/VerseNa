@@ -16,6 +16,116 @@ def test_registry_loads_builtins():
     assert "web_search" in names
     assert "code_exec" in names
     assert "load_skill" in names
+    assert "ask_user_choice" in names
+    assert "runtime_smoke" in names
+    assert "task_checkpoint" in names
+
+
+@pytest.mark.asyncio
+async def test_runtime_smoke_rejects_public_service_url(registry, tool_context):
+    result = json.loads(await registry.execute(
+        "runtime_smoke",
+        {"mode": "http", "url": "https://example.com/health"},
+        context=tool_context,
+    ))
+
+    assert result["error"] == "INVALID_RUNTIME_URL"
+
+
+@pytest.mark.asyncio
+async def test_runtime_smoke_checks_service_identity(registry, tool_context, monkeypatch):
+    import tools.builtin.runtime_smoke as runtime_smoke
+
+    class Response:
+        status = 200
+        headers = {"content-type": "application/json"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self, size):
+            return json.dumps({
+                "status": "ok",
+                "service": "OtherService",
+                "version": "1.0.0",
+                "instance_id": "other:1:8002",
+            }).encode("utf-8")
+
+    class Opener:
+        def open(self, *args, **kwargs):
+            return Response()
+
+    monkeypatch.setattr(runtime_smoke, "build_opener", lambda *args, **kwargs: Opener())
+    result = json.loads(await registry.execute(
+        "runtime_smoke",
+        {"mode": "http", "url": "http://127.0.0.1:8002/health"},
+        context=tool_context,
+    ))
+
+    assert result["error"] == "WRONG_SERVICE_OR_UNHEALTHY"
+    assert result["data"]["identity"]["service"] == "OtherService"
+
+
+@pytest.mark.asyncio
+async def test_task_checkpoint_persists_and_merges(registry, tool_context, monkeypatch):
+    import tools.builtin.task_checkpoint as checkpoint_tool
+
+    state = {"task_checkpoint": "{}"}
+
+    class FakeDatabase:
+        async def get_session_meta(self, session_id):
+            return {"task_checkpoint": state["task_checkpoint"]}
+
+        async def set_session_meta(self, session_id, **updates):
+            state.update(updates)
+
+    monkeypatch.setattr(checkpoint_tool, "db", FakeDatabase())
+    first = json.loads(await registry.execute(
+        "task_checkpoint",
+        {
+            "action": "update",
+            "phase": "实现",
+            "completed": ["接口已完成"],
+            "next_step": "运行冒烟",
+        },
+        context=tool_context,
+    ))
+    second = json.loads(await registry.execute(
+        "task_checkpoint",
+        {"action": "update", "validation": "runtime_smoke 通过"},
+        context=tool_context,
+    ))
+    loaded = json.loads(await registry.execute(
+        "task_checkpoint", {"action": "read"}, context=tool_context
+    ))
+
+    assert first["success"] is True
+    assert second["data"]["checkpoint"]["phase"] == "实现"
+    assert loaded["data"]["checkpoint"]["validation"] == "runtime_smoke 通过"
+
+
+@pytest.mark.asyncio
+async def test_ask_user_choice_normalizes_clickable_options(registry, tool_context):
+    result = json.loads(await registry.execute(
+        "ask_user_choice",
+        {
+            "question": "主要用途是什么？",
+            "options": [
+                {"label": "自己学习", "description": "快速查看函数图像"},
+                {"label": "课堂演示"},
+                {"label": "代码调试"},
+            ],
+        },
+        context=tool_context,
+    ))
+
+    assert result["type"] == "user_choice"
+    assert result["success"] is True
+    assert [option["id"] for option in result["data"]["options"]] == ["A", "B", "C"]
+    assert result["data"]["question"] == "主要用途是什么？"
 
 def test_tool_format():
     reg = ToolRegistry()
@@ -25,6 +135,25 @@ def test_tool_format():
         assert t["type"] == "function"
         assert "name" in t["function"]
         assert "parameters" in t["function"]
+
+
+@pytest.mark.asyncio
+async def test_code_exec_blocks_broad_git_stage(registry, tool_context):
+    result = json.loads(await registry.execute(
+        "code_exec",
+        {"language": "shell", "code": "git add -A"},
+        context=tool_context,
+        confirmed=True,
+    ))
+
+    assert result["error"] == "BROAD_REPO_STAGE_BLOCKED"
+
+
+def test_code_exec_decodes_windows_legacy_output():
+    from tools.builtin.code_exec import _decode_output
+
+    raw = "中文输出".encode("gb18030")
+    assert _decode_output(raw) == "中文输出"
 
 
 @pytest.fixture

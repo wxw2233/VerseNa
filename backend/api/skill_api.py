@@ -21,6 +21,22 @@ async def skill_status():
     return skill_manager.diagnostics()
 
 
+@router.get("/api/skills/commands")
+async def list_skill_commands():
+    return [
+        {
+            "command": "compact",
+            "name": "上下文压缩",
+            "description": "手动整理当前会话的旧上下文，保留最近工作记录",
+            "skill_id": "builtin",
+            "skill_name": "VerseNa 内置指令",
+            "source": "builtin",
+            "aliases": [],
+        },
+        *skill_manager.list_commands(),
+    ]
+
+
 @router.get("/api/skills/{skill_id}")
 async def get_skill(skill_id: str):
     skill = skill_manager.get_skill(skill_id)

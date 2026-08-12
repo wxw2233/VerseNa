@@ -127,7 +127,7 @@ def test_authenticated_post_accepts_same_origin_referer(auth_client, monkeypatch
 
     assert response.status_code == 200
     assert saved["agent_max_steps"] == "20"
-    assert saved["agent_max_history"] == "60"
+    assert "agent_max_history" not in saved
 
 
 def test_bearer_token_authentication(auth_client):

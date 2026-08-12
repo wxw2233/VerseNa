@@ -300,7 +300,6 @@ async def set_trust_mode(req: TrustModeReq):
 
 AGENT_CONFIG_DEFAULTS = {
     "max_steps": 15,
-    "max_history": 50,
     "max_context": 128000,
     "max_tokens": 8192,
     "reasoning_effort": "medium",
@@ -310,7 +309,6 @@ AGENT_CONFIG_DEFAULTS = {
 # 配置值硬上限（MiMo 百万上下文，放宽限制）
 AGENT_CONFIG_LIMITS = {
     "max_steps": (1, 100),
-    "max_history": (5, 500),
     "max_context": (2000, 1000000),
     "max_tokens": (256, 65536),
 }
@@ -334,7 +332,6 @@ async def get_agent_config():
 
 class AgentConfigReq(BaseModel):
     max_steps: int | None = None
-    max_history: int | None = None
     max_context: int | None = None
     temperature: float | None = None
     top_p: float | None = None

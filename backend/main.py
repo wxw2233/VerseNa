@@ -71,7 +71,17 @@ async def require_api_authentication(request: Request, call_next):
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "version": settings.VERSION}
+    import os
+    import socket
+    return {
+        "status": "ok",
+        "service": settings.PROJECT_NAME,
+        "version": settings.VERSION,
+        "host": settings.HOST,
+        "port": settings.PORT,
+        "pid": os.getpid(),
+        "instance_id": f"{socket.gethostname()}:{os.getpid()}:{settings.PORT}",
+    }
 
 from api.chat import router as chat_router
 from api.config_api import router as config_router

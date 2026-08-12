@@ -6,6 +6,7 @@ from agent.react import ReActAgent
 from agent.models.base import BaseModelAdapter, ModelResponse
 from agent.memory import MemoryManager
 from db.database import db
+from tools.registry import ToolRegistry
 from typing import AsyncGenerator
 
 class MockAdapter(BaseModelAdapter):
@@ -253,6 +254,47 @@ async def test_identical_tool_call_reuses_result_without_second_execution(tmp_pa
 
 
 @pytest.mark.asyncio
+async def test_code_exec_results_are_not_reused_between_identical_calls():
+    tool_call = {
+        "id": "call_exec",
+        "type": "function",
+        "function": {"name": "code_exec", "arguments": '{"language":"python","code":"print(1)"}'},
+    }
+
+    class RepeatingAdapter(BaseModelAdapter):
+        def __init__(self):
+            self.calls = 0
+
+        async def chat(self, messages, tools=None, stream=True, **kwargs):
+            self.calls += 1
+            if self.calls <= 2:
+                yield ModelResponse(tool_calls=[tool_call])
+            else:
+                yield ModelResponse(content="完成")
+
+        async def list_models(self):
+            return ["exec-model"]
+
+    class CountingRegistry:
+        def __init__(self):
+            self.executions = 0
+
+        def create_context(self, session_id, **kwargs):
+            return object()
+
+        async def execute(self, name, arguments, **kwargs):
+            self.executions += 1
+            return json.dumps({"success": True, "data": {"output": str(self.executions)}})
+
+    registry = CountingRegistry()
+    events = [event async for event in ReActAgent(
+        RepeatingAdapter(), MemoryManager(), tool_registry=registry
+    ).run("exec-repeat-session", "执行验证", tools=[{}])]
+
+    assert registry.executions == 2
+
+
+@pytest.mark.asyncio
 async def test_intermediate_text_is_kept_out_of_saved_final_answer():
     tool_call = {
         "id": "call_intermediate",
@@ -297,6 +339,64 @@ async def test_intermediate_text_is_kept_out_of_saved_final_answer():
     history = await db.get_history("staged-session")
     assistant = next(message for message in history if message["role"] == "assistant")
     assert assistant["content"] == "最终总结"
+
+
+@pytest.mark.asyncio
+async def test_choice_tool_emits_clickable_segment_and_waits_for_user():
+    tool_call = {
+        "id": "call_choice",
+        "type": "function",
+        "function": {
+            "name": "ask_user_choice",
+            "arguments": json.dumps({
+                "question": "主要用途是什么？",
+                "options": [
+                    {"label": "自己学习"},
+                    {"label": "课堂演示"},
+                ],
+            }, ensure_ascii=False),
+        },
+    }
+
+    class ChoiceAdapter(BaseModelAdapter):
+        def __init__(self):
+            self.calls = 0
+
+        async def chat(self, messages, tools=None, stream=True, **kwargs):
+            self.calls += 1
+            yield ModelResponse(content="先确认一下。", tool_calls=[tool_call])
+
+        async def list_models(self):
+            return ["choice-model"]
+
+    registry = ToolRegistry()
+    registry.load_builtins()
+    adapter = ChoiceAdapter()
+    events = [event async for event in ReActAgent(
+        adapter,
+        MemoryManager(),
+        tool_registry=registry,
+    ).run("choice-session", "帮我设计", tools=registry.get_tools())]
+
+    choices = [
+        event["segment"] for event in events
+        if event.get("segment", {}).get("type") == "choice"
+    ]
+    tool_segments = [
+        event["segment"] for event in events
+        if event.get("segment", {}).get("type") == "tool"
+    ]
+
+    assert adapter.calls == 1
+    assert len(choices) == 1
+    assert choices[0]["question"] == "主要用途是什么？"
+    assert [option["id"] for option in choices[0]["options"]] == ["A", "B"]
+    assert tool_segments == []
+
+    history = await db.get_history("choice-session")
+    assistant = next(message for message in history if message["role"] == "assistant")
+    assert "先确认一下。" in assistant["content"]
+    assert "A：自己学习" in assistant["content"]
 
 
 @pytest.mark.asyncio

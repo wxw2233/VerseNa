@@ -111,6 +111,7 @@ async function installSkill() {
     installUrl.value = ''
     toast.success(`已安装 ${data.skill?.name || '技能'}`)
     await loadSkills()
+    window.dispatchEvent(new CustomEvent('versena:skills-changed'))
   } catch (error) {
     toast.error(`安装失败: ${error.message}`)
   } finally {
@@ -127,6 +128,7 @@ async function deleteSkill(id) {
     if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`)
     toast.success('已卸载')
     await loadSkills()
+    window.dispatchEvent(new CustomEvent('versena:skills-changed'))
   } catch (e) {
     toast.error('卸载失败: ' + e.message)
   } finally {

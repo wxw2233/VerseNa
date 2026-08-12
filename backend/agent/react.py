@@ -43,13 +43,12 @@ class ReActAgent:
             return kwargs
         return {k: v for k, v in kwargs.items() if k in params}
 
-    async def run(self, session_id: str, user_message: str, system_prompt: str = "", tools: list = None, persona: str = "default", confirm_callback=None, image_url: str = None, stop_event=None, agent_config: dict = None, persist_user: bool = True, client_message_id: str = None, generation_id: str = None) -> AsyncGenerator[dict, None]:
+    async def run(self, session_id: str, user_message: str, system_prompt: str = "", tools: list = None, persona: str = "default", confirm_callback=None, image_url: str = None, stop_event=None, agent_config: dict = None, persist_user: bool = True, client_message_id: str = None, generation_id: str = None, progress_callback=None) -> AsyncGenerator[dict, None]:
         cfg = agent_config or {}
         max_steps = cfg.get("max_steps", self.max_steps)
         temperature = cfg.get("temperature", 0.8)
         top_p = cfg.get("top_p", 0.9)
         max_tokens = cfg.get("max_tokens", 4096)
-        max_history = cfg.get("max_history", 20)
         max_context = cfg.get("max_context", 4096)
         custom_instructions = cfg.get("custom_instructions", "")
         reasoning_requested = bool(cfg.get("reasoning_enabled", False))
@@ -58,6 +57,22 @@ class ReActAgent:
             reasoning_effort = "medium"
         reasoning_known_available = bool(getattr(self.model, "reasoning_available", False))
         reasoning_enabled = reasoning_requested
+
+        async def notify_compaction(event):
+            if not progress_callback:
+                return
+            try:
+                payload = {
+                    "type": "context_compaction",
+                    "mode": "automatic",
+                    **event,
+                }
+                result = progress_callback(payload)
+                if inspect.isawaitable(result):
+                    await result
+            except Exception:
+                # 状态提示不能影响 Agent 主流程。
+                pass
 
         if custom_instructions and system_prompt:
             system_prompt += f"\n\n## 自定义指令\n{custom_instructions}"
@@ -79,7 +94,13 @@ class ReActAgent:
                 metadata=message_metadata,
                 client_message_id=client_message_id,
             )
-        messages = await self.memory.get_context(session_id, system_prompt, max_history=max_history, max_context=max_context)
+        messages = await self.memory.get_context(
+            session_id,
+            system_prompt,
+            max_context=max_context,
+            max_output_tokens=max_tokens,
+            compaction_callback=notify_compaction,
+        )
 
         # 如果有图片，将最后一条用户消息替换为视觉格式
         if image_url and messages:
@@ -101,6 +122,11 @@ class ReActAgent:
         first_reasoning_id = None
         tool_result_cache = {}
         read_progress = {}
+        waiting_for_user = False
+
+        def cacheable_tool(tool_name: str) -> bool:
+            # 代码执行和文件操作可能改变外部状态，不能复用旧结果，尤其是“写入后重新读取”。
+            return tool_name not in {"code_exec", "file_manager"}
         tool_context = self.tool_registry.create_context(
             session_id,
             workspace=cfg.get("tool_workspace"),
@@ -324,14 +350,15 @@ class ReActAgent:
                         default=str,
                     )
 
-                    # 发送工具调用开始
-                    yield {"type": "segment", "segment": {
-                        "type": "tool",
-                        "tool_call_id": tool_call_id,
-                        "tool_name": tool_name,
-                        "tool_args": tool_args,
-                        "status": "running"
-                    }}
+                    is_choice_tool = tool_name == "ask_user_choice"
+                    if not is_choice_tool:
+                        yield {"type": "segment", "segment": {
+                            "type": "tool",
+                            "tool_call_id": tool_call_id,
+                            "tool_name": tool_name,
+                            "tool_args": tool_args,
+                            "status": "running"
+                        }}
 
                     read_error = self._validate_read_continuation(
                         tool_name,
@@ -341,7 +368,7 @@ class ReActAgent:
                     if read_error:
                         result = read_error
                     else:
-                        result = tool_result_cache.get(tool_signature)
+                        result = tool_result_cache.get(tool_signature) if cacheable_tool(tool_name) else None
                         if result is not None:
                             result = self._mark_result_reused(result)
                         else:
@@ -366,7 +393,30 @@ class ReActAgent:
                     except (json.JSONDecodeError, TypeError):
                         result_data = {}
 
-                    if tool_signature not in tool_result_cache:
+                    if (
+                        is_choice_tool
+                        and result_data.get("type") == "user_choice"
+                        and result_data.get("success") is True
+                    ):
+                        choice = result_data.get("data") or {}
+                        question = str(choice.get("question") or "").strip()
+                        options = choice.get("options") or []
+                        yield {"type": "segment", "segment": {
+                            "type": "choice",
+                            "choice_id": choice.get("choice_id") or tool_call_id,
+                            "question": question,
+                            "options": options,
+                        }}
+                        choice_lines = [chunk_content.strip(), question]
+                        choice_lines.extend(
+                            f"{option.get('id', '')}：{option.get('label', '')}"
+                            for option in options
+                        )
+                        final_response = "\n".join(line for line in choice_lines if line)
+                        waiting_for_user = True
+                        break
+
+                    if cacheable_tool(tool_name) and tool_signature not in tool_result_cache:
                         tool_result_cache[tool_signature] = result
                     self._update_read_progress(tool_name, tool_args, result_data, read_progress)
 
@@ -374,23 +424,48 @@ class ReActAgent:
                     result_summary = self._make_summary(tool_name, result_data, result)
                     result_detail = self._result_detail(result_data, result)
 
-                    # 发送工具调用完成
-                    yield {"type": "segment", "segment": {
-                        "type": "tool",
-                        "tool_call_id": tool_call_id,
-                        "tool_name": tool_name,
-                        "status": "done",
-                        "result_summary": result_summary,
-                        "result_detail": result_detail
-                    }}
+                    if not is_choice_tool:
+                        yield {"type": "segment", "segment": {
+                            "type": "tool",
+                            "tool_call_id": tool_call_id,
+                            "tool_name": tool_name,
+                            "status": "done",
+                            "result_summary": result_summary,
+                            "result_detail": result_detail
+                        }}
 
                     # MiMo 百万上下文，不截断 tool result
                     result_for_msg = result if isinstance(result, str) else str(result)
                     messages.append({"role": "tool", "tool_call_id": tc.get("id", ""), "content": result_for_msg})
+                    if self.memory.needs_runtime_compaction(
+                        messages,
+                        max_context=max_context,
+                        max_output_tokens=max_tokens,
+                    ):
+                        before_tokens = self.memory._estimate_msgs_tokens(messages)
+                        await notify_compaction({
+                            "phase": "start",
+                            "reason": "tool_loop",
+                            "before_tokens": before_tokens,
+                        })
+                        messages = self.memory.compact_runtime_messages(
+                            messages,
+                            max_context=max_context,
+                            max_output_tokens=max_tokens,
+                        )
+                        await notify_compaction({
+                            "phase": "done",
+                            "reason": "tool_loop",
+                            "before_tokens": before_tokens,
+                            "after_tokens": self.memory._estimate_msgs_tokens(messages),
+                        })
 
                     if stop_event and stop_event.is_set():
                         generation_stopped = True
                         break
+
+                if waiting_for_user:
+                    break
 
                 if generation_stopped:
                     yield {"type": "segment", "segment": {"type": "text", "content": "\n\n[已停止]"}}
@@ -420,7 +495,14 @@ class ReActAgent:
             persona=persona,
             metadata=message_metadata,
         )
-        await self.memory.post_conversation(session_id, user_message, assistant_response)
+        await self.memory.post_conversation(
+            session_id,
+            user_message,
+            assistant_response,
+            max_context=max_context,
+            max_output_tokens=max_tokens,
+            compaction_callback=notify_compaction,
+        )
 
         emotion = persona_manager.get_emotion_engine(persona) if hasattr(self, '_persona_manager') else None
         emoji = ""

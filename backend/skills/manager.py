@@ -24,6 +24,12 @@ BUILTIN_DIR = SKILLS_DIR / "builtin"
 CUSTOM_DIR = settings.SKILLS_DATA_DIR / "custom"
 INSTALLED_DIR = settings.SKILLS_DATA_DIR / "installed"
 SKILL_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+SLASH_COMMAND_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+SLASH_INPUT_PATTERN = re.compile(
+    r"^\s*/([A-Za-z0-9][A-Za-z0-9._:-]{0,127})(?:\s+([\s\S]*))?$"
+)
+RESERVED_SLASH_COMMANDS = {"skill"}
+MAX_COMMAND_CONTEXT_CHARS = 20000
 
 BUILTIN_SKILLS = [
     {
@@ -83,9 +89,15 @@ class SkillManager:
     def _load_all(self):
         self._cache = {skill["id"]: dict(skill) for skill in BUILTIN_SKILLS}
         self._skill_dirs = {}
+        self._commands = {}
+        self._command_aliases = {}
         self._load_errors = []
         self._load_directory(self.custom_dir, "custom")
         self._load_directory(self.installed_dir, "installed")
+        for skill in self._cache.values():
+            self._register_root_command(skill)
+        for skill_id, directory in self._skill_dirs.items():
+            self._discover_commands(skill_id, directory)
 
     def _load_directory(self, root, source):
         for directory in sorted(root.iterdir()):
@@ -118,6 +130,29 @@ class SkillManager:
             if isinstance(name, str) and isinstance(content, str):
                 normalized_knowledge[name[:160]] = content[:5000]
 
+        normalized_commands = []
+        raw_commands = data.get("commands")
+        if isinstance(raw_commands, dict):
+            raw_commands = [
+                {"name": name, **(value if isinstance(value, dict) else {"prompt": value})}
+                for name, value in raw_commands.items()
+            ]
+        if isinstance(raw_commands, list):
+            for item in raw_commands[:50]:
+                if isinstance(item, str):
+                    item = {"name": item}
+                if not isinstance(item, dict):
+                    continue
+                name = str(item.get("name") or "").strip()
+                if not name:
+                    continue
+                normalized_commands.append({
+                    "name": name[:64],
+                    "description": str(item.get("description") or "")[:500],
+                    "path": str(item.get("path") or "")[:300],
+                    "prompt": str(item.get("prompt") or "")[:MAX_COMMAND_CONTEXT_CHARS],
+                })
+
         return {
             "id": skill_id,
             "name": str(data.get("name") or skill_id)[:120],
@@ -127,35 +162,183 @@ class SkillManager:
             "source": source,
             "github_url": str(data.get("github_url") or "")[:500],
             "knowledge": normalized_knowledge,
+            "commands": normalized_commands,
         }
 
     def list_skills(self):
         fields = ("id", "name", "icon", "description", "source", "github_url")
         return [{field: skill.get(field, "") for field in fields} for skill in self._cache.values()]
 
-    def get_skill(self, skill_id):
-        return self._cache.get(skill_id)
+    @staticmethod
+    def _normalize_command_name(value):
+        name = str(value or "").strip().lstrip("/").lower()
+        return name if SLASH_COMMAND_PATTERN.fullmatch(name) else ""
 
-    def get_skill_prompt(self):
-        if not self._cache:
-            return ""
-        lines = [
-            "## 可用技能",
-            "根据用户需求判断是否需要技能。需要时必须先调用 load_skill(skill_id) 读取完整技能指令，再按返回内容执行。",
-            "不要声称已使用尚未加载的技能。",
-            "",
-        ]
-        for skill in self._cache.values():
-            lines.append(
-                f"- `{skill['id']}`：{skill['name']} - {skill['description']}"
+    @staticmethod
+    def _parse_skill_document(content):
+        metadata = {}
+        body = content
+        if content.startswith("---\n") or content.startswith("---\r\n"):
+            lines = content.splitlines()
+            closing_index = next(
+                (index for index, line in enumerate(lines[1:], 1) if line.strip() == "---"),
+                None,
             )
-        return "\n".join(lines)
+            if closing_index is not None:
+                for line in lines[1:closing_index]:
+                    key, separator, value = line.partition(":")
+                    if not separator or key.strip() not in {"name", "description"}:
+                        continue
+                    value = value.strip()
+                    if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+                        value = value[1:-1]
+                    metadata[key.strip()] = value
+                body = "\n".join(lines[closing_index + 1:]).strip()
+        return metadata, body
 
-    def get_skill_context(self, skill_id, max_chars=12000):
-        skill = self.get_skill(skill_id)
+    @staticmethod
+    def _public_command(command):
+        fields = (
+            "command",
+            "name",
+            "description",
+            "skill_id",
+            "skill_name",
+            "source",
+            "aliases",
+        )
+        return {field: command.get(field, "") for field in fields}
+
+    def _register_command(
+        self,
+        skill_id,
+        name,
+        description,
+        context,
+        *,
+        kind="command",
+    ):
+        name = self._normalize_command_name(name)
+        if not name:
+            return
+        skill = self._cache.get(skill_id)
         if not skill:
-            raise ValueError(f"技能 '{skill_id}' 不存在")
+            return
 
+        qualified_name = f"{skill_id}:{name}".lower()
+        command_name = name
+        if command_name in RESERVED_SLASH_COMMANDS or command_name in self._command_aliases:
+            command_name = qualified_name
+        if command_name in self._command_aliases:
+            self._load_errors.append(
+                f"{skill_id}: slash command '{name}' conflicts with another installed skill"
+            )
+            return
+
+        aliases = []
+        if qualified_name != command_name:
+            aliases.append(qualified_name)
+        command = {
+            "command": command_name,
+            "name": name,
+            "description": str(description or skill.get("description") or "")[:500],
+            "skill_id": skill_id,
+            "skill_name": skill.get("name", skill_id),
+            "source": skill.get("source", "installed"),
+            "aliases": aliases,
+            "context": str(context or "")[:MAX_COMMAND_CONTEXT_CHARS],
+            "kind": kind,
+        }
+        self._commands[command_name] = command
+        self._command_aliases[command_name] = command_name
+        self._command_aliases[qualified_name] = command_name
+
+    def _register_root_command(self, skill):
+        skill_id = skill.get("id", "")
+        self._register_command(
+            skill_id,
+            skill_id,
+            skill.get("description", ""),
+            "",
+            kind="skill",
+        )
+
+    def _command_document(self, path):
+        content = self._read_text(path, max_len=MAX_COMMAND_CONTEXT_CHARS)
+        if not content:
+            return {}, ""
+        return self._parse_skill_document(content)
+
+    def _discover_commands(self, skill_id, skill_dir):
+        skill = self._cache.get(skill_id) or {}
+        root = skill_dir.resolve()
+        seen_paths = set()
+
+        for spec in skill.get("commands") or []:
+            name = spec.get("name", "")
+            description = spec.get("description", "")
+            context = spec.get("prompt", "")
+            relative_path = spec.get("path", "")
+            if relative_path:
+                path = (root / relative_path).resolve()
+                if not path.is_relative_to(root) or not path.is_file():
+                    self._load_errors.append(
+                        f"{skill_id}: slash command path is invalid: {relative_path}"
+                    )
+                    continue
+                metadata, file_context = self._command_document(path)
+                seen_paths.add(path)
+                name = name or metadata.get("name") or path.parent.name
+                description = description or metadata.get("description", "")
+                context = context or file_context
+            if context:
+                self._register_command(skill_id, name, description, context)
+
+        patterns = (
+            "skills/*/SKILL.md",
+            ".agents/skills/*/SKILL.md",
+            ".codex/skills/*/SKILL.md",
+            "commands/**/*.md",
+            ".claude/commands/**/*.md",
+        )
+        for pattern in patterns:
+            for path in sorted(root.glob(pattern)):
+                resolved = path.resolve()
+                if resolved in seen_paths or not resolved.is_relative_to(root):
+                    continue
+                seen_paths.add(resolved)
+                metadata, context = self._command_document(resolved)
+                if not context:
+                    continue
+                default_name = path.parent.name if path.name.lower() == "skill.md" else path.stem
+                name = metadata.get("name") or default_name
+                description = metadata.get("description") or self._extract_description(context)
+                self._register_command(skill_id, name, description, context)
+
+    def list_commands(self):
+        return [
+            self._public_command(command)
+            for command in sorted(self._commands.values(), key=lambda item: item["command"])
+        ]
+
+    def get_command(self, command_name):
+        lookup = str(command_name or "").strip().lstrip("/").lower()
+        canonical = self._command_aliases.get(lookup)
+        return self._commands.get(canonical) if canonical else None
+
+    def resolve_slash_command(self, content):
+        match = SLASH_INPUT_PATTERN.match(str(content or ""))
+        if not match:
+            return None
+        command = self.get_command(match.group(1))
+        if not command:
+            return None
+        return {
+            **self._public_command(command),
+            "arguments": (match.group(2) or "").strip(),
+        }
+
+    def _render_skill_context(self, skill, max_chars):
         sections = [
             f"# {skill['name']}",
             skill.get("description", ""),
@@ -169,6 +352,64 @@ class SkillManager:
                 sections.append(f"### {name}\n{content}")
         return "\n\n".join(part for part in sections if part).strip()[:max_chars]
 
+    def get_command_context(self, command_name, max_chars=MAX_COMMAND_CONTEXT_CHARS):
+        command = self.get_command(command_name)
+        if not command:
+            raise ValueError(f"斜杠指令 '{command_name}' 不存在")
+        if command.get("kind") == "skill":
+            return self._render_skill_context(self._cache[command["skill_id"]], max_chars)
+        sections = [
+            f"# /{command['command']}",
+            f"来源技能：{command['skill_name']}",
+            command.get("description", ""),
+            "## 指令内容",
+            command.get("context", ""),
+        ]
+        return "\n\n".join(part for part in sections if part).strip()[:max_chars]
+
+    def get_skill(self, skill_id):
+        return self._cache.get(skill_id)
+
+    def get_skill_prompt(self):
+        if not self._cache:
+            return ""
+        lines = [
+            "## 可用技能",
+            "根据用户需求判断是否需要技能。需要时必须先调用 load_skill(skill_id) 读取完整技能指令，再按返回内容执行。",
+            "不要声称已使用尚未加载的技能。",
+            "不要为了决定技能而逐个枚举或比较候选项；明确匹配时加载一次，不匹配时直接处理用户请求。",
+            "",
+        ]
+        for skill in self._cache.values():
+            lines.append(
+                f"- `{skill['id']}`：{skill['name']} - {skill['description']}"
+            )
+
+        commands = [
+            command for command in self.list_commands()
+            if command["command"] != command["skill_id"]
+        ]
+        if commands:
+            lines.extend([
+                "",
+                "## 可用技能指令",
+                "用户可直接输入斜杠指令。自然语言需求明显符合某条指令时，也应主动调用 load_skill，skill_id 使用下列指令名。",
+            ])
+            for command in commands:
+                lines.append(
+                    f"- `/{command['command']}`：{command['description']}（来源：{command['skill_name']}）"
+                )
+        return "\n".join(lines)
+
+    def get_skill_context(self, skill_id, max_chars=12000):
+        skill = self.get_skill(skill_id)
+        if skill:
+            return self._render_skill_context(skill, max_chars)
+        command = self.get_command(skill_id)
+        if command:
+            return self.get_command_context(skill_id, max_chars=max_chars)
+        raise ValueError(f"技能或指令 '{skill_id}' 不存在")
+
     def diagnostics(self):
         counts = {"builtin": 0, "custom": 0, "installed": 0}
         for skill in self._cache.values():
@@ -178,6 +419,7 @@ class SkillManager:
         return {
             "status": "ok" if not self._load_errors else "degraded",
             "total": len(self._cache),
+            "commands": len(self._commands),
             "counts": counts,
             "load_errors": list(self._load_errors),
         }

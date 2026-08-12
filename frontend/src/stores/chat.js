@@ -104,6 +104,12 @@ export const useChatStore = defineStore('chat', () => {
         } else {
           segs.push({ ...segment })
         }
+      } else if (segment.type === 'choice') {
+        const idx = segs.findIndex(s => (
+          s.type === 'choice' && s.choice_id === segment.choice_id
+        ))
+        if (idx >= 0) segs[idx] = { ...segs[idx], ...segment }
+        else segs.push({ ...segment })
       }
 
       // 连续 tool 分组组内排序（text 段位置不动）
@@ -221,7 +227,9 @@ export const useChatStore = defineStore('chat', () => {
         reasoningDurationMs: message.reasoning_duration_ms || 0,
       }
       if (message.segments?.length) {
-        restored.segments = message.content && message.segments.every(segment => segment.type !== 'text')
+        restored.segments = message.content && message.segments.every(
+          segment => !['text', 'choice'].includes(segment.type),
+        )
           ? [...message.segments, { type: 'text', content: message.content }]
           : message.segments
         restored.version = message.version || 2

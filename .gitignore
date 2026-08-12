@@ -59,6 +59,8 @@ backups/
 # .superpowers
 .superpowers/
 docs/superpowers/
+backend/skills/installed/
+backend/skills/custom/
 
 # 调试文件
 data/debug_request.json

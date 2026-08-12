@@ -120,7 +120,10 @@ class Database:
                 name TEXT DEFAULT '',
                 theme_pack_id TEXT DEFAULT 'default_pack',
                 tool_workspace TEXT DEFAULT '',
-                approval_mode TEXT DEFAULT 'ask'
+                approval_mode TEXT DEFAULT 'ask',
+                active_skill_command TEXT DEFAULT '',
+                active_skill_arguments TEXT DEFAULT '',
+                task_checkpoint TEXT DEFAULT '{}'
             )
         """)
         session_columns = await self._db.execute("PRAGMA table_info(session_metadata)")
@@ -132,6 +135,18 @@ class Database:
         if "approval_mode" not in session_column_names:
             await self._db.execute(
                 "ALTER TABLE session_metadata ADD COLUMN approval_mode TEXT DEFAULT 'ask'"
+            )
+        if "active_skill_command" not in session_column_names:
+            await self._db.execute(
+                "ALTER TABLE session_metadata ADD COLUMN active_skill_command TEXT DEFAULT ''"
+            )
+        if "active_skill_arguments" not in session_column_names:
+            await self._db.execute(
+                "ALTER TABLE session_metadata ADD COLUMN active_skill_arguments TEXT DEFAULT ''"
+            )
+        if "task_checkpoint" not in session_column_names:
+            await self._db.execute(
+                "ALTER TABLE session_metadata ADD COLUMN task_checkpoint TEXT DEFAULT '{}'"
             )
         await self._db.commit()
 
@@ -164,7 +179,8 @@ class Database:
 
     async def get_session_meta(self, session_id):
         cursor = await self._db.execute(
-            "SELECT session_id, name, theme_pack_id, tool_workspace, approval_mode "
+            "SELECT session_id, name, theme_pack_id, tool_workspace, approval_mode, "
+            "active_skill_command, active_skill_arguments, task_checkpoint "
             "FROM session_metadata WHERE session_id = ?",
             (session_id,)
         )
@@ -176,6 +192,9 @@ class Database:
                 "theme_pack_id": row[2],
                 "tool_workspace": row[3] or "",
                 "approval_mode": row[4] if row[4] in {"ask", "auto"} else "ask",
+                "active_skill_command": row[5] or "",
+                "active_skill_arguments": row[6] or "",
+                "task_checkpoint": row[7] or "{}",
             }
         return {
             "session_id": session_id,
@@ -183,6 +202,9 @@ class Database:
             "theme_pack_id": "default_pack",
             "tool_workspace": "",
             "approval_mode": "ask",
+            "active_skill_command": "",
+            "active_skill_arguments": "",
+            "task_checkpoint": "{}",
         }
 
     async def set_session_meta(
@@ -192,6 +214,9 @@ class Database:
         theme_pack_id=None,
         tool_workspace=None,
         approval_mode=None,
+        active_skill_command=None,
+        active_skill_arguments=None,
+        task_checkpoint=None,
     ):
         meta = await self.get_session_meta(session_id)
         if name is not None:
@@ -202,16 +227,26 @@ class Database:
             meta["tool_workspace"] = tool_workspace
         if approval_mode is not None:
             meta["approval_mode"] = approval_mode
+        if active_skill_command is not None:
+            meta["active_skill_command"] = active_skill_command
+        if active_skill_arguments is not None:
+            meta["active_skill_arguments"] = active_skill_arguments
+        if task_checkpoint is not None:
+            meta["task_checkpoint"] = task_checkpoint
         await self._db.execute(
             "INSERT OR REPLACE INTO session_metadata "
-            "(session_id, name, theme_pack_id, tool_workspace, approval_mode) "
-            "VALUES (?, ?, ?, ?, ?)",
+            "(session_id, name, theme_pack_id, tool_workspace, approval_mode, "
+            "active_skill_command, active_skill_arguments, task_checkpoint) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 session_id,
                 meta["name"],
                 meta["theme_pack_id"],
                 meta["tool_workspace"],
                 meta["approval_mode"],
+                meta["active_skill_command"],
+                meta["active_skill_arguments"],
+                meta["task_checkpoint"],
             )
         )
         await self._db.commit()
@@ -287,12 +322,16 @@ class Database:
         row = await cursor.fetchone()
         return dict(row) if row else None
 
-    async def get_history(self, session_id: str, limit: int = 50):
-        cursor = await self._db.execute(
+    async def get_history(self, session_id: str, limit: int | None = 50, after_id: int = 0):
+        query = (
             "SELECT id, role, content, persona, metadata, client_message_id, created_at "
-            "FROM conversations WHERE session_id = ? ORDER BY id DESC LIMIT ?",
-            (session_id, limit)
+            "FROM conversations WHERE session_id = ? AND id > ? ORDER BY id DESC"
         )
+        params = [session_id, max(0, int(after_id or 0))]
+        if limit is not None:
+            query += " LIMIT ?"
+            params.append(max(1, int(limit)))
+        cursor = await self._db.execute(query, params)
         rows = await cursor.fetchall()
         result = []
         for row in reversed(rows):
@@ -412,7 +451,7 @@ class Database:
         row = await cursor.fetchone()
         return row[0] if row else 0
 
-    async def get_uncovered_history(self, session_id, limit=10):
+    async def get_uncovered_history(self, session_id, limit=None):
         """获取未被摘要覆盖的历史消息"""
         covered_to = 0
         cursor = await self._db.execute(
@@ -422,10 +461,15 @@ class Database:
         if row and row[0]:
             covered_to = row[0]
 
-        cursor = await self._db.execute(
-            "SELECT id, role, content FROM conversations WHERE session_id = ? AND id > ? ORDER BY id ASC LIMIT ?",
-            (session_id, covered_to, limit)
+        query = (
+            "SELECT id, role, content FROM conversations "
+            "WHERE session_id = ? AND id > ? ORDER BY id ASC"
         )
+        params = [session_id, covered_to]
+        if limit is not None:
+            query += " LIMIT ?"
+            params.append(max(1, int(limit)))
+        cursor = await self._db.execute(query, params)
         return [dict(row) for row in await cursor.fetchall()]
 
     async def get_uncovered_message_count(self, session_id):

@@ -316,6 +316,83 @@ class TestContextLoading:
         total_chars = sum(len(m.get("content", "")) for m in context)
         assert total_chars < 5000  # 不应无限膨胀
 
+    @pytest.mark.asyncio
+    async def test_context_compresses_near_budget_and_keeps_recent_work(self):
+        memory = MemoryManager(max_tokens=120)
+        for i in range(18):
+            await memory.add_message("budget-session", "user", f"用户任务 {i} " + "细节" * 20)
+            await memory.add_message("budget-session", "assistant", f"阶段结果 {i} " + "结果" * 20)
+
+        context = await memory.get_context(
+            "budget-session",
+            "系统指令",
+            max_history=50,
+            max_context=120,
+            max_output_tokens=20,
+        )
+
+        assert any("早期任务上下文" in message.get("content", "") for message in context)
+        assert any("用户任务 17" in message.get("content", "") for message in context)
+        assert len([message for message in context if message["role"] != "system"]) <= 20
+
+    @pytest.mark.asyncio
+    async def test_runtime_compaction_replaces_old_tool_records(self):
+        memory = MemoryManager()
+        messages = [{"role": "system", "content": "系统指令"}]
+        for i in range(12):
+            messages.append({"role": "assistant", "content": "", "tool_calls": [{"id": f"call-{i}"}]})
+            messages.append({"role": "tool", "content": f"工具结果 {i}: " + "错误输出" * 50})
+
+        compacted = memory.compact_runtime_messages(
+            messages,
+            max_context=240,
+            max_output_tokens=20,
+        )
+
+        assert any("本轮早期工作记录" in message.get("content", "") for message in compacted)
+        assert len(compacted) < len(messages)
+        assert any("工具结果 11" in message.get("content", "") for message in compacted)
+
+    @pytest.mark.asyncio
+    async def test_context_compaction_emits_progress_events(self):
+        memory = MemoryManager(max_tokens=120)
+        for i in range(18):
+            await memory.add_message("progress-session", "user", f"任务 {i} " + "细节" * 20)
+            await memory.add_message("progress-session", "assistant", f"结果 {i} " + "内容" * 20)
+
+        events = []
+
+        async def on_compaction(event):
+            events.append(event)
+
+        await memory.get_context(
+            "progress-session",
+            "系统指令",
+            max_context=120,
+            max_output_tokens=20,
+            compaction_callback=on_compaction,
+        )
+
+        assert [event["phase"] for event in events] == ["start", "done"]
+        assert events[0]["before_tokens"] > events[1]["after_tokens"]
+
+    @pytest.mark.asyncio
+    async def test_manual_compact_persists_summary_and_excludes_old_history(self):
+        memory = MemoryManager()
+        for i in range(12):
+            await memory.add_message("manual-compact-session", "user", f"旧任务 {i}")
+            await memory.add_message("manual-compact-session", "assistant", f"旧结果 {i}")
+
+        result = await memory.compact_session("manual-compact-session")
+        assert result["compressed"] is True
+        assert result["message_count"] > 0
+
+        summaries = await db.get_summaries("manual-compact-session")
+        assert len(summaries) == 1
+        context = await memory.get_context("manual-compact-session", "系统指令")
+        assert any("对话摘要" in item.get("content", "") for item in context)
+        assert not any("旧任务 0" == item.get("content") for item in context)
+
 
 # ============================================================
 # 6. chat.py 变量顺序（今天的真实 bug）

@@ -1,5 +1,37 @@
 <template>
   <div class="input-wrapper">
+    <Transition name="slash-menu">
+      <div
+        v-if="slashMenuOpen"
+        class="slash-command-menu"
+        role="listbox"
+        aria-label="可用指令"
+      >
+        <div class="slash-command-header">
+          <Command :size="15" aria-hidden="true" />
+          <span>可用指令</span>
+          <small>{{ filteredSlashCommands.length }}</small>
+        </div>
+        <div class="slash-command-list">
+          <button
+            v-for="(command, index) in filteredSlashCommands"
+            :id="`slash-command-${index}`"
+            :key="`${command.skill_id}:${command.command}`"
+            type="button"
+            role="option"
+            class="slash-command-item"
+            :class="{ selected: index === slashCommandIndex }"
+            :aria-selected="index === slashCommandIndex"
+            @mouseenter="slashCommandIndex = index"
+            @mousedown.prevent="selectSlashCommand(command)"
+          >
+            <span class="slash-command-name">/{{ command.command }}</span>
+            <span class="slash-command-description">{{ command.description }}</span>
+            <span class="slash-command-source">{{ command.skill_name }}</span>
+          </button>
+        </div>
+      </div>
+    </Transition>
     <!-- 附件预览区（在输入框上方） -->
     <div v-if="pendingImage || pendingFile" class="preview-bar">
       <div v-if="pendingImage" class="preview-item">
@@ -16,6 +48,21 @@
           <X :size="11" aria-hidden="true" />
         </button>
       </div>
+    </div>
+    <div v-if="activeSkill?.active" class="active-skill-bar" role="status">
+      <Command :size="14" aria-hidden="true" />
+      <span class="active-skill-label">当前技能</span>
+      <strong>/{{ activeSkill.command }}</strong>
+      <span class="active-skill-source">{{ activeSkill.skill_name }}</span>
+      <button
+        type="button"
+        :disabled="submitting || isStreaming"
+        title="关闭当前技能"
+        aria-label="关闭当前技能"
+        @click="emit('clear-active-skill')"
+      >
+        <X :size="14" aria-hidden="true" />
+      </button>
     </div>
     <div class="input-bar glass-enhanced">
       <input type="file" ref="fileInput" style="display:none" @change="handleFile" accept="image/*,.txt,.md,.py,.js,.json,.csv,.pdf,.docx" />
@@ -65,11 +112,12 @@
       </div>
       <textarea
         v-model="text"
-        @keydown.enter.exact.prevent="send"
+        @keydown="handleTextareaKeydown"
         :placeholder="pendingImage ? '添加文字描述（可选）...' : '输入消息... (Enter 发送)'"
         rows="1"
         ref="textareaRef"
         :disabled="submitting"
+        :aria-activedescendant="slashMenuOpen ? `slash-command-${slashCommandIndex}` : undefined"
       ></textarea>
       <button
         class="mic-btn"
@@ -120,8 +168,8 @@
 </template>
 
 <script setup>
-import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
-import { BrainCircuit, FileText, LoaderCircle, Mic, Paperclip, Send, ShieldAlert, ShieldCheck, Square, Volume2, VolumeX, X } from 'lucide-vue-next'
+import { computed, ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
+import { BrainCircuit, Command, FileText, LoaderCircle, Mic, Paperclip, Send, ShieldAlert, ShieldCheck, Square, Volume2, VolumeX, X } from 'lucide-vue-next'
 import { useToast } from '../composables/useToast'
 
 const props = defineProps({
@@ -130,8 +178,9 @@ const props = defineProps({
   isStopping: { type: Boolean, default: false },
   connected: { type: Boolean, default: false },
   approvalMode: { type: String, default: 'ask' },
+  activeSkill: { type: Object, default: null },
 })
-const emit = defineEmits(['send', 'toggle-tts', 'stop', 'update:approval-mode'])
+const emit = defineEmits(['send', 'toggle-tts', 'stop', 'update:approval-mode', 'clear-active-skill'])
 const text = ref('')
 const textareaRef = ref(null)
 const fileInput = ref(null)
@@ -142,6 +191,86 @@ const submitting = ref(false)
 const reasoningEnabled = ref(localStorage.getItem('reasoning-enabled') === 'true')
 const approvalMenuOpen = ref(false)
 const approvalRef = ref(null)
+const slashCommands = ref([])
+const slashCommandIndex = ref(0)
+
+const slashQuery = computed(() => {
+  const match = text.value.match(/^\/([^\s/]*)$/)
+  return match ? match[1].toLowerCase() : null
+})
+
+const filteredSlashCommands = computed(() => {
+  if (slashQuery.value === null) return []
+  const query = slashQuery.value
+  return slashCommands.value
+    .filter(command => {
+      if (!query) return true
+      return [command.command, command.name, command.description, command.skill_name]
+        .some(value => String(value || '').toLowerCase().includes(query))
+    })
+    .slice(0, 12)
+})
+
+const slashMenuOpen = computed(() => (
+  !submitting.value
+  && slashQuery.value !== null
+  && filteredSlashCommands.value.length > 0
+))
+
+async function loadSlashCommands() {
+  try {
+    const response = await fetch('/api/skills/commands')
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+    const data = await response.json()
+    slashCommands.value = Array.isArray(data) ? data : []
+  } catch {
+    slashCommands.value = []
+  }
+}
+
+function selectSlashCommand(command) {
+  text.value = `/${command.command} `
+  slashCommandIndex.value = 0
+  nextTick(() => textareaRef.value?.focus())
+}
+
+function handleTextareaKeydown(event) {
+  if (event.isComposing) return
+  if (slashMenuOpen.value) {
+    if (event.key === 'ArrowDown') {
+      event.preventDefault()
+      slashCommandIndex.value = (slashCommandIndex.value + 1) % filteredSlashCommands.value.length
+      return
+    }
+    if (event.key === 'ArrowUp') {
+      event.preventDefault()
+      slashCommandIndex.value = (
+        slashCommandIndex.value - 1 + filteredSlashCommands.value.length
+      ) % filteredSlashCommands.value.length
+      return
+    }
+    if (event.key === 'Enter' || event.key === 'Tab') {
+      event.preventDefault()
+      selectSlashCommand(filteredSlashCommands.value[slashCommandIndex.value])
+      return
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      text.value = text.value.slice(1)
+      return
+    }
+  }
+  if (
+    event.key === 'Enter'
+    && !event.shiftKey
+    && !event.ctrlKey
+    && !event.altKey
+    && !event.metaKey
+  ) {
+    event.preventDefault()
+    send()
+  }
+}
 
 function selectApprovalMode(mode) {
   approvalMenuOpen.value = false
@@ -273,6 +402,7 @@ function removeImage() {
 
 // textarea 自动调整高度
 watch(text, () => {
+  slashCommandIndex.value = 0
   nextTick(() => {
     if (textareaRef.value) {
       textareaRef.value.style.height = 'auto'
@@ -318,10 +448,15 @@ watch(text, () => {
 // 组件挂载时恢复草稿
 onMounted(() => {
   restoreDraft()
+  loadSlashCommands()
   document.addEventListener('pointerdown', closeApprovalMenu)
+  window.addEventListener('versena:skills-changed', loadSlashCommands)
 })
 
-onUnmounted(() => document.removeEventListener('pointerdown', closeApprovalMenu))
+onUnmounted(() => {
+  document.removeEventListener('pointerdown', closeApprovalMenu)
+  window.removeEventListener('versena:skills-changed', loadSlashCommands)
+})
 </script>
 
 <style scoped>
@@ -332,6 +467,106 @@ onUnmounted(() => document.removeEventListener('pointerdown', closeApprovalMenu)
   padding: 0 var(--chat-gutter) 12px;
   margin-inline: auto;
   box-sizing: border-box;
+}
+
+.slash-command-menu {
+  position: absolute;
+  left: var(--chat-gutter);
+  right: var(--chat-gutter);
+  bottom: calc(100% + 8px);
+  z-index: 60;
+  overflow: hidden;
+  background: var(--surface-modal);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.38);
+  backdrop-filter: blur(18px);
+}
+
+.slash-command-header {
+  height: 38px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  color: var(--text-secondary);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  font-size: 12px;
+}
+
+.slash-command-header small {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.slash-command-list {
+  max-height: min(360px, 42vh);
+  overflow-y: auto;
+  padding: 5px;
+}
+
+.slash-command-item {
+  width: 100%;
+  min-height: 48px;
+  display: grid;
+  grid-template-columns: minmax(160px, 0.8fr) minmax(0, 2fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 10px;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  border-radius: 5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.slash-command-item:hover,
+.slash-command-item.selected {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.slash-command-item.selected {
+  box-shadow: inset 2px 0 0 var(--primary);
+}
+
+.slash-command-name {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.slash-command-description {
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.slash-command-source {
+  max-width: 130px;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.slash-menu-enter-active,
+.slash-menu-leave-active {
+  transition: opacity var(--motion-fast) var(--ease-standard), transform var(--motion-fast) var(--ease-standard);
+}
+
+.slash-menu-enter-from,
+.slash-menu-leave-to {
+  opacity: 0;
+  transform: translateY(5px);
 }
 
 /* 附件预览区 */
@@ -376,6 +611,75 @@ onUnmounted(() => document.removeEventListener('pointerdown', closeApprovalMenu)
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.active-skill-bar {
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  color: var(--text-secondary);
+  background: var(--surface-control);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  box-shadow: var(--ui-border);
+  font-size: 12px;
+}
+
+.active-skill-bar strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.active-skill-label {
+  flex-shrink: 0;
+}
+
+.active-skill-source {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.active-skill-bar button {
+  width: 26px;
+  height: 26px;
+  margin-left: auto;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.active-skill-bar button:hover:not(:disabled) {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.active-skill-bar button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.active-skill-bar + .input-bar {
+  border-radius: 0 0 var(--radius) var(--radius);
+}
+
+.preview-bar + .active-skill-bar {
+  border-radius: 0;
 }
 .remove-btn {
   position: absolute;
@@ -625,6 +929,19 @@ textarea:focus {
     width: 100vw;
     max-width: 100vw;
     padding: 0 12px 12px;
+  }
+
+  .slash-command-menu {
+    left: 12px;
+    right: 12px;
+  }
+
+  .slash-command-item {
+    grid-template-columns: minmax(120px, 0.8fr) minmax(0, 1.5fr);
+  }
+
+  .slash-command-source {
+    display: none;
   }
 
   .input-bar {
