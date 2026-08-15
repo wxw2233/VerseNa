@@ -28,9 +28,12 @@ const icons = { success: '✓', error: '✕', warning: '⚠', info: 'ℹ' }
 .toast-container {
   position: fixed;
   top: 16px;
-  right: 16px;
+  left: 50%;
+  width: min(420px, calc(100vw - 120px));
+  transform: translateX(-50%);
   z-index: 99999;
   display: flex;
+  align-items: center;
   flex-direction: column;
   gap: 10px;
   pointer-events: none;
@@ -48,7 +51,9 @@ const icons = { success: '✓', error: '✕', warning: '⚠', info: 'ℹ' }
   -webkit-backdrop-filter: blur(16px);
   pointer-events: auto;
   cursor: pointer;
-  max-width: 380px;
+  width: fit-content;
+  max-width: 100%;
+  box-sizing: border-box;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   position: relative;
@@ -136,5 +141,16 @@ const icons = { success: '✓', error: '✕', warning: '⚠', info: 'ℹ' }
 
 .toast-move {
   transition: transform 0.3s ease;
+}
+
+@media (max-width: 767px) {
+  .toast-container {
+    top: 64px;
+    width: calc(100vw - 32px);
+  }
+
+  .toast-item {
+    width: 100%;
+  }
 }
 </style>

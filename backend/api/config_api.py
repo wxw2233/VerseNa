@@ -300,8 +300,10 @@ async def set_trust_mode(req: TrustModeReq):
 
 AGENT_CONFIG_DEFAULTS = {
     "max_steps": 15,
+    "subagent_max_steps": 16,
     "max_context": 128000,
     "max_tokens": 8192,
+    "tool_timeout": 120,
     "reasoning_effort": "medium",
     "custom_instructions": "",
 }
@@ -309,8 +311,10 @@ AGENT_CONFIG_DEFAULTS = {
 # 配置值硬上限（MiMo 百万上下文，放宽限制）
 AGENT_CONFIG_LIMITS = {
     "max_steps": (1, 100),
+    "subagent_max_steps": (4, 50),
     "max_context": (2000, 1000000),
     "max_tokens": (256, 65536),
+    "tool_timeout": (10, 300),
 }
 
 @router.get("/api/config/agent")
@@ -332,10 +336,12 @@ async def get_agent_config():
 
 class AgentConfigReq(BaseModel):
     max_steps: int | None = None
+    subagent_max_steps: int | None = None
     max_context: int | None = None
     temperature: float | None = None
     top_p: float | None = None
     max_tokens: int | None = None
+    tool_timeout: int | None = None
     reasoning_effort: str | None = None
     custom_instructions: str | None = None
 
@@ -396,44 +402,67 @@ async def load_saved_config():
 # ========== Memory API ==========
 
 @router.get("/api/memories")
-async def list_memories(category: str = None):
-    memories = await db.get_memories(limit=100, category=category)
+async def list_memories(category: str = None, scope: str = None, workspace_path: str = None):
+    if scope not in {None, "global", "workspace"}:
+        raise HTTPException(400, "无效的记忆作用域")
+    if scope == "workspace" and not workspace_path:
+        workspace_path = str(settings.TOOL_WORKSPACE)
+    memories = await db.get_memories(limit=100, category=category, workspace_path=workspace_path)
+    if scope == "global":
+        memories = [memory for memory in memories if memory.get("scope") == "global"]
+    elif scope == "workspace":
+        memories = [memory for memory in memories if memory.get("scope") == "workspace"]
     return memories
 
 @router.post("/api/memories")
 async def create_memory(req: dict):
     content = req.get('content', '')
     category = req.get('category', 'general')
+    scope = req.get('scope', 'global')
     if not content:
         raise HTTPException(400, "内容不能为空")
-    dup_id = await db.check_duplicate_memory(content)
+    if scope not in {"global", "workspace"}:
+        raise HTTPException(400, "无效的记忆作用域")
+    workspace_path = str(settings.TOOL_WORKSPACE) if scope == "workspace" else None
+    dup_id = await db.check_duplicate_memory(content, scope=scope, workspace_path=workspace_path)
     if dup_id:
-        return {"status": "duplicate", "id": dup_id}
-    await db.save_memory(content, category=category, source='manual', expired_at=None)
-    return {"status": "ok"}
+        return {"status": "duplicate", "id": dup_id, "scope": scope, "workspace_path": workspace_path}
+    memory_id = await db.save_memory(
+        content, category=category, source='manual', expired_at=None,
+        scope=scope, workspace_path=workspace_path,
+    )
+    return {"status": "ok", "id": memory_id, "scope": scope, "workspace_path": workspace_path}
 
 @router.put("/api/memories/{memory_id}")
 async def update_memory(memory_id: int, req: dict):
-    await db.update_memory(memory_id, content=req.get('content'), category=req.get('category'))
+    scope = req.get('scope')
+    if scope is not None and scope not in {"global", "workspace"}:
+        raise HTTPException(400, "无效的记忆作用域")
+    workspace_path = str(settings.TOOL_WORKSPACE) if scope == "workspace" else None
+    await db.update_memory(
+        memory_id,
+        content=req.get('content'),
+        category=req.get('category'),
+        scope=scope,
+        workspace_path=workspace_path,
+    )
     return {"status": "ok"}
 
 @router.delete("/api/memories/{memory_id}")
 async def delete_memory(memory_id: int):
-    await db.delete_memory(memory_id)
-    return {"status": "ok"}
+    deleted = await db.delete_memory(memory_id)
+    if not deleted:
+        raise HTTPException(404, "记忆不存在")
+    return {"status": "ok", "id": memory_id}
 
 
 # ========== 工具列表 API ==========
 
 @router.get("/api/tools")
 async def list_tools():
-    """返回所有已注册的工具"""
+    """Return the tool catalog, including group, risk, and role metadata."""
     from tools.registry import tool_registry
-    tools = tool_registry.get_tools()
-    return [
-        {"name": t["function"]["name"], "description": t["function"]["description"]}
-        for t in tools
-    ]
+    return tool_registry.get_tool_catalog(role="main")
 
 
 @router.get("/api/tools/workspace")

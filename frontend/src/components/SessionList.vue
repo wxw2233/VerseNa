@@ -88,14 +88,14 @@
     </div>
 
     <!-- 新建会话：选择主题包 -->
-    <div v-if="showNewDialog" class="modal-overlay" @click.self="showNewDialog = false">
+    <div v-if="showNewDialog" class="modal-overlay" @click.self="cancelNew">
       <section class="modal" role="dialog" aria-modal="true" aria-labelledby="new-session-title">
         <div class="modal-header">
           <div>
             <h2 id="new-session-title" class="modal-title">选择主题包</h2>
             <p class="modal-subtitle">角色、主题和语音配置会随会话保存</p>
           </div>
-          <button class="modal-close" @click="showNewDialog = false" title="关闭" aria-label="关闭">
+          <button class="modal-close" @click="cancelNew" title="关闭" aria-label="关闭">
             <X :size="16" aria-hidden="true" />
           </button>
         </div>
@@ -127,7 +127,7 @@
           <div v-else class="modal-state">暂无可用主题包</div>
         </div>
         <div class="modal-actions">
-          <button class="btn-cancel" @click="showNewDialog = false">取消</button>
+          <button class="btn-cancel" @click="cancelNew">取消</button>
         </div>
       </section>
     </div>
@@ -196,7 +196,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { ChevronRight, LoaderCircle, PawPrint, Pencil, Plus, RefreshCcw, Settings, Trash2, TriangleAlert, X } from 'lucide-vue-next'
 import { useToast } from '../composables/useToast'
 import { useSessionStore } from '../stores/session'
@@ -231,6 +231,7 @@ const editSaving = ref(false)
 const deleteSessionId = ref('')
 const deleteSessionName = ref('')
 const deleteSaving = ref(false)
+const newDialogHandlers = ref({ onCreated: null, onCancel: null })
 
 const groupedSessions = computed(() => {
   const groups = {}
@@ -270,9 +271,40 @@ async function fetchThemepacks() {
   }
 }
 
-function handleNew() {
+function handleNew(handlers = {}) {
+  newDialogHandlers.value = {
+    onCreated: typeof handlers.onCreated === 'function' ? handlers.onCreated : null,
+    onCancel: typeof handlers.onCancel === 'function' ? handlers.onCancel : null,
+  }
   fetchThemepacks()
   showNewDialog.value = true
+}
+
+function cancelNew() {
+  if (creatingPackId.value) return
+  showNewDialog.value = false
+  const onCancel = newDialogHandlers.value.onCancel
+  newDialogHandlers.value = { onCreated: null, onCancel: null }
+  onCancel?.()
+}
+
+async function applyThemePack(pack) {
+  if (pack.persona_ref) personaStore.switchPersona(pack.persona_ref)
+
+  const themeId = pack.theme_ref || pack.id
+  const cssVarMap = {
+    primary: '--primary',
+    highlight: '--highlight',
+    textPrimary: '--text-primary',
+    textSecondary: '--text-secondary',
+  }
+  const colorOverrides = {}
+  if (pack.theme?.colors) {
+    for (const [key, cssVar] of Object.entries(cssVarMap)) {
+      if (pack.theme.colors[key]) colorOverrides[cssVar] = pack.theme.colors[key]
+    }
+  }
+  if (themeId) await themeStore.switchTheme(themeId, colorOverrides)
 }
 
 async function createWithPack(packId) {
@@ -282,9 +314,6 @@ async function createWithPack(packId) {
     const packResp = await fetch(`/api/themepacks/${packId}`)
     if (!packResp.ok) throw new Error(`主题包读取失败: HTTP ${packResp.status}`)
     const pack = await packResp.json()
-
-    if (pack.theme_ref) themeStore.applyTheme(pack.theme_ref)
-    if (pack.persona_ref) personaStore.switchPersona(pack.persona_ref)
 
     const resp = await fetch('/api/sessions', {
       method: 'POST',
@@ -301,10 +330,25 @@ async function createWithPack(packId) {
     })
     if (!metadataResp.ok) console.warn(`Session metadata update failed: HTTP ${metadataResp.status}`)
 
+    // 主题必须完成应用后再切换会话，避免首条消息期间仍显示旧主题。
+    await applyThemePack(pack)
+    currentPackId.value = packId
     sessionStore.switchSession(data.session_id)
     chatStore.clearMessages()
-    await sessionStore.fetchSessions()
     showNewDialog.value = false
+    const onCreated = newDialogHandlers.value.onCreated
+    newDialogHandlers.value = { onCreated: null, onCancel: null }
+    await nextTick()
+    if (onCreated) await onCreated(data.session_id, pack)
+
+    try {
+      await sessionStore.fetchSessions()
+      if (!sessionStore.sessions.some(session => session.id === data.session_id)) {
+        await sessionStore.fetchSessions()
+      }
+    } catch (error) {
+      console.error('Session list refresh failed after creation:', error)
+    }
     toast.success('会话已创建')
   } catch (e) {
     toast.error(e.message || '会话创建失败')
@@ -339,7 +383,7 @@ function handleEscape(event) {
   if (event.key !== 'Escape') return
   if (showDeleteDialog.value && !deleteSaving.value) showDeleteDialog.value = false
   else if (showEditDialog.value && !editSaving.value) showEditDialog.value = false
-  else if (showNewDialog.value && !creatingPackId.value) showNewDialog.value = false
+  else if (showNewDialog.value && !creatingPackId.value) cancelNew()
 }
 
 const currentPackId = ref('')
@@ -353,16 +397,7 @@ async function handleSwitch(id) {
     const packResp = await fetch(`/api/themepacks/${newPackId}`)
     if (packResp.ok) {
       const pack = await packResp.json()
-      const themeId = pack.theme_ref || pack.id
-      if (pack.persona_ref) personaStore.switchPersona(pack.persona_ref)
-      const cssVarMap = { primary: '--primary', highlight: '--highlight', textPrimary: '--text-primary', textSecondary: '--text-secondary' }
-      const colorOverrides = {}
-      if (pack.theme?.colors) {
-        for (const [key, cssVar] of Object.entries(cssVarMap)) {
-          if (pack.theme.colors[key]) colorOverrides[cssVar] = pack.theme.colors[key]
-        }
-      }
-      if (themeId) await themeStore.switchTheme(themeId, colorOverrides)
+      await applyThemePack(pack)
     }
     currentPackId.value = newPackId
   }

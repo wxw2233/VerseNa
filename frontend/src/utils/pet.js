@@ -30,7 +30,7 @@ export function detectAgentPetState({ isStopping = false, isStreaming = false, m
   const segments = Array.isArray(assistant.segments) ? assistant.segments : []
   // 工具执行优先级高于思考，避免残留的 running reasoning 覆盖真实工具状态。
   const activeTool = [...segments].reverse().find(segment => (
-    segment?.type === 'tool' && segment.status === 'running'
+    ['tool', 'subagent', 'subagent_plan'].includes(segment?.type) && segment.status === 'running'
   ))
   if (activeTool) return 'tool'
   const activeReasoning = [...segments].reverse().find(segment => (

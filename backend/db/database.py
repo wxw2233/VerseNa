@@ -157,10 +157,36 @@ class Database:
                 content TEXT NOT NULL,
                 category TEXT DEFAULT 'general',
                 source TEXT DEFAULT 'auto',
+                scope TEXT DEFAULT 'global',
+                workspace_path TEXT DEFAULT NULL,
+                use_count INTEGER DEFAULT 0,
+                last_used_at TIMESTAMP DEFAULT NULL,
                 expired_at TIMESTAMP DEFAULT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        memory_columns = await self._db.execute("PRAGMA table_info(memories)")
+        memory_column_names = {row[1] for row in await memory_columns.fetchall()}
+        if "scope" not in memory_column_names:
+            await self._db.execute(
+                "ALTER TABLE memories ADD COLUMN scope TEXT DEFAULT 'global'"
+            )
+        if "workspace_path" not in memory_column_names:
+            await self._db.execute(
+                "ALTER TABLE memories ADD COLUMN workspace_path TEXT DEFAULT NULL"
+            )
+        if "use_count" not in memory_column_names:
+            await self._db.execute(
+                "ALTER TABLE memories ADD COLUMN use_count INTEGER DEFAULT 0"
+            )
+        if "last_used_at" not in memory_column_names:
+            await self._db.execute(
+                "ALTER TABLE memories ADD COLUMN last_used_at TIMESTAMP DEFAULT NULL"
+            )
+        await self._db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memories_scope_workspace "
+            "ON memories(scope, workspace_path)"
+        )
         await self._db.commit()
 
         # summaries table
@@ -369,45 +395,150 @@ class Database:
 
     # --- Memory methods ---
 
-    async def get_memories(self, limit=20, category=None):
+    async def get_memories(self, limit=20, category=None, workspace_path=None):
         """获取长期记忆，按权重+时间综合排序，排除已过期的"""
         # 权重：instruction=3 > fact=2 > preference=1 > general=0
         weight_case = "CASE category WHEN 'instruction' THEN 3 WHEN 'fact' THEN 2 WHEN 'preference' THEN 1 ELSE 0 END"
-        query = f"SELECT id, content, category, source, expired_at, created_at FROM memories WHERE (expired_at IS NULL OR datetime(expired_at) > datetime('now'))"
+        query = (
+            "SELECT id, content, category, source, scope, workspace_path, "
+            "use_count, last_used_at, expired_at, created_at FROM memories "
+            "WHERE (expired_at IS NULL OR datetime(expired_at) > datetime('now'))"
+        )
         params = []
         if category:
             query += " AND category = ?"
             params.append(category)
-        query += f" ORDER BY {weight_case} DESC, created_at DESC LIMIT ?"
+        if workspace_path:
+            query += " AND (scope = 'global' OR (scope = 'workspace' AND workspace_path = ?))"
+            params.append(workspace_path)
+            query += (
+                f" ORDER BY CASE WHEN scope = 'workspace' THEN 1 ELSE 0 END DESC, "
+                f"{weight_case} DESC, created_at DESC LIMIT ?"
+            )
+        else:
+            query += f" ORDER BY {weight_case} DESC, created_at DESC LIMIT ?"
         params.append(limit)
         cursor = await self._db.execute(query, params)
         return [dict(row) for row in await cursor.fetchall()]
 
-    async def save_memory(self, content, category='general', source='auto', expired_at=None):
+    async def get_memory(self, memory_id, workspace_path=None):
+        """Return one visible memory, or None when it does not exist/is out of scope."""
+        query = (
+            "SELECT id, content, category, source, scope, workspace_path, "
+            "use_count, last_used_at, expired_at, created_at FROM memories "
+            "WHERE id = ? AND (expired_at IS NULL OR datetime(expired_at) > datetime('now'))"
+        )
+        params = [memory_id]
+        if workspace_path:
+            query += " AND (scope = 'global' OR (scope = 'workspace' AND workspace_path = ?))"
+            params.append(workspace_path)
+        cursor = await self._db.execute(query, params)
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+
+    async def get_memory_stats(self, workspace_path=None):
+        """Return lightweight memory counts for the settings diagnostics panel."""
+        params = []
+        scope_filter = ""
+        if workspace_path:
+            scope_filter = " AND (scope = 'global' OR (scope = 'workspace' AND workspace_path = ?))"
+            params.append(workspace_path)
+        cursor = await self._db.execute(
+            "SELECT COUNT(*) AS total, "
+            "SUM(CASE WHEN scope = 'global' THEN 1 ELSE 0 END) AS global_count, "
+            "SUM(CASE WHEN scope = 'workspace' THEN 1 ELSE 0 END) AS workspace_count "
+            "FROM memories WHERE (expired_at IS NULL OR datetime(expired_at) > datetime('now'))"
+            + scope_filter,
+            params,
+        )
+        row = await cursor.fetchone()
+        return {
+            "total": int(row["total"] or 0),
+            "global": int(row["global_count"] or 0),
+            "workspace": int(row["workspace_count"] or 0),
+        }
+
+    async def save_memory(
+        self,
+        content,
+        category='general',
+        source='auto',
+        expired_at=None,
+        scope='global',
+        workspace_path=None,
+    ):
+        if scope != 'workspace':
+            scope = 'global'
+            workspace_path = None
+        cursor = await self._db.execute(
+            "INSERT INTO memories "
+            "(content, category, source, scope, workspace_path, use_count, last_used_at, expired_at) "
+            "VALUES (?, ?, ?, ?, ?, 0, NULL, ?)",
+            (content, category, source, scope, workspace_path, expired_at)
+        )
+        await self._db.commit()
+        return cursor.lastrowid
+
+    async def mark_memories_used(self, memory_ids):
+        ids = [int(memory_id) for memory_id in (memory_ids or []) if str(memory_id).isdigit()]
+        if not ids:
+            return
+        placeholders = ",".join("?" for _ in ids)
         await self._db.execute(
-            "INSERT INTO memories (content, category, source, expired_at) VALUES (?, ?, ?, ?)",
-            (content, category, source, expired_at)
+            f"UPDATE memories SET use_count = COALESCE(use_count, 0) + 1, "
+            f"last_used_at = CURRENT_TIMESTAMP WHERE id IN ({placeholders})",
+            ids,
         )
         await self._db.commit()
 
-    async def update_memory(self, memory_id, content=None, category=None):
+    async def update_memory(
+        self,
+        memory_id,
+        content=None,
+        category=None,
+        scope=None,
+        workspace_path=None,
+    ):
+        existing = await self.get_memory(memory_id, workspace_path=workspace_path)
+        if not existing:
+            return False
         if content:
             await self._db.execute("UPDATE memories SET content = ? WHERE id = ?", (content, memory_id))
         if category:
             await self._db.execute("UPDATE memories SET category = ? WHERE id = ?", (category, memory_id))
+        if scope in {'global', 'workspace'}:
+            if scope == 'workspace' and workspace_path:
+                await self._db.execute(
+                    "UPDATE memories SET scope = 'workspace', workspace_path = ? WHERE id = ?",
+                    (workspace_path, memory_id),
+                )
+            else:
+                await self._db.execute(
+                    "UPDATE memories SET scope = 'global', workspace_path = NULL WHERE id = ?",
+                    (memory_id,),
+                )
         await self._db.commit()
+        return True
 
     async def delete_memory(self, memory_id):
-        await self._db.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
+        cursor = await self._db.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
         await self._db.commit()
+        return cursor.rowcount > 0
 
     async def delete_expired_memories(self):
         await self._db.execute("DELETE FROM memories WHERE expired_at IS NOT NULL AND datetime(expired_at) <= datetime('now')")
         await self._db.commit()
 
-    async def check_duplicate_memory(self, content):
+    async def check_duplicate_memory(self, content, scope='global', workspace_path=None):
         """检查是否有相似记忆（字符串包含匹配）"""
-        cursor = await self._db.execute("SELECT id, content FROM memories")
+        if scope != 'workspace':
+            scope = 'global'
+            workspace_path = None
+        cursor = await self._db.execute(
+            "SELECT id, content FROM memories WHERE scope = ? "
+            "AND (workspace_path IS ? OR workspace_path = ?)",
+            (scope, workspace_path, workspace_path),
+        )
         rows = await cursor.fetchall()
         for row in rows:
             existing = row['content']

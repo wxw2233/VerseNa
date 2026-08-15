@@ -12,6 +12,10 @@ class ToolContext:
     trust_mode_getter: Callable[[], bool] | None = None
     stop_event: Any = None
     approval_mode: str = "ask"
+    model: Any = None
+    progress_callback: Callable[[dict], Any] | None = None
+    agent_config: dict[str, Any] | None = None
+    confirm_callback: Callable[[dict], Any] | None = None
 
     @property
     def trust_mode(self) -> bool:

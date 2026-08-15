@@ -97,6 +97,108 @@
                   <pre v-else>{{ entry.segment.result_detail }}</pre>
                 </div>
               </div>
+
+              <div
+                v-else-if="entry.segment.type === 'subagent'"
+                class="subagent-seg"
+                :data-status="entry.segment.status"
+              >
+                <button
+                  type="button"
+                  class="subagent-header"
+                  :disabled="!entry.segment.detail"
+                  :aria-expanded="subagentExpanded(entry.segment.subagent_id)"
+                  @click.stop="toggleSubagent(entry.segment.subagent_id)"
+                >
+                  <GitBranch :size="14" aria-hidden="true" />
+                  <span class="subagent-role">{{ subagentRole(entry.segment.role) }}</span>
+                  <span class="subagent-task">{{ entry.segment.task }}</span>
+                  <span class="subagent-status">{{ subagentStatus(entry.segment.status) }}</span>
+                  <ChevronDown
+                    v-if="entry.segment.detail"
+                    class="work-entry-arrow"
+                    :class="{ open: subagentExpanded(entry.segment.subagent_id) }"
+                    :size="13"
+                    aria-hidden="true"
+                  />
+                </button>
+                <button
+                  v-if="entry.segment.status === 'running'"
+                  type="button"
+                  class="subagent-stop"
+                  title="停止此子代理"
+                  aria-label="停止此子代理"
+                  @click.stop="emit('stop-subagent', entry.segment.subagent_id)"
+                >
+                  <Square :size="11" aria-hidden="true" />
+                </button>
+                <div class="subagent-meta">
+                  <span v-if="entry.segment.phase">{{ subagentPhase(entry.segment.phase) }}</span>
+                  <span v-if="entry.segment.depends_on?.length">依赖 {{ entry.segment.depends_on.join('、') }}</span>
+                  <span v-if="entry.segment.tool_limit">{{ entry.segment.tool_calls || 0 }}/{{ entry.segment.tool_limit }} 个工具</span>
+                  <span v-else-if="entry.segment.tool_calls">{{ entry.segment.tool_calls }} 个工具</span>
+                  <span v-if="subagentModifiedCount(entry.segment)">{{ subagentModifiedCount(entry.segment) }} 个文件</span>
+                  <span v-if="entry.segment.duration_ms">{{ formatReasoningDuration(entry.segment.duration_ms) }}</span>
+                </div>
+                <div
+                  v-if="subagentExpanded(entry.segment.subagent_id) && entry.segment.detail"
+                  class="subagent-detail"
+                  v-html="renderText(entry.segment.detail)"
+                ></div>
+                <div
+                  v-if="subagentExpanded(entry.segment.subagent_id) && subagentEvidence(entry.segment).length"
+                  class="subagent-evidence"
+                >
+                  <div
+                    v-for="item in subagentEvidence(entry.segment)"
+                    :key="item.label"
+                    class="subagent-evidence-row"
+                  >
+                    <span>{{ item.label }}</span>
+                    <code>{{ item.value }}</code>
+                  </div>
+                </div>
+              </div>
+
+              <div
+                v-else-if="entry.segment.type === 'subagent_plan'"
+                class="subagent-plan"
+                :data-status="entry.segment.status"
+              >
+                <div class="subagent-plan-header">
+                  <ListTree :size="14" aria-hidden="true" />
+                  <span>任务计划</span>
+                  <span class="subagent-plan-progress">{{ planProgress(entry.segment) }}</span>
+                  <span class="subagent-status">{{ planStatus(entry.segment.status) }}</span>
+                  <button
+                    v-if="entry.segment.status === 'running'"
+                    type="button"
+                    class="subagent-plan-stop"
+                    title="停止整个任务计划"
+                    aria-label="停止整个任务计划"
+                    @click.stop="emit('stop-plan')"
+                  >
+                    <Square :size="11" aria-hidden="true" />
+                  </button>
+                </div>
+                <div class="subagent-plan-detail">{{ entry.segment.detail }}</div>
+                <div class="subagent-plan-nodes">
+                  <div
+                    v-for="node in entry.segment.nodes || []"
+                    :key="node.id"
+                    class="subagent-plan-node"
+                    :data-status="node.status"
+                  >
+                    <span class="plan-node-dot" aria-hidden="true"></span>
+                    <span class="plan-node-id">{{ node.id }}</span>
+                    <span class="plan-node-task">{{ node.task }}</span>
+                    <span v-if="node.depends_on?.length" class="plan-node-deps">
+                      依赖 {{ node.depends_on.join('、') }}
+                    </span>
+                    <span class="plan-node-status">{{ planNodeStatus(node.status) }}</span>
+                  </div>
+                </div>
+              </div>
             </template>
           </div>
         </section>
@@ -217,7 +319,7 @@
 <script setup>
 import { ref, reactive, computed, nextTick, onBeforeUnmount, watch } from 'vue'
 import { marked } from 'marked'
-import { BrainCircuit, ChevronDown, FileText, MessageSquareText, MousePointerClick, Pencil, RefreshCcw, Send, Volume1, Volume2 } from 'lucide-vue-next'
+import { BrainCircuit, ChevronDown, FileText, GitBranch, ListTree, MessageSquareText, MousePointerClick, Pencil, RefreshCcw, Send, Square, Volume1, Volume2 } from 'lucide-vue-next'
 import { useSessionStore } from '../stores/session'
 import { useThemeStore } from '../stores/theme'
 import { useToast } from '../composables/useToast'
@@ -245,9 +347,10 @@ const props = defineProps({
   msg: Object,
   choiceResolved: { type: Boolean, default: false },
 })
-const emit = defineEmits(['retry', 'edit', 'choose'])
+const emit = defineEmits(['retry', 'edit', 'choose', 'stop-subagent', 'stop-plan'])
 const workExpanded = ref(Boolean(props.msg.streaming))
 const expandedReasoning = reactive({})
+const expandedSubagents = reactive({})
 const otherChoiceOpen = reactive({})
 const otherChoiceText = reactive({})
 const reasoningClock = ref(Date.now())
@@ -287,7 +390,9 @@ const answerSegments = computed(() => {
     ...(inferred.after ? [{ type: 'text', content: inferred.after }] : []),
   ]
 })
-const hasTools = computed(() => workSegments.value.some(segment => segment.type === 'tool'))
+const hasTools = computed(() => workSegments.value.some(segment => (
+  ['tool', 'subagent', 'subagent_plan'].includes(segment.type)
+)))
 
 const reasoningEntries = computed(() =>
   workSegments.value.filter(segment => segment.type === 'reasoning')
@@ -300,7 +405,7 @@ const workEntries = computed(() => {
     return {
       segment,
       reasoningNumber,
-      key: segment.reasoning_id || segment.tool_call_id || `work-${index}`,
+      key: segment.reasoning_id || segment.tool_call_id || segment.subagent_id || segment.plan_id || `work-${index}`,
     }
   })
 })
@@ -381,6 +486,7 @@ watch(workExpanded, async (expanded) => {
 const workStatus = computed(() => {
   if (workSegments.value.some(segment => segment.status === 'running')) return 'running'
   if (workSegments.value.some(segment => segment.status === 'error')) return 'error'
+  if (workSegments.value.some(segment => ['needs_verification', 'needs_attention', 'partial'].includes(segment.status))) return 'warning'
   if (workSegments.value.some(segment => segment.status === 'stopped')) return 'stopped'
   return props.msg.streaming ? 'running' : 'done'
 })
@@ -392,9 +498,16 @@ const hasRunningReasoning = computed(() =>
 const toolCount = computed(() =>
   workSegments.value.filter(segment => segment.type === 'tool').length
 )
+const subagentCount = computed(() =>
+  workSegments.value.filter(segment => segment.type === 'subagent').length
+)
+const planCount = computed(() =>
+  workSegments.value.filter(segment => segment.type === 'subagent_plan').length
+)
 
 const workLabel = computed(() => {
   if (workStatus.value === 'error') return '工作中断'
+  if (workStatus.value === 'warning') return '工作待验收'
   if (workStatus.value === 'stopped') return '工作已停止'
   if (workStatus.value === 'running') return '正在工作'
   return '工作完成'
@@ -412,6 +525,8 @@ const workMeta = computed(() => {
     parts.push(duration ? `思考 ${formatReasoningDuration(duration)}` : `${reasoningEntries.value.length} 段思考`)
   }
   if (toolCount.value) parts.push(`${toolCount.value} 个工具`)
+  if (subagentCount.value) parts.push(`${subagentCount.value} 个子代理`)
+  if (planCount.value) parts.push(`${planCount.value} 个任务计划`)
   return parts.join(' · ')
 })
 
@@ -491,6 +606,82 @@ function getPlainText() {
     ? finalAnswerText(props.msg.segments)
     : props.msg.content || ''
   return prepareTextForSpeech(text)
+}
+
+function toggleSubagent(id) {
+  if (!id) return
+  expandedSubagents[id] = !expandedSubagents[id]
+}
+
+function subagentExpanded(id) {
+  return Boolean(id && expandedSubagents[id])
+}
+
+function subagentRole(role) {
+  return ({ explorer: '代码探索', researcher: '资料研究', reviewer: '实现审查', verifier: '动态验收', executor: '任务执行' })[role] || '子代理'
+}
+
+function subagentStatus(status) {
+  return ({
+    running: '运行中',
+    done: '已完成',
+    stopped: '已停止',
+    error: '失败',
+    needs_verification: '待验收',
+    needs_attention: '需处理',
+  })[status] || status
+}
+
+function subagentPhase(phase) {
+  return ({
+    analyzing: '分析任务',
+    investigating: '调查中',
+    modifying: '修改文件',
+    executing: '执行命令',
+    waiting_approval: '等待批准',
+    verifying: '运行验证',
+    summarizing: '整理结果',
+    completed: '已完成',
+    needs_verification: '等待验收',
+    needs_attention: '需要处理',
+    budget_exhausted: '预算耗尽',
+    timed_out: '已超时',
+    stopped: '已停止',
+    failed: '执行失败',
+  })[phase] || phase
+}
+
+function subagentModifiedCount(segment) {
+  return segment?.evidence?.modified_files?.length || 0
+}
+
+function subagentEvidence(segment) {
+  const evidence = segment?.evidence || {}
+  const groups = [
+    ['修改', evidence.modified_files],
+    ['验证', evidence.verifications],
+    ['失败', evidence.failures],
+  ]
+  return groups.flatMap(([label, values]) => (
+    (values || []).map(value => ({ label, value }))
+  ))
+}
+
+function planProgress(segment) {
+  const nodes = segment?.nodes || []
+  const completed = nodes.filter(node => ['done', 'error', 'stopped', 'skipped', 'needs_verification', 'needs_attention'].includes(node.status)).length
+  return `${completed}/${nodes.length}`
+}
+
+function planStatus(status) {
+  return ({ running: '运行中', done: '已完成', partial: '部分完成' })[status] || status
+}
+
+function planNodeStatus(status) {
+  return ({
+    pending: '等待', running: '运行中', done: '完成', error: '失败',
+    stopped: '停止', skipped: '跳过', needs_verification: '待验收', needs_attention: '需处理',
+  })[status] || status
 }
 
 function openOtherChoice(segment) {
@@ -922,10 +1113,26 @@ onBeforeUnmount(() => {
 .work-reasoning + .work-reasoning,
 .work-reasoning + .work-text,
 .work-reasoning + .tool-seg,
+.work-reasoning + .subagent-seg,
+.work-reasoning + .subagent-plan,
 .work-text + .work-reasoning,
 .work-text + .tool-seg,
+.work-text + .subagent-seg,
+.work-text + .subagent-plan,
 .tool-seg + .work-reasoning,
-.tool-seg + .work-text { margin-top: 10px; }
+.tool-seg + .work-text,
+.tool-seg + .subagent-seg,
+.tool-seg + .subagent-plan,
+.subagent-seg + .work-reasoning,
+.subagent-seg + .work-text,
+.subagent-seg + .tool-seg,
+.subagent-seg + .subagent-seg { margin-top: 10px; }
+.subagent-seg + .subagent-plan,
+.subagent-plan + .work-reasoning,
+.subagent-plan + .work-text,
+.subagent-plan + .tool-seg,
+.subagent-plan + .subagent-seg,
+.subagent-plan + .subagent-plan { margin-top: 10px; }
 .work-reasoning[data-status="running"] { color: var(--primary); }
 .work-reasoning[data-status="unavailable"],
 .work-reasoning[data-status="error"] { color: #f59e0b; }
@@ -950,6 +1157,94 @@ onBeforeUnmount(() => {
 .work-entry-arrow.open { transform: rotate(180deg); }
 .work-reasoning-text { white-space: pre-wrap; }
 .work-text { color: var(--text-secondary); }
+
+.subagent-seg {
+  position: relative;
+  padding: 7px 9px;
+  color: var(--text-secondary);
+  background: rgba(42, 120, 108, 0.08);
+  border: 1px solid rgba(76, 179, 158, 0.2);
+  border-radius: 6px;
+}
+.subagent-seg[data-status="running"] { border-color: rgba(76, 179, 158, 0.48); }
+.subagent-seg[data-status="error"],
+.subagent-seg[data-status="stopped"],
+.subagent-seg[data-status="needs_verification"],
+.subagent-seg[data-status="needs_attention"] { border-color: rgba(245, 158, 11, 0.42); }
+.subagent-header {
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: inherit;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+}
+.subagent-seg[data-status="running"] .subagent-header { padding-right: 28px; }
+.subagent-header:disabled { cursor: default; }
+.subagent-role { flex: 0 0 auto; color: var(--text-primary); font-weight: 600; }
+.subagent-task { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.subagent-status { flex: 0 0 auto; font-size: 11px; color: var(--primary); }
+.subagent-stop {
+  position: absolute;
+  top: 5px;
+  right: 6px;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  color: #fca5a5;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.28);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.subagent-stop:hover { background: rgba(239, 68, 68, 0.2); }
+.subagent-seg[data-status="error"] .subagent-status,
+.subagent-seg[data-status="stopped"] .subagent-status,
+.subagent-seg[data-status="needs_verification"] .subagent-status,
+.subagent-seg[data-status="needs_attention"] .subagent-status { color: #f59e0b; }
+.subagent-meta { display: flex; gap: 8px; margin: 5px 0 0 21px; color: var(--text-tertiary, var(--text-secondary)); font-size: 11px; }
+.subagent-detail { margin: 8px 0 0 21px; padding-top: 7px; border-top: 1px solid rgba(255, 255, 255, 0.1); }
+.subagent-detail :deep(p) { margin: 0 0 7px; }
+.subagent-detail :deep(p:last-child) { margin-bottom: 0; }
+.subagent-evidence { margin: 8px 0 0 21px; padding-top: 7px; border-top: 1px solid rgba(255, 255, 255, 0.1); }
+.subagent-evidence-row { display: grid; grid-template-columns: 38px minmax(0, 1fr); gap: 8px; padding: 2px 0; font-size: 11px; }
+.subagent-evidence-row > span { color: var(--text-tertiary, var(--text-secondary)); }
+.subagent-evidence-row code { overflow-wrap: anywhere; color: var(--text-secondary); white-space: normal; }
+
+.subagent-plan { padding: 8px 9px; color: var(--text-secondary); background: rgba(76, 120, 179, 0.07); border: 1px solid rgba(99, 155, 210, 0.22); border-radius: 6px; }
+.subagent-plan[data-status="running"] { border-color: rgba(99, 155, 210, 0.48); }
+.subagent-plan[data-status="partial"] { border-color: rgba(245, 158, 11, 0.42); }
+.subagent-plan-header { display: flex; align-items: center; gap: 7px; color: var(--text-primary); font-weight: 600; }
+.subagent-plan-progress { margin-left: auto; color: var(--text-secondary); font-size: 11px; font-weight: 400; }
+.subagent-plan-stop { width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; padding: 0; color: #fca5a5; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.28); border-radius: 4px; cursor: pointer; }
+.subagent-plan-stop:hover { background: rgba(239, 68, 68, 0.2); }
+.subagent-plan-detail { margin: 5px 0 7px 21px; color: var(--text-tertiary, var(--text-secondary)); font-size: 11px; }
+.subagent-plan-nodes { display: grid; gap: 4px; margin-left: 21px; }
+.subagent-plan-node { min-width: 0; display: grid; grid-template-columns: 8px auto minmax(0, 1fr) auto auto; align-items: center; gap: 7px; font-size: 11px; }
+.plan-node-dot { width: 6px; height: 6px; border-radius: 50%; background: #718096; }
+.subagent-plan-node[data-status="running"] .plan-node-dot { background: var(--primary); box-shadow: 0 0 0 3px rgba(76, 179, 158, 0.14); }
+.subagent-plan-node[data-status="done"] .plan-node-dot { background: #4cb39e; }
+.subagent-plan-node[data-status="error"] .plan-node-dot,
+.subagent-plan-node[data-status="stopped"] .plan-node-dot,
+.subagent-plan-node[data-status="skipped"] .plan-node-dot { background: #f59e0b; }
+.plan-node-id { color: var(--text-primary); font-family: monospace; }
+.plan-node-task { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plan-node-deps { color: var(--text-tertiary, var(--text-secondary)); }
+.plan-node-status { color: var(--primary); }
+
+@media (max-width: 640px) {
+  .subagent-plan-node { grid-template-columns: 8px auto minmax(0, 1fr) auto; }
+  .plan-node-deps { grid-column: 2 / -1; white-space: normal; }
+}
 
 .tool-actions-bar { display: flex; justify-content: flex-end; margin-bottom: 4px; }
 .tool-toggle-all { background: none; border: none; color: var(--text-secondary); cursor: pointer; font-size: 11px; }

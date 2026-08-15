@@ -1,36 +1,53 @@
 <template>
   <div class="tab-content">
     <h2>记忆管理</h2>
-    <p class="tab-desc">Agent 会自动记住用户偏好，也可手动添加/编辑/删除。</p>
+    <p class="tab-desc">管理 Agent 保存的偏好、事实和指令。工作区记忆只会在对应工作目录中生效。</p>
 
-    <!-- 分类筛选 -->
     <div class="memory-filters">
-      <button v-for="cat in ['all', 'preference', 'fact', 'instruction', 'general']"
-              :key="cat"
-              :class="{ active: memoryFilter === cat }"
-              @click="memoryFilter = cat; loadMemories()">
-        {{ memoryLabel(cat) }}
-      </button>
+      <button
+        v-for="filter in categoryFilters"
+        :key="filter.value"
+        type="button"
+        :class="{ active: memoryFilter === filter.value }"
+        @click="memoryFilter = filter.value; loadMemories()"
+      >{{ filter.label }}</button>
+      <span class="filter-divider"></span>
+      <button
+        v-for="filter in scopeFilters"
+        :key="filter.value"
+        type="button"
+        :class="{ active: scopeFilter === filter.value }"
+        @click="scopeFilter = filter.value; loadMemories()"
+      >{{ filter.label }}</button>
     </div>
 
-    <!-- 搜索 -->
-    <input type="text" @input="e => debouncedSearch(e.target.value)" placeholder="搜索记忆..." class="memory-search" />
+    <div class="workspace-note" v-if="workspace">
+      当前工作区：<code :title="workspace">{{ workspace }}</code>
+    </div>
 
-    <!-- 添加记忆 -->
+    <input
+      type="text"
+      @input="e => debouncedSearch(e.target.value)"
+      placeholder="搜索记忆..."
+      class="memory-search"
+    />
+
     <div class="memory-add">
-      <input type="text" v-model="newMemoryContent" placeholder="添加新记忆..." />
+      <input type="text" v-model="newMemoryContent" placeholder="添加新记忆..." @keyup.enter="addMemory" />
       <select v-model="newMemoryCategory">
         <option value="preference">偏好</option>
         <option value="fact">事实</option>
         <option value="instruction">指令</option>
         <option value="general">通用</option>
       </select>
-      <button @click="addMemory">添加</button>
+      <select v-model="newMemoryScope">
+        <option value="global">全局</option>
+        <option value="workspace">当前工作区</option>
+      </select>
+      <button type="button" @click="addMemory">添加</button>
     </div>
 
-    <!-- 记忆列表 -->
     <div class="memory-list">
-      <!-- Loading skeleton -->
       <template v-if="loading">
         <div v-for="i in 3" :key="i" class="memory-card skeleton">
           <div class="skeleton-line w80"></div>
@@ -39,21 +56,45 @@
       </template>
       <template v-else>
         <div v-for="mem in filteredMemories" :key="mem.id" class="memory-card">
-          <div class="memory-content" v-if="editingMemoryId !== mem.id">
-            {{ mem.content }}
-          </div>
-          <input v-else type="text" v-model="editingMemoryContent" @keyup.enter="saveEditMemory(mem.id)" />
+          <template v-if="editingMemoryId !== mem.id">
+            <div class="memory-content">{{ mem.content }}</div>
+          </template>
+          <template v-else>
+            <input class="edit-input" type="text" v-model="editingMemoryContent" @keyup.enter="saveEditMemory(mem.id)" />
+            <div class="edit-options">
+              <select v-model="editingMemoryCategory">
+                <option value="preference">偏好</option>
+                <option value="fact">事实</option>
+                <option value="instruction">指令</option>
+                <option value="general">通用</option>
+              </select>
+              <select v-model="editingMemoryScope">
+                <option value="global">全局</option>
+                <option value="workspace">当前工作区</option>
+              </select>
+            </div>
+          </template>
+
           <div class="memory-meta">
             <span class="memory-category" :class="mem.category">{{ memoryLabel(mem.category) }}</span>
+            <span class="memory-scope" :class="mem.scope === 'workspace' ? 'workspace' : 'global'">
+              {{ mem.scope === 'workspace' ? '工作区' : '全局' }}
+            </span>
             <span class="memory-source">{{ mem.source === 'auto' ? '自动' : '手动' }}</span>
+            <span class="memory-id">#{{ mem.id }}</span>
+            <span class="memory-usage">命中 {{ mem.use_count || 0 }} 次</span>
             <span class="memory-time">{{ formatTime(mem.created_at) }}</span>
           </div>
+          <div v-if="mem.scope === 'workspace' && mem.workspace_path" class="memory-path" :title="mem.workspace_path">
+            {{ mem.workspace_path }}
+          </div>
           <div class="memory-actions">
-            <button v-if="editingMemoryId !== mem.id" @click="startEditMemory(mem)">编辑</button>
-            <button v-else @click="saveEditMemory(mem.id)">保存</button>
-            <button @click="deleteMemory(mem.id)" class="btn-danger">删除</button>
+            <button v-if="editingMemoryId !== mem.id" type="button" @click="startEditMemory(mem)">编辑</button>
+            <button v-else type="button" @click="saveEditMemory(mem.id)">保存</button>
+            <button type="button" @click="deleteMemory(mem.id)" class="btn-danger">删除</button>
           </div>
         </div>
+        <div v-if="!filteredMemories.length" class="empty-hint">暂无匹配记忆</div>
       </template>
     </div>
   </div>
@@ -64,39 +105,65 @@ import { ref, computed, onMounted } from 'vue'
 import { useDebounce } from '../../composables/usePerformance'
 
 const memories = ref([])
+const workspace = ref('')
 const memoryFilter = ref('all')
+const scopeFilter = ref('all')
 const memorySearch = ref('')
 const newMemoryContent = ref('')
 const newMemoryCategory = ref('preference')
+const newMemoryScope = ref('global')
 const editingMemoryId = ref(null)
 const editingMemoryContent = ref('')
+const editingMemoryCategory = ref('general')
+const editingMemoryScope = ref('global')
 const loading = ref(false)
 
-// 防抖搜索
-const { debouncedFn: debouncedSearch } = useDebounce((val) => {
-  memorySearch.value = val
+const categoryFilters = [
+  { value: 'all', label: '全部' },
+  { value: 'preference', label: '偏好' },
+  { value: 'fact', label: '事实' },
+  { value: 'instruction', label: '指令' },
+  { value: 'general', label: '通用' },
+]
+const scopeFilters = [
+  { value: 'all', label: '全部作用域' },
+  { value: 'global', label: '全局' },
+  { value: 'workspace', label: '当前工作区' },
+]
+const { debouncedFn: debouncedSearch } = useDebounce((value) => {
+  memorySearch.value = value
 }, 300)
 
 const filteredMemories = computed(() => {
-  let list = memories.value
-  if (memorySearch.value) {
-    const q = memorySearch.value.toLowerCase()
-    list = list.filter(m => m.content.toLowerCase().includes(q))
-  }
-  return list
+  const query = memorySearch.value.trim().toLowerCase()
+  if (!query) return memories.value
+  return memories.value.filter(memory => memory.content.toLowerCase().includes(query))
 })
 
-function memoryLabel(cat) {
-  const labels = { all: '全部', preference: '偏好', fact: '事实', instruction: '指令', general: '通用' }
-  return labels[cat] || cat
+function memoryLabel(category) {
+  return { preference: '偏好', fact: '事实', instruction: '指令', general: '通用' }[category] || category
+}
+
+async function loadWorkspace() {
+  try {
+    const response = await fetch('/api/tools/workspace')
+    const data = await response.json()
+    workspace.value = data.path || ''
+  } catch {
+    workspace.value = ''
+  }
 }
 
 async function loadMemories() {
   loading.value = true
   try {
-    const url = memoryFilter.value === 'all' ? '/api/memories' : `/api/memories?category=${memoryFilter.value}`
-    const resp = await fetch(url)
-    memories.value = await resp.json()
+    const params = new URLSearchParams()
+    if (memoryFilter.value !== 'all') params.set('category', memoryFilter.value)
+    if (scopeFilter.value !== 'all') params.set('scope', scopeFilter.value)
+    if (scopeFilter.value === 'workspace' && workspace.value) params.set('workspace_path', workspace.value)
+    const response = await fetch(`/api/memories?${params.toString()}`)
+    if (!response.ok) throw new Error('memory request failed')
+    memories.value = await response.json()
   } catch {
     memories.value = []
   } finally {
@@ -105,156 +172,105 @@ async function loadMemories() {
 }
 
 async function addMemory() {
-  if (!newMemoryContent.value.trim()) return
-  await fetch('/api/memories', {
+  const content = newMemoryContent.value.trim()
+  if (!content || (newMemoryScope.value === 'workspace' && !workspace.value)) return
+  const response = await fetch('/api/memories', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ content: newMemoryContent.value, category: newMemoryCategory.value })
+    body: JSON.stringify({ content, category: newMemoryCategory.value, scope: newMemoryScope.value }),
   })
-  newMemoryContent.value = ''
-  await loadMemories()
+  if (response.ok) {
+    newMemoryContent.value = ''
+    await loadMemories()
+  }
 }
 
-function startEditMemory(mem) {
-  editingMemoryId.value = mem.id
-  editingMemoryContent.value = mem.content
+function startEditMemory(memory) {
+  editingMemoryId.value = memory.id
+  editingMemoryContent.value = memory.content
+  editingMemoryCategory.value = memory.category || 'general'
+  editingMemoryScope.value = memory.scope || 'global'
 }
 
 async function saveEditMemory(id) {
-  await fetch(`/api/memories/${id}`, {
+  const content = editingMemoryContent.value.trim()
+  if (!content || (editingMemoryScope.value === 'workspace' && !workspace.value)) return
+  const response = await fetch(`/api/memories/${id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ content: editingMemoryContent.value })
+    body: JSON.stringify({
+      content,
+      category: editingMemoryCategory.value,
+      scope: editingMemoryScope.value,
+    }),
   })
-  editingMemoryId.value = null
-  await loadMemories()
+  if (response.ok) {
+    editingMemoryId.value = null
+    await loadMemories()
+  }
 }
 
 async function deleteMemory(id) {
-  await fetch(`/api/memories/${id}`, { method: 'DELETE' })
+  const response = await fetch(`/api/memories/${id}`, { method: 'DELETE' })
+  if (response.ok) await loadMemories()
+}
+
+function formatTime(timestamp) {
+  if (!timestamp) return ''
+  return new Date(timestamp).toLocaleString('zh-CN')
+}
+
+onMounted(async () => {
+  await loadWorkspace()
   await loadMemories()
-}
-
-function formatTime(ts) {
-  if (!ts) return ''
-  return new Date(ts).toLocaleString('zh-CN')
-}
-
-onMounted(() => loadMemories())
+})
 </script>
 
 <style scoped>
 .tab-desc { font-size: 13px; color: var(--text-secondary); margin-bottom: 16px; }
-.memory-filters { display: flex; gap: 8px; margin-bottom: 12px; }
+.memory-filters { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
+.memory-filters button, .memory-add button, .memory-actions button {
+  border: 0; border-radius: 6px; cursor: pointer; font-size: 12px;
+}
 .memory-filters button {
-  padding: 4px 12px;
-  border-radius: 12px;
+  padding: 5px 11px; color: var(--text-secondary); background: rgba(20, 20, 40, 0.60);
   box-shadow: 0 0 0 1px rgba(255,255,255,0.20);
-  background: rgba(20, 20, 40, 0.60);
-  color: var(--text-secondary);
-  cursor: pointer;
-  font-size: 12px;
-  border: none;
-  transition: filter 0.2s, transform 0.2s;
 }
-.memory-filters button.active {
-  background: var(--primary);
-  color: white;
-  box-shadow: none;
+.memory-filters button.active { background: var(--primary); color: #fff; box-shadow: none; }
+.filter-divider { width: 1px; height: 20px; background: rgba(255,255,255,0.18); margin: 0 2px; }
+.workspace-note { color: var(--text-secondary); font-size: 12px; margin: 0 0 12px; }
+.workspace-note code, .memory-path { color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.memory-search, .memory-add input, .memory-add select, .edit-input, .edit-options select {
+  border: 0; outline: none; border-radius: 6px; color: var(--text-primary);
+  background: rgba(20, 20, 40, 0.60); box-shadow: 0 0 0 1px rgba(255,255,255,0.20);
 }
-.memory-filters button:hover:not(.active) {
-  filter: brightness(1.08);
-  transform: translateY(-1px);
-}
-.memory-search {
-  width: 100%;
-  padding: 8px 12px;
-  box-shadow: 0 0 0 1px rgba(255,255,255,0.20);
-  border-radius: 6px;
-  background: rgba(20, 20, 40, 0.60);
-  color: var(--text-primary);
-  margin-bottom: 12px;
-  border: none;
-}
-.memory-add { display: flex; gap: 8px; margin-bottom: 16px; }
-.memory-add input {
-  flex: 1;
-  padding: 8px 12px;
-  box-shadow: 0 0 0 1px rgba(255,255,255,0.20);
-  border-radius: 6px;
-  background: rgba(20, 20, 40, 0.60);
-  color: var(--text-primary);
-  border: none;
-}
-.memory-add select {
-  padding: 8px;
-  box-shadow: 0 0 0 1px rgba(255,255,255,0.20);
-  border-radius: 6px;
-  background: rgba(20, 20, 40, 0.60);
-  color: var(--text-primary);
-  border: none;
-}
-.memory-add button {
-  padding: 8px 16px;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: var(--primary);
-  color: white;
-  cursor: pointer;
-  transition: filter 0.2s, transform 0.2s;
-}
-.memory-add button:hover {
-  filter: brightness(1.08);
-  transform: translateY(-1px);
-}
+.memory-search { width: 100%; padding: 8px 12px; margin-bottom: 12px; }
+.memory-add { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+.memory-add input { flex: 1 1 240px; padding: 8px 12px; }
+.memory-add select, .edit-options select { padding: 8px; }
+.memory-add button { padding: 8px 16px; background: var(--primary); color: #fff; }
 .memory-list { display: flex; flex-direction: column; gap: 8px; }
-.memory-card {
-  padding: 12px;
-  background: rgba(20, 20, 40, 0.60);
-  border-radius: var(--radius);
-  box-shadow: var(--ui-border);
-}
-.memory-content { font-size: 14px; color: var(--text-primary); margin-bottom: 8px; }
-.memory-meta { display: flex; gap: 8px; font-size: 11px; color: var(--text-secondary); margin-bottom: 8px; }
-.memory-category { padding: 2px 6px; border-radius: 4px; }
-.memory-category.preference { background: rgba(59,130,246,0.15); color: #3b82f6; }
-.memory-category.fact { background: rgba(34,197,94,0.15); color: #22c55e; }
-.memory-category.instruction { background: rgba(239,68,68,0.15); color: #ef4444; }
-.memory-category.general { background: rgba(136,136,170,0.15); color: #8888aa; }
+.memory-card { padding: 12px; background: rgba(20, 20, 40, 0.60); border-radius: var(--radius); box-shadow: var(--ui-border); }
+.memory-content { font-size: 14px; color: var(--text-primary); margin-bottom: 8px; white-space: pre-wrap; }
+.edit-input { width: 100%; padding: 8px 10px; margin-bottom: 8px; }
+.edit-options { display: flex; gap: 8px; margin-bottom: 8px; }
+.memory-meta { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 11px; color: var(--text-secondary); margin-bottom: 6px; }
+.memory-category, .memory-scope { padding: 2px 6px; border-radius: 4px; }
+.memory-category.preference { color: #60a5fa; background: rgba(59,130,246,0.15); }
+.memory-category.fact { color: #4ade80; background: rgba(34,197,94,0.15); }
+.memory-category.instruction { color: #f87171; background: rgba(239,68,68,0.15); }
+.memory-category.general { color: #aaa; background: rgba(136,136,170,0.15); }
+.memory-scope.global { color: #c4b5fd; background: rgba(124,92,252,0.15); }
+.memory-scope.workspace { color: #67e8f9; background: rgba(34,211,238,0.15); }
+.memory-id { font-family: monospace; color: var(--text-secondary); }
+.memory-path { font-size: 11px; margin-bottom: 8px; }
 .memory-actions { display: flex; gap: 8px; }
-.memory-actions button {
-  padding: 4px 8px;
-  border: none;
-  border-radius: 4px;
-  background: rgba(20, 20, 40, 0.60);
-  color: var(--text-secondary);
-  cursor: pointer;
-  font-size: 12px;
-  box-shadow: 0 0 0 1px rgba(255,255,255,0.20);
-  transition: filter 0.2s;
-}
-.memory-actions button:hover {
-  filter: brightness(1.1);
-}
+.memory-actions button { padding: 4px 8px; color: var(--text-secondary); background: rgba(20,20,40,0.60); box-shadow: 0 0 0 1px rgba(255,255,255,0.20); }
 .memory-actions .btn-danger { color: #ef4444; }
-
-/* Skeleton loading */
+.empty-hint { text-align: center; padding: 28px; color: var(--text-secondary); font-size: 13px; }
 .skeleton { animation: pulse 1.5s infinite; }
-.skeleton-line {
-  height: 14px;
-  border-radius: 4px;
-  background: rgba(255,255,255,0.08);
-  margin-bottom: 8px;
-}
-.skeleton-line.w80 { width: 80%; }
-.skeleton-line.w60 { width: 60%; }
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
-}
-
-input, select {
-  outline: none;
-  font-size: 14px;
-}
+.skeleton-line { height: 14px; border-radius: 4px; background: rgba(255,255,255,0.08); margin-bottom: 8px; }
+.skeleton-line.w80 { width: 80%; } .skeleton-line.w60 { width: 60%; }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+@media (max-width: 640px) { .memory-add > * { flex: 1 1 100%; } .memory-add button { flex: 0 0 auto; } }
 </style>

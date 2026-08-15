@@ -1,7 +1,7 @@
 export function splitAgentSegments(segments = []) {
   let lastToolIndex = -1
   for (let index = segments.length - 1; index >= 0; index -= 1) {
-    if (segments[index]?.type === 'tool') {
+    if (['tool', 'subagent', 'subagent_plan'].includes(segments[index]?.type)) {
       lastToolIndex = index
       break
     }

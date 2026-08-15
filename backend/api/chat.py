@@ -22,6 +22,28 @@ MAX_PERSISTED_REASONING_CHARS = 50000
 MAX_ACTIVE_SKILL_ARGUMENTS = 4000
 
 
+def _subagent_collaboration_prompt() -> str:
+    return """## 子代理协作能力
+你内置了 `delegate_task`、`delegate_tasks` 和 `delegate_plan` 子代理工具。这是你的常驻能力，不属于技能包，也不需要用户提醒、安装或显式要求。
+每轮收到任务后，在开始大量探索前先判断是否满足以下任一条件：
+- 需要跨多个文件、模块或目录定位实现与调用关系；
+- 需要查阅外部资料并与本地实现交叉核对；
+- 已经有实现或修改结果，需要一次独立审查来发现遗漏；
+- 主任务包含一个边界明确、可独立调查并返回报告的子问题；
+- 有边界明确、验收标准清楚的实现任务，适合由独立执行者完成修改和验证。
+满足时应主动委派。探索、研究或静态审查分别交给 explorer、researcher、reviewer；必须实际运行测试、类型检查、lint 或构建的动态验收交给 verifier；明确的实现任务可用 `delegate_task` 交给 executor。不要等用户说“使用子代理”。
+只有一个独立子问题时使用 `delegate_task`；恰好有两个互不依赖的只读调查时使用 `delegate_tasks` 并行委派。executor 必须单独串行运行，不能参与并行委派，也不能与其他子代理同时运行。
+当任务包含 2 到 5 个有明确依赖关系的子任务时使用 `delegate_plan`。计划必须是单层有向无环图；不要为简单任务创建计划，不要制造递归任务树。每个节点都必须显式填写 `depends_on`，根节点填写 `[]`；实现节点必须依赖为它提供信息的 explorer/researcher，需要实际执行命令的验证节点必须使用 verifier 并依赖被验证的 executor。计划中的无依赖只读节点可并行，executor 节点必须独占串行。
+不要把模糊的整项目目标交给 executor，不要用 executor 绕过用户审批。委派 executor 时应提供允许修改范围、约束和可验证的验收标准。executor 返回后必须由你再次读取关键改动、运行验证或委派 reviewer 独立审查，再决定是否继续修复或向用户交付。
+简单问答、单文件直接读取、明确的小修改不需要委派。不要为了展示功能而委派。
+
+## 委派触发阈值
+子代理不是默认步骤，简单任务优先由主 Agent 直接完成。只有满足以下条件之一时才委派：跨越多个模块或目录并需要独立调查；存在两个互不依赖的调查方向；需要独立审查实现结果；或存在至少三个有明确依赖关系的阶段。单文件小修改、单次读取、单条验证命令和简单问答不要委派。动态验证可以直接调用 verification_exec，不因“需要测试”本身强制创建 verifier。
+
+## 工作区外文件
+file_manager 只允许访问当前工作区。确实需要读取工作区外文件时，才使用 code_exec，并明确说明目标路径和原因；不得把 code_exec 当作普通文件读取替代品，也不得借此绕过审批或访问敏感信息。"""
+
+
 def _skill_state_payload(command, arguments=""):
     if not command:
         return {"active": False, "command": "", "arguments": ""}
@@ -85,11 +107,16 @@ def _append_response_segment(segments: list[dict], segment: dict) -> None:
             segments[index] = merged
             return
 
-    if segment_type == "tool":
-        tool_call_id = current.get("tool_call_id")
+    if segment_type in {"tool", "subagent", "subagent_plan"}:
+        id_field = {
+            "tool": "tool_call_id",
+            "subagent": "subagent_id",
+            "subagent_plan": "plan_id",
+        }[segment_type]
+        segment_id = current.get(id_field)
         for index in range(len(segments) - 1, -1, -1):
             existing = segments[index]
-            if existing.get("type") == "tool" and existing.get("tool_call_id") == tool_call_id:
+            if existing.get("type") == segment_type and existing.get(id_field) == segment_id:
                 segments[index] = {**existing, **current}
                 return
 
@@ -222,11 +249,13 @@ async def websocket_chat(ws: WebSocket):
     stop_event = asyncio.Event()
     msg_queue = asyncio.Queue()
     active_generation_id = None
+    send_lock = asyncio.Lock()
 
     async def send_event(event, generation_id):
         payload = dict(event)
         payload["generation_id"] = generation_id
-        await ws.send_text(json.dumps(payload, ensure_ascii=False))
+        async with send_lock:
+            await ws.send_text(json.dumps(payload, ensure_ascii=False))
 
     async def send_accepted(client_message_id, generation_id, request_type, duplicate=False, status="accepted", accepted=True, error=None):
         payload = {
@@ -263,6 +292,18 @@ async def websocket_chat(ws: WebSocket):
                     target_generation = m.get("generation_id")
                     if not target_generation or target_generation == active_generation_id:
                         stop_event.set()
+                elif m.get('type') == 'stop_subagent':
+                    from agent.subagent import subagent_manager
+                    run_id = str(m.get("subagent_id") or "")
+                    stopped = subagent_manager.stop(
+                        str(m.get("session_id") or ""),
+                        run_id,
+                    )
+                    await send_event({
+                        "type": "subagent_stop_ack",
+                        "subagent_id": run_id,
+                        "stopped": stopped,
+                    }, m.get("generation_id") or active_generation_id)
                 elif m.get('type') == 'confirm_response':
                     rid = m.get('request_id', '')
                     fut = pending_confirms.get(rid)
@@ -542,13 +583,16 @@ async def websocket_chat(ws: WebSocket):
                 active_arguments=session_meta.get("active_skill_arguments", ""),
             )
 
-            tool_desc = "\n".join(f"- {t['function']['name']}: {t['function']['description']}" for t in tool_registry.get_tools())
+            available_tools = tool_registry.get_tools(role="main")
+            tool_desc = tool_registry.format_tool_descriptions(role="main")
             system_prompt += f"""\n\n## 可用工具
 你有以下工具可以调用：
 {tool_desc}
 
 工具工作区：{tool_workspace}
 使用工具时请通过 function calling 调用，不要直接告诉用户你没有工具。
+
+{_subagent_collaboration_prompt()}
 
 ## 工具使用原则
 - 只在用户明确需要时才调用工具，不要自作主张
@@ -559,10 +603,18 @@ async def websocket_chat(ws: WebSocket):
 - 当需要用户从 2 到 6 个明确选项中选择时，必须调用 ask_user_choice 展示可点击选项；不要在普通文本中要求用户手动回复 A/B/C/D
 - 技能指令中出现“给出选项”“A/B/C/D”或类似要求时，也必须转换为 ask_user_choice 调用，不能照抄成纯文字列表
 - ask_user_choice 每次只能提出一个问题，调用后立即等待用户选择，不要同时继续回答
+- 遇到上述条件之一时，应主动使用 delegate_task 或 delegate_tasks；不要把它们当成只有用户点名才启用的可选技能
+- delegate_task 可运行一个只读角色或串行 executor；委派 executor 必须填写 allowed_paths、constraints 和 acceptance_criteria
+- delegate_tasks 只允许两个互不依赖的只读任务；executor 不得并行运行，也不得用于规避批准流程
+- delegate_plan 仅用于 2 到 5 个存在明确依赖的节点；每个节点必须显式填写 depends_on（根节点为 []），实现节点依赖其前序调查，需要运行验证命令的节点使用 verifier 并依赖被验证的实现；节点还必须有唯一 ID、清晰边界和验收标准，禁止递归计划
+- 子代理返回报告后由你核对、整合并继续主任务，不能把未经判断的报告直接当作最终答案
 - 先用 list/search 定位目标，再读取必要内容，避免无目的读取整个大文件
 - 如果用户只是让你「看」「读」「理解」某个内容，用 file_manager 读取即可，不要做额外操作
 - 只有确实需要运行程序或命令时才使用 code_exec
-- 完成所需工具调用后直接给出结论"""
+- 完成所需工具调用后直接给出结论
+- 子代理委派遵循“直接执行优先”：单文件、小修改、单次读取或单条验证命令不委派；只有跨模块调查、独立审查、两个并行调查方向或至少三个有依赖阶段时才委派。
+- file_manager 只访问当前工作区；确需访问工作区外文件时才使用 code_exec，并说明目标路径和原因，不得借此绕过审批。
+"""
             environment_facts = collect_environment_facts(tool_workspace)
             system_prompt += f"""\n\n## 已验证的执行环境
 以下信息由 VerseNa 在本轮请求前读取，不要凭操作系统或仓库位置猜测：
@@ -588,7 +640,6 @@ async def websocket_chat(ws: WebSocket):
 - 用户要求结束任务时，清除已无关的检查点，避免后续对话继承过时状态。"""
             system_prompt += "\n\n## 重要：你必须始终使用中文回复，不要使用英文。"
 
-            available_tools = tool_registry.get_tools()
             emotion = persona_manager.get_emotion_engine(persona_name)
             emotion_state = emotion.pick_emotion()
 
@@ -641,6 +692,10 @@ async def websocket_chat(ws: WebSocket):
             done_metadata = {}
             generation_failed = False
             stop_event.clear()  # 新消息开始前清除停止信号
+            async def progress_event(event):
+                if event.get("type") == "segment":
+                    _append_response_segment(response_segments, event.get("segment", {}))
+                await send_event(event, generation_id)
             try:
                 request_agent = await create_agent(model_role="reasoning") if reasoning_enabled else agent
                 async for event in request_agent.run(
@@ -655,7 +710,7 @@ async def websocket_chat(ws: WebSocket):
                     agent_config=agent_config,
                     persist_user=False,
                     generation_id=generation_id,
-                    progress_callback=lambda event: send_event(event, generation_id),
+                    progress_callback=progress_event,
                 ):
                     if event.get("type") == "done":
                         done_metadata = {

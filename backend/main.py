@@ -139,6 +139,9 @@ app.include_router(auth_router)
 from api.update_api import router as update_router
 app.include_router(update_router)
 
+from api.diagnostics_api import router as diagnostics_router
+app.include_router(diagnostics_router)
+
 
 @app.get("/{full_path:path}", include_in_schema=False)
 async def serve_frontend(full_path: str):

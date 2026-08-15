@@ -2,11 +2,13 @@ import json
 import time
 import inspect
 import asyncio
+from pathlib import Path
 from typing import AsyncGenerator
 from agent.models.base import BaseModelAdapter
 from agent.memory import MemoryManager
 from config import settings
 from persona.manager import persona_manager
+from agent.diagnostics import runtime_diagnostics
 
 class ReActAgent:
     def __init__(self, model: BaseModelAdapter, memory: MemoryManager, tool_registry=None, max_steps: int = None):
@@ -50,6 +52,8 @@ class ReActAgent:
         top_p = cfg.get("top_p", 0.9)
         max_tokens = cfg.get("max_tokens", 4096)
         max_context = cfg.get("max_context", 4096)
+        tool_timeout = cfg.get("tool_timeout", 120)
+        workspace_path = cfg.get("tool_workspace") or None
         custom_instructions = cfg.get("custom_instructions", "")
         reasoning_requested = bool(cfg.get("reasoning_enabled", False))
         reasoning_effort = cfg.get("reasoning_effort", "medium")
@@ -59,6 +63,9 @@ class ReActAgent:
         reasoning_enabled = reasoning_requested
 
         async def notify_compaction(event):
+            runtime_diagnostics.record_compaction(session_id, event)
+            if event.get("phase") == "done" and event.get("after_tokens") is not None:
+                runtime_diagnostics.update_context(session_id, event.get("after_tokens"), None)
             if not progress_callback:
                 return
             try:
@@ -94,12 +101,20 @@ class ReActAgent:
                 metadata=message_metadata,
                 client_message_id=client_message_id,
             )
+        runtime_diagnostics.start_generation(
+            session_id,
+            generation_id or "",
+            workspace=workspace_path,
+            max_context=max_context,
+            max_steps=max_steps,
+        )
         messages = await self.memory.get_context(
             session_id,
             system_prompt,
             max_context=max_context,
             max_output_tokens=max_tokens,
             compaction_callback=notify_compaction,
+            workspace_path=workspace_path,
         )
 
         # 如果有图片，将最后一条用户消息替换为视觉格式
@@ -123,15 +138,26 @@ class ReActAgent:
         tool_result_cache = {}
         read_progress = {}
         waiting_for_user = False
+        executor_verification_required = False
+        executor_verification_prompts = 0
+        executor_modified_files = set()
+        plan_repair_attempts = 0
+        plan_repair_pending = False
+        tool_attempts = {}
+        tool_failures = {}
 
         def cacheable_tool(tool_name: str) -> bool:
             # 代码执行和文件操作可能改变外部状态，不能复用旧结果，尤其是“写入后重新读取”。
-            return tool_name not in {"code_exec", "file_manager"}
+            return tool_name not in {"code_exec", "file_manager", "delegate_task", "delegate_tasks", "delegate_plan"}
         tool_context = self.tool_registry.create_context(
             session_id,
             workspace=cfg.get("tool_workspace"),
             approval_mode=cfg.get("approval_mode", "ask"),
             stop_event=stop_event,
+            model=self.model,
+            progress_callback=progress_callback,
+            agent_config=cfg,
+            confirm_callback=confirm_callback,
         ) if self.tool_registry else None
 
         async def execute_tool(tool_name, tool_args, confirmed=False):
@@ -148,27 +174,45 @@ class ReActAgent:
                 context=tool_context,
                 confirmed=confirmed,
             ))
-            if not stop_event:
-                return await execute_task
-
-            stop_wait = asyncio.create_task(stop_event.wait())
+            timeout_task = asyncio.create_task(asyncio.sleep(max(10, min(int(tool_timeout or 120), 300))))
+            stop_wait = asyncio.create_task(stop_event.wait()) if stop_event else None
             try:
+                pending = {execute_task, timeout_task}
+                if stop_wait:
+                    pending.add(stop_wait)
                 completed, _ = await asyncio.wait(
-                    {execute_task, stop_wait},
+                    pending,
                     return_when=asyncio.FIRST_COMPLETED,
                 )
                 if execute_task in completed:
                     return execute_task.result()
                 execute_task.cancel()
                 await asyncio.gather(execute_task, return_exceptions=True)
+                if timeout_task in completed:
+                    return json.dumps({
+                        "success": False,
+                        "error": "TOOL_TIMEOUT",
+                        "message": f"工具执行超过 {int(tool_timeout)} 秒，已自动终止。",
+                    }, ensure_ascii=False)
                 return json.dumps({
                     "success": False,
                     "error": "CANCELLED",
                     "message": "操作已停止",
                 }, ensure_ascii=False)
             finally:
-                stop_wait.cancel()
-                await asyncio.gather(stop_wait, return_exceptions=True)
+                if stop_wait:
+                    stop_wait.cancel()
+                timeout_task.cancel()
+                await asyncio.gather(
+                    *(task for task in (stop_wait, timeout_task) if task is not None),
+                    return_exceptions=True,
+                )
+
+        runtime_diagnostics.update_context(
+            session_id,
+            self.memory._estimate_msgs_tokens(messages),
+            len(messages),
+        )
 
         try:
             while loops < max_steps:
@@ -304,6 +348,32 @@ class ReActAgent:
                 if generation_stopped:
                     break
 
+                if not tool_calls and executor_verification_required:
+                    if executor_verification_prompts >= 2:
+                        final_response = (
+                            chunk_content.rstrip()
+                            + "\n\n[执行子代理的修改尚未由主代理独立验收，本轮不能确认任务已完成。]"
+                        )
+                        break
+                    executor_verification_prompts += 1
+                    messages.append({"role": "assistant", "content": chunk_content})
+                    messages.append({
+                        "role": "user",
+                        "content": (
+                            "系统验收门：executor 已返回修改结果，但你尚未独立核对。"
+                            "请立即使用 file_manager 读取关键改动、运行 code_exec/runtime_smoke 验证，"
+                            "或委派 reviewer 静态审查、verifier 动态验收；完成验收后再给最终结论。"
+                        ),
+                    })
+                    continue
+
+                if not tool_calls and plan_repair_pending:
+                    final_response = (
+                        chunk_content.rstrip()
+                        + "\n\n[任务计划校验失败，自动修正计划未完成。]"
+                    )
+                    break
+
                 if not tool_calls:
                     final_response = chunk_content
                     break
@@ -330,6 +400,7 @@ class ReActAgent:
                     yield {"type": "segment", "segment": {"type": "text", "content": "工具系统未配置"}}
                     break
 
+                pending_plan_repair_prompt = ""
                 for tc in valid_tool_calls:
                     if stop_event and stop_event.is_set():
                         generation_stopped = True
@@ -341,6 +412,18 @@ class ReActAgent:
                     except json.JSONDecodeError:
                         tool_args = {}
 
+                    if pending_plan_repair_prompt:
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tc.get("id", ""),
+                            "content": json.dumps({
+                                "success": False,
+                                "error": "SKIPPED_DUE_TO_PLAN_REPAIR",
+                                "message": "同批次前序 delegate_plan 校验失败，本工具未执行；请先重新提交完整计划",
+                            }, ensure_ascii=False),
+                        })
+                        continue
+
                     tool_seq += 1
                     tool_call_id = f"tc_{int(time.time() * 1000):013d}_{tool_seq:03d}"
                     tool_signature = json.dumps(
@@ -351,7 +434,14 @@ class ReActAgent:
                     )
 
                     is_choice_tool = tool_name == "ask_user_choice"
-                    if not is_choice_tool:
+                    is_delegate_tool = tool_name in {"delegate_task", "delegate_tasks", "delegate_plan"}
+                    tool_attempts[tool_signature] = tool_attempts.get(tool_signature, 0) + 1
+                    repeated_blocked = (
+                        tool_attempts[tool_signature] >= 3
+                        and not is_choice_tool
+                        and not is_delegate_tool
+                    )
+                    if not is_choice_tool and not is_delegate_tool:
                         yield {"type": "segment", "segment": {
                             "type": "tool",
                             "tool_call_id": tool_call_id,
@@ -361,11 +451,16 @@ class ReActAgent:
                         }}
 
                     read_error = self._validate_read_continuation(
-                        tool_name,
-                        tool_args,
-                        read_progress,
+                        tool_name, tool_args, read_progress,
                     )
-                    if read_error:
+                    tool_started = time.monotonic()
+                    if repeated_blocked:
+                        result = json.dumps({
+                            "success": False,
+                            "error": "REPEATED_TOOL_CALL",
+                            "message": "检测到相同工具和参数已连续调用多次，已阻止重复执行。请使用已有结果或调整方案。",
+                        }, ensure_ascii=False)
+                    elif read_error:
                         result = read_error
                     else:
                         result = tool_result_cache.get(tool_signature) if cacheable_tool(tool_name) else None
@@ -392,6 +487,86 @@ class ReActAgent:
                                 result = json.dumps(result_data, ensure_ascii=False)
                     except (json.JSONDecodeError, TypeError):
                         result_data = {}
+
+                    tool_duration_ms = int((time.monotonic() - tool_started) * 1000)
+                    runtime_diagnostics.record_tool(
+                        session_id,
+                        tool_name,
+                        tool_duration_ms,
+                        result_data.get("success") is True,
+                        result_data.get("error", ""),
+                        blocked=repeated_blocked,
+                    )
+                    if result_data.get("success") is not True and not repeated_blocked:
+                        tool_failures[tool_signature] = tool_failures.get(tool_signature, 0) + 1
+                    if tool_failures.get(tool_signature, 0) >= 3:
+                        result_data = {
+                            **result_data,
+                            "error": result_data.get("error") or "TOOL_FAILURE_LOOP",
+                            "message": "同一工具调用已连续失败多次，请停止重复尝试并重新评估方案。",
+                        }
+                        result = json.dumps(result_data, ensure_ascii=False)
+
+                    if tool_name == "delegate_plan":
+                        repair = (result_data.get("data") or {}).get("repair") or {}
+                        if result_data.get("success") is True:
+                            plan_repair_pending = False
+                            plan_repair_attempts = 0
+                        elif repair.get("retryable") is True:
+                            if plan_repair_attempts < int(repair.get("max_retries") or 1):
+                                plan_repair_attempts += 1
+                                plan_repair_pending = True
+                                requirements = repair.get("requirements") or []
+                                pending_plan_repair_prompt = (
+                                    "系统计划修正门：delegate_plan 校验失败。"
+                                    f"错误代码：{repair.get('failed_error') or result_data.get('error') or 'UNKNOWN'}。"
+                                    "请根据工具返回的 repair 数据重新构建并立即提交完整计划。"
+                                    "这是本次计划唯一一次自动修正机会；不要解释错误，不要继续执行其他工具。"
+                                )
+                                if requirements:
+                                    pending_plan_repair_prompt += "\n修正要求：\n" + "\n".join(
+                                        f"- {item}" for item in requirements
+                                    )
+                            else:
+                                plan_repair_pending = False
+
+                    if (
+                        tool_name == "delegate_task"
+                        and (result_data.get("data") or {}).get("role") == "executor"
+                    ):
+                        evidence = (result_data.get("data") or {}).get("evidence") or {}
+                        executor_modified_files = {
+                            str(Path(path).resolve())
+                            for path in evidence.get("modified_files") or []
+                            if path
+                        }
+                        if executor_modified_files:
+                            executor_verification_required = True
+                            executor_verification_prompts = 0
+                    elif tool_name == "delegate_plan":
+                        plan_evidence = (result_data.get("data") or {}).get("evidence") or {}
+                        executor_modified_files = {
+                            str(Path(path).resolve())
+                            for path in plan_evidence.get("modified_files") or []
+                            if path
+                        }
+                        if executor_modified_files:
+                            executor_verification_required = True
+                            executor_verification_prompts = 0
+                    elif executor_verification_required and result_data.get("success") is True:
+                        is_file_check = False
+                        if tool_name == "file_manager" and tool_args.get("action") in {"read", "info"}:
+                            check_path = Path(tool_args.get("path") or "")
+                            if not check_path.is_absolute() and tool_context:
+                                check_path = tool_context.workspace / check_path
+                            is_file_check = str(check_path.resolve()) in executor_modified_files
+                        is_runtime_check = tool_name in {"code_exec", "runtime_smoke"}
+                        is_review = (
+                            tool_name == "delegate_task"
+                            and tool_args.get("role") in {"reviewer", "verifier"}
+                        )
+                        if is_file_check or is_runtime_check or is_review:
+                            executor_verification_required = False
 
                     if (
                         is_choice_tool
@@ -424,14 +599,15 @@ class ReActAgent:
                     result_summary = self._make_summary(tool_name, result_data, result)
                     result_detail = self._result_detail(result_data, result)
 
-                    if not is_choice_tool:
+                    if not is_choice_tool and not is_delegate_tool:
                         yield {"type": "segment", "segment": {
                             "type": "tool",
                             "tool_call_id": tool_call_id,
                             "tool_name": tool_name,
                             "status": "done",
                             "result_summary": result_summary,
-                            "result_detail": result_detail
+                            "result_detail": result_detail,
+                            "duration_ms": tool_duration_ms,
                         }}
 
                     # MiMo 百万上下文，不截断 tool result
@@ -463,6 +639,12 @@ class ReActAgent:
                     if stop_event and stop_event.is_set():
                         generation_stopped = True
                         break
+
+                if pending_plan_repair_prompt and not generation_stopped and not waiting_for_user:
+                    messages.append({
+                        "role": "user",
+                        "content": pending_plan_repair_prompt,
+                    })
 
                 if waiting_for_user:
                     break
@@ -502,7 +684,9 @@ class ReActAgent:
             max_context=max_context,
             max_output_tokens=max_tokens,
             compaction_callback=notify_compaction,
+            workspace_path=workspace_path,
         )
+        runtime_diagnostics.finish_generation(session_id)
 
         emotion = persona_manager.get_emotion_engine(persona) if hasattr(self, '_persona_manager') else None
         emoji = ""

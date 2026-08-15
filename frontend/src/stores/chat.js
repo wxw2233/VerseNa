@@ -9,7 +9,7 @@ export const useChatStore = defineStore('chat', () => {
   const currentPersona = ref('default')
   const bgOpacity = ref(0.3)
 
-  const statusPriority = { running: 1, done: 2, error: 3 }
+  const statusPriority = { running: 1, done: 2, stopped: 3, error: 4 }
 
   function addUserMessage(content, dbId, clientMessageId, reasoningEnabled = false, reasoningEffort = null) {
     messages.value.push({
@@ -104,6 +104,18 @@ export const useChatStore = defineStore('chat', () => {
         } else {
           segs.push({ ...segment })
         }
+      } else if (segment.type === 'subagent') {
+        const idx = segs.findIndex(s => (
+          s.type === 'subagent' && s.subagent_id === segment.subagent_id
+        ))
+        if (idx >= 0) segs[idx] = { ...segs[idx], ...segment }
+        else segs.push({ ...segment })
+      } else if (segment.type === 'subagent_plan') {
+        const idx = segs.findIndex(s => (
+          s.type === 'subagent_plan' && s.plan_id === segment.plan_id
+        ))
+        if (idx >= 0) segs[idx] = { ...segs[idx], ...segment }
+        else segs.push({ ...segment })
       } else if (segment.type === 'choice') {
         const idx = segs.findIndex(s => (
           s.type === 'choice' && s.choice_id === segment.choice_id
@@ -152,6 +164,12 @@ export const useChatStore = defineStore('chat', () => {
         if (s.type === 'reasoning' && s.status === 'running') {
           return { ...s, status: 'done' }
         }
+        if (s.type === 'subagent' && s.status === 'running') {
+          return { ...s, status: 'error', detail: '子代理状态未正常结束' }
+        }
+        if (s.type === 'subagent_plan' && s.status === 'running') {
+          return { ...s, status: 'partial', detail: '任务计划状态未正常结束' }
+        }
         return s
       })
       last.segments = segs
@@ -176,6 +194,12 @@ export const useChatStore = defineStore('chat', () => {
         }
         if (s.type === 'reasoning' && s.status === 'running') {
           return { ...s, status: 'error' }
+        }
+        if (s.type === 'subagent' && s.status === 'running') {
+          return { ...s, status: 'error', detail: '服务异常，子代理执行中断' }
+        }
+        if (s.type === 'subagent_plan' && s.status === 'running') {
+          return { ...s, status: 'partial', detail: '服务异常，任务计划执行中断' }
         }
         return s
       })

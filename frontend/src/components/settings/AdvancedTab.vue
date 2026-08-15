@@ -7,10 +7,18 @@
       <!-- Agent 执行步数 -->
       <div class="config-item">
         <div class="config-label">
-          <span class="label-title">🔧 最大执行步数</span>
-          <span class="label-desc">Agent 单次对话最多调用工具的次数，防止无限循环</span>
+          <span class="label-title">主 Agent 最大执行步数</span>
+          <span class="label-desc">主 Agent 单轮任务最多进行的模型与工具循环次数</span>
         </div>
         <input type="number" v-model.number="config.max_steps" :min="1" :max="100" class="num-input" />
+      </div>
+
+      <div class="config-item">
+        <div class="config-label">
+          <span class="label-title">子 Agent 最大执行步数</span>
+          <span class="label-desc">每个子 Agent 最多执行的模型轮数，executor 会按此值获得对应的工具预算</span>
+        </div>
+        <input type="number" v-model.number="config.subagent_max_steps" :min="4" :max="50" class="num-input" />
       </div>
 
       <!-- 上下文长度 -->
@@ -29,6 +37,14 @@
           <span class="label-desc">单次回复的最大 Token 数</span>
         </div>
         <input type="number" v-model.number="config.max_tokens" :min="64" :max="65536" :step="256" class="num-input" />
+      </div>
+
+      <div class="config-item">
+        <div class="config-label">
+          <span class="label-title">工具超时时间（秒）</span>
+          <span class="label-desc">单个工具超过这个时间没有返回时自动终止，避免文件读取或外部请求永久卡住</span>
+        </div>
+        <input type="number" v-model.number="config.tool_timeout" :min="10" :max="300" class="num-input" />
       </div>
 
       <div class="config-item">
@@ -77,8 +93,10 @@ const toast = useToast()
 
 const config = reactive({
   max_steps: 15,
+  subagent_max_steps: 16,
   max_context: 4096,
   max_tokens: 4096,
+  tool_timeout: 120,
   reasoning_effort: 'medium',
   custom_instructions: '',
 })
@@ -94,8 +112,10 @@ const saving = ref(false)
 
 const numericFields = {
   max_steps: [1, 100],
+  subagent_max_steps: [4, 50],
   max_context: [2000, 1000000],
   max_tokens: [256, 65536],
+  tool_timeout: [10, 300],
 }
 
 function buildPayload() {
@@ -310,5 +330,11 @@ onMounted(loadConfig)
   opacity: 0.55;
   cursor: default;
   transform: none;
+}
+
+@media (max-width: 640px) {
+  .config-item:not(.full-width) { align-items: flex-start; flex-direction: column; gap: 10px; }
+  .num-input { width: 100%; }
+  .effort-control { width: 100%; grid-template-columns: repeat(3, 1fr); }
 }
 </style>

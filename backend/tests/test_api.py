@@ -4,6 +4,72 @@ from main import app
 from auth import is_loopback_host
 from config import settings
 
+
+def test_subagent_segments_merge_streamed_status_updates():
+    from api.chat import _append_response_segment
+
+    segments = []
+    _append_response_segment(segments, {
+        "type": "subagent",
+        "subagent_id": "sub_1",
+        "role": "explorer",
+        "status": "running",
+        "detail": "正在分析",
+    })
+    _append_response_segment(segments, {
+        "type": "subagent",
+        "subagent_id": "sub_1",
+        "status": "done",
+        "detail": "报告",
+        "duration_ms": 1200,
+    })
+
+    assert segments == [{
+        "type": "subagent",
+        "subagent_id": "sub_1",
+        "role": "explorer",
+        "status": "done",
+        "detail": "报告",
+        "duration_ms": 1200,
+    }]
+
+
+def test_subagent_plan_segments_merge_streamed_updates():
+    from api.chat import _append_response_segment
+
+    segments = []
+    _append_response_segment(segments, {
+        "type": "subagent_plan",
+        "plan_id": "plan_1",
+        "status": "running",
+        "nodes": [{"id": "inspect", "status": "running"}],
+    })
+    _append_response_segment(segments, {
+        "type": "subagent_plan",
+        "plan_id": "plan_1",
+        "status": "done",
+        "nodes": [{"id": "inspect", "status": "done"}],
+    })
+
+    assert segments == [{
+        "type": "subagent_plan",
+        "plan_id": "plan_1",
+        "status": "done",
+        "nodes": [{"id": "inspect", "status": "done"}],
+    }]
+
+
+def test_subagent_prompt_requires_proactive_delegation_without_user_hint():
+    from api.chat import _subagent_collaboration_prompt
+
+    prompt = _subagent_collaboration_prompt()
+
+    assert "常驻能力" in prompt
+    assert "不需要用户提醒" in prompt
+    assert "应主动委派" in prompt
+    assert "`delegate_tasks` 并行委派" in prompt
+    assert "简单问答" in prompt
+
 @pytest.fixture
 def client(monkeypatch):
     import api.qq_api as qq_api
@@ -22,6 +88,16 @@ def test_health(client):
     assert resp.json()["status"] == "ok"
     assert resp.json()["service"] == "VerseNa"
     assert "instance_id" in resp.json()
+
+
+def test_tools_api_returns_grouped_capability_metadata(client):
+    response = client.get("/api/tools")
+
+    assert response.status_code == 200
+    tools = {item["name"]: item for item in response.json()}
+    assert tools["file_manager"]["group"] == "filesystem"
+    assert tools["code_exec"]["risk"] == "high"
+    assert "main" in tools["list_memory"]["roles"]
 
 
 def test_skill_commands_api(client, monkeypatch):
@@ -67,8 +143,10 @@ def test_agent_config_can_be_saved_and_loaded(client, monkeypatch):
 
     payload = {
         "max_steps": 24,
+        "subagent_max_steps": 20,
         "max_context": 64000,
         "max_tokens": 4096,
+        "tool_timeout": 120,
         "reasoning_effort": "high",
         "custom_instructions": "Keep answers concise.",
     }
@@ -130,6 +208,17 @@ def test_tool_workspace_api(client, tmp_path, monkeypatch):
     assert response.status_code == 200
     assert response.json()["path"] == str(tmp_path / "workspace")
     assert (tmp_path / "workspace").is_dir()
+
+
+def test_diagnostics_api_returns_runtime_and_memory_sections(client):
+    response = client.get("/api/diagnostics")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["service"] == "VerseNa"
+    assert set(data["memory"]) == {"total", "global", "workspace"}
+    assert isinstance(data["runtime"], dict)
+    assert isinstance(data["active_subagents"], list)
 
 
 def test_session_tool_settings_are_validated_and_persisted(client, tmp_path):

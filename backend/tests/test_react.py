@@ -2,6 +2,7 @@ import pytest
 import pytest_asyncio
 import asyncio
 import json
+from types import SimpleNamespace
 from agent.react import ReActAgent
 from agent.models.base import BaseModelAdapter, ModelResponse
 from agent.memory import MemoryManager
@@ -339,6 +340,324 @@ async def test_intermediate_text_is_kept_out_of_saved_final_answer():
     history = await db.get_history("staged-session")
     assistant = next(message for message in history if message["role"] == "assistant")
     assert assistant["content"] == "最终总结"
+
+
+@pytest.mark.asyncio
+async def test_executor_result_requires_main_agent_verification(tmp_path):
+    modified = str((tmp_path / "changed.txt").resolve())
+
+    class VerificationAdapter(BaseModelAdapter):
+        def __init__(self):
+            self.calls = 0
+            self.gate_seen = False
+
+        async def chat(self, messages, tools=None, stream=True, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                yield ModelResponse(tool_calls=[{
+                    "id": "delegate-executor",
+                    "type": "function",
+                    "function": {
+                        "name": "delegate_task",
+                        "arguments": json.dumps({"role": "executor", "task": "修改文件"}),
+                    },
+                }])
+            elif self.calls == 2:
+                yield ModelResponse(content="executor 说已经完成，可以直接交付。")
+            elif self.calls == 3:
+                self.gate_seen = "系统验收门" in messages[-1]["content"]
+                yield ModelResponse(tool_calls=[{
+                    "id": "verify-file",
+                    "type": "function",
+                    "function": {
+                        "name": "file_manager",
+                        "arguments": json.dumps({"action": "read", "path": "changed.txt"}),
+                    },
+                }])
+            else:
+                yield ModelResponse(content="已读取真实改动，验收完成。")
+
+        async def list_models(self):
+            return ["verification-model"]
+
+    class VerificationRegistry:
+        def create_context(self, session_id, **kwargs):
+            return SimpleNamespace(workspace=tmp_path)
+
+        async def execute(self, name, arguments, **kwargs):
+            if name == "delegate_task":
+                return json.dumps({
+                    "type": "subagent_result",
+                    "success": True,
+                    "data": {
+                        "role": "executor",
+                        "status": "done",
+                        "evidence": {"modified_files": [modified]},
+                    },
+                }, ensure_ascii=False)
+            return json.dumps({
+                "success": True,
+                "data": {"path": modified, "content": "changed"},
+            }, ensure_ascii=False)
+
+    adapter = VerificationAdapter()
+    events = [event async for event in ReActAgent(
+        adapter,
+        MemoryManager(),
+        tool_registry=VerificationRegistry(),
+    ).run("executor-verification", "完成修改", tools=[{}])]
+
+    assert adapter.calls == 4
+    assert adapter.gate_seen is True
+    assert any(
+        event.get("segment", {}).get("content") == "已读取真实改动，验收完成。"
+        for event in events
+    )
+    history = await db.get_history("executor-verification")
+    assistant = next(message for message in history if message["role"] == "assistant")
+    assert assistant["content"] == "已读取真实改动，验收完成。"
+
+
+@pytest.mark.asyncio
+async def test_delegate_plan_validation_failure_is_repaired_once_and_retried():
+    invalid_nodes = [
+        {"id": "setup", "role": "executor", "task": "创建文件", "depends_on": []},
+        {
+            "id": "verify",
+            "role": "reviewer",
+            "task": "运行 pytest 验证",
+            "depends_on": ["setup"],
+        },
+    ]
+    corrected_nodes = [
+        invalid_nodes[0],
+        {**invalid_nodes[1], "role": "verifier"},
+    ]
+
+    class RepairAdapter(BaseModelAdapter):
+        def __init__(self):
+            self.calls = 0
+            self.repair_prompt = ""
+
+        async def chat(self, messages, tools=None, stream=True, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                nodes = invalid_nodes
+            elif self.calls == 2:
+                self.repair_prompt = messages[-1]["content"]
+                nodes = corrected_nodes
+            else:
+                yield ModelResponse(content="计划已自动修正并完成。")
+                return
+            yield ModelResponse(tool_calls=[{
+                "id": f"plan-{self.calls}",
+                "type": "function",
+                "function": {
+                    "name": "delegate_plan",
+                    "arguments": json.dumps({"nodes": nodes}, ensure_ascii=False),
+                },
+            }])
+
+        async def list_models(self):
+            return ["repair-model"]
+
+    class RepairRegistry:
+        def __init__(self):
+            self.executions = []
+
+        def create_context(self, session_id, **kwargs):
+            return object()
+
+        async def execute(self, name, arguments, **kwargs):
+            self.executions.append(arguments["nodes"])
+            if len(self.executions) == 1:
+                return json.dumps({
+                    "success": False,
+                    "error": "SUBAGENT_VERIFIER_ROLE_REQUIRED",
+                    "message": "动态验证必须使用 verifier",
+                    "data": {
+                        "repair": {
+                            "retryable": True,
+                            "max_retries": 1,
+                            "failed_error": "SUBAGENT_VERIFIER_ROLE_REQUIRED",
+                            "failed_nodes": invalid_nodes,
+                            "requirements": ["动态验收使用 verifier"],
+                        },
+                    },
+                }, ensure_ascii=False)
+            return json.dumps({
+                "type": "subagent_plan_result",
+                "success": True,
+                "data": {
+                    "status": "done",
+                    "nodes": corrected_nodes,
+                    "evidence": {"modified_files": []},
+                },
+            }, ensure_ascii=False)
+
+    adapter = RepairAdapter()
+    registry = RepairRegistry()
+    events = [event async for event in ReActAgent(
+        adapter, MemoryManager(), tool_registry=registry,
+    ).run("plan-auto-repair", "执行计划", tools=[{}])]
+
+    assert adapter.calls == 3
+    assert len(registry.executions) == 2
+    assert registry.executions[0][1]["role"] == "reviewer"
+    assert registry.executions[1][1]["role"] == "verifier"
+    assert "系统计划修正门" in adapter.repair_prompt
+    assert "唯一一次自动修正机会" in adapter.repair_prompt
+    assert any(
+        event.get("segment", {}).get("content") == "计划已自动修正并完成。"
+        for event in events
+    )
+
+
+@pytest.mark.asyncio
+async def test_delegate_plan_auto_repair_stops_after_second_validation_failure():
+    class RepeatedInvalidAdapter(BaseModelAdapter):
+        def __init__(self):
+            self.calls = 0
+            self.second_prompt_has_gate = False
+            self.third_prompt_has_gate = False
+
+        async def chat(self, messages, tools=None, stream=True, **kwargs):
+            self.calls += 1
+            if self.calls == 2:
+                self.second_prompt_has_gate = "系统计划修正门" in messages[-1]["content"]
+            if self.calls == 3:
+                self.third_prompt_has_gate = "系统计划修正门" in messages[-1]["content"]
+                yield ModelResponse(content="计划仍然无效，停止自动重试。")
+                return
+            yield ModelResponse(tool_calls=[{
+                "id": f"invalid-plan-{self.calls}",
+                "type": "function",
+                "function": {
+                    "name": "delegate_plan",
+                    "arguments": json.dumps({
+                        "nodes": [
+                            {"id": "a", "role": "explorer", "task": "A", "depends_on": ["missing"]},
+                            {"id": "b", "role": "reviewer", "task": "B", "depends_on": ["a"]},
+                        ],
+                    }),
+                },
+            }])
+
+        async def list_models(self):
+            return ["invalid-repair-model"]
+
+    class AlwaysInvalidRegistry:
+        def __init__(self):
+            self.executions = 0
+
+        def create_context(self, session_id, **kwargs):
+            return object()
+
+        async def execute(self, name, arguments, **kwargs):
+            self.executions += 1
+            return json.dumps({
+                "success": False,
+                "error": "UNKNOWN_SUBAGENT_DEPENDENCY",
+                "message": "节点 a 依赖不存在: missing",
+                "data": {
+                    "repair": {
+                        "retryable": True,
+                        "max_retries": 1,
+                        "failed_error": "UNKNOWN_SUBAGENT_DEPENDENCY",
+                        "requirements": ["依赖 ID 必须存在"],
+                    },
+                },
+            }, ensure_ascii=False)
+
+    adapter = RepeatedInvalidAdapter()
+    registry = AlwaysInvalidRegistry()
+    events = [event async for event in ReActAgent(
+        adapter, MemoryManager(), tool_registry=registry,
+    ).run("plan-repair-limit", "执行计划", tools=[{}])]
+
+    assert registry.executions == 2
+    assert adapter.calls == 3
+    assert adapter.second_prompt_has_gate is True
+    assert adapter.third_prompt_has_gate is False
+    assert any(
+        event.get("segment", {}).get("content") == "计划仍然无效，停止自动重试。"
+        for event in events
+    )
+
+
+@pytest.mark.asyncio
+async def test_delegate_plan_repair_gate_skips_remaining_tool_calls_in_same_batch():
+    class BatchAdapter(BaseModelAdapter):
+        def __init__(self):
+            self.calls = 0
+            self.skipped_result_seen = False
+
+        async def chat(self, messages, tools=None, stream=True, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                yield ModelResponse(tool_calls=[
+                    {
+                        "id": "invalid-plan",
+                        "type": "function",
+                        "function": {
+                            "name": "delegate_plan",
+                            "arguments": json.dumps({"nodes": [
+                                {"id": "a", "role": "explorer", "task": "A", "depends_on": ["missing"]},
+                                {"id": "b", "role": "reviewer", "task": "B", "depends_on": ["a"]},
+                            ]}),
+                        },
+                    },
+                    {
+                        "id": "must-not-run",
+                        "type": "function",
+                        "function": {
+                            "name": "code_exec",
+                            "arguments": json.dumps({"language": "python", "code": "print('unsafe')"}),
+                        },
+                    },
+                ])
+                return
+            self.skipped_result_seen = any(
+                message.get("role") == "tool"
+                and "SKIPPED_DUE_TO_PLAN_REPAIR" in message.get("content", "")
+                for message in messages
+            )
+            yield ModelResponse(content="停止批次并等待重建计划。")
+
+        async def list_models(self):
+            return ["batch-repair-model"]
+
+    class BatchRegistry:
+        def __init__(self):
+            self.names = []
+
+        def create_context(self, session_id, **kwargs):
+            return object()
+
+        async def execute(self, name, arguments, **kwargs):
+            self.names.append(name)
+            return json.dumps({
+                "success": False,
+                "error": "UNKNOWN_SUBAGENT_DEPENDENCY",
+                "data": {"repair": {
+                    "retryable": True,
+                    "max_retries": 1,
+                    "failed_error": "UNKNOWN_SUBAGENT_DEPENDENCY",
+                    "requirements": ["依赖 ID 必须存在"],
+                }},
+            }, ensure_ascii=False)
+
+    adapter = BatchAdapter()
+    registry = BatchRegistry()
+    events = [event async for event in ReActAgent(
+        adapter, MemoryManager(), tool_registry=registry,
+    ).run("plan-repair-batch", "执行计划", tools=[{}])]
+
+    assert registry.names == ["delegate_plan"]
+    assert adapter.skipped_result_seen is True
+    history = await db.get_history("plan-repair-batch")
+    assistant = next(message for message in history if message["role"] == "assistant")
+    assert "自动修正计划未完成" in assistant["content"]
 
 
 @pytest.mark.asyncio

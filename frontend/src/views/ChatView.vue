@@ -40,12 +40,12 @@
             @retry="handleRetry(i)"
             @edit="(newContent) => handleEdit(i, newContent)"
             @choose="payload => handleChoice(i, payload)"
+          @stop-subagent="handleStopSubagent"
+          @stop-plan="handleStop"
           />
           <EmptyState
             v-if="store.messages.length === 0"
             title="VerseNa"
-            action-text="开始对话"
-            @action="handleNewChat"
           />
         </div>
       </div>
@@ -53,7 +53,10 @@
         <button
           v-if="!isAtBottom && store.messages.length"
           class="scroll-bottom-btn"
-          :class="{ 'has-unread': unreadCount > 0 }"
+          :class="{
+            'has-unread': unreadCount > 0,
+            'above-active-skill': activeSkill?.active,
+          }"
           :title="unreadCount ? `${unreadCount} 条新消息` : '回到底部'"
           :aria-label="unreadCount ? `${unreadCount} 条新消息，回到底部` : '回到底部'"
           @click="scrollToBottom(true)"
@@ -466,8 +469,7 @@ watch(connectionStatus, (nextStatus, previousStatus) => {
 // 键盘快捷键
 useKeyboard({
   'ctrl+n': () => {
-    sessionStore.createSession()
-    toast.info('新建对话')
+    sessionListRef.value?.handleNew()
   },
   'ctrl+/': () => {
     mobileSidebarOpen.value = !mobileSidebarOpen.value
@@ -482,12 +484,37 @@ useKeyboard({
   }
 })
 
-// 新建对话 - 触发 SessionList 的主题包选择对话框
+// 新建对话 - 发送首条消息时由 SessionList 打开主题包选择框
 const sessionListRef = ref(null)
-const handleNewChat = () => {
-  if (sessionListRef.value) {
-    sessionListRef.value.handleNew()
+const pendingInitialSend = ref(null)
+
+function hasRealCurrentSession() {
+  return Boolean(
+    sessionStore.currentSessionId
+    && sessionStore.currentSessionId !== 'default',
+  )
+}
+
+function queueInitialSend(content, acknowledge) {
+  if (!sessionListRef.value) {
+    acknowledge(false)
+    toast.error('主题包选择器尚未就绪，请稍后重试')
+    return
   }
+
+  pendingInitialSend.value = { content, acknowledge }
+  sessionListRef.value.handleNew({
+    onCreated: async () => {
+      const pending = pendingInitialSend.value
+      pendingInitialSend.value = null
+      if (pending) await handleSend(pending.content, pending.acknowledge)
+    },
+    onCancel: () => {
+      const pending = pendingInitialSend.value
+      pendingInitialSend.value = null
+      pending?.acknowledge(false)
+    },
+  })
 }
 
 onMounted(() => {
@@ -603,7 +630,26 @@ function handleStop() {
   store.requestStop(generationId)
 }
 
+function handleStopSubagent(subagentId) {
+  if (!subagentId) return
+  const sent = send({
+    type: 'stop_subagent',
+    session_id: sessionStore.currentSessionId,
+    generation_id: store.activeGenerationId,
+    subagent_id: subagentId,
+  })
+  if (!sent) {
+    toast.warning('连接不可用，无法停止子代理')
+    reconnect()
+  }
+}
+
 async function handleSend(content, acknowledge = () => {}) {
+  if (!hasRealCurrentSession()) {
+    queueInitialSend(content, acknowledge)
+    return
+  }
+
   const fingerprint = requestFingerprint(content)
   const requestIds = retainedSendRequest?.fingerprint === fingerprint
     ? retainedSendRequest.ids
@@ -1054,6 +1100,9 @@ setTimeout(loadToolExpanded, 100)
   cursor: pointer;
   transition: transform var(--motion-fast) var(--ease-standard), background var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard);
 }
+.scroll-bottom-btn.above-active-skill {
+  bottom: 124px;
+}
 .scroll-bottom-btn.has-unread {
   width: auto;
   min-width: 38px;
@@ -1200,7 +1249,9 @@ setTimeout(loadToolExpanded, 100)
 .confirm-overlay {
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: rgba(2, 6, 12, 0.78);
+  backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(5px);
 
 
   display: flex;
@@ -1209,10 +1260,12 @@ setTimeout(loadToolExpanded, 100)
   z-index: 1000;
 }
 .confirm-dialog {
-  background: var(--panel-l3);
+  background: #152337;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: #f3f6fb;
 
 
-  box-shadow: var(--border-subtle), var(--glow-inner), 0 8px 32px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.24), 0 14px 42px rgba(0, 0, 0, 0.58);
   border-radius: var(--radius);
   padding: 24px;
   min-width: 380px;
@@ -1225,14 +1278,14 @@ setTimeout(loadToolExpanded, 100)
   font-size: 18px;
   font-weight: 600;
   margin-bottom: 16px;
-  color: var(--text-primary);
+  color: #f3f6fb;
 }
 .confirm-body {
   margin-bottom: 20px;
 }
 .confirm-message {
   font-size: 14px;
-  color: var(--text-primary);
+  color: #f3f6fb;
   line-height: 1.6;
   margin-bottom: 12px;
 }
@@ -1241,7 +1294,8 @@ setTimeout(loadToolExpanded, 100)
   flex-direction: column;
   gap: 6px;
   padding: 10px 14px;
-  background: var(--panel-l4);
+  background: #0d1929;
+  border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 8px;
   box-shadow: var(--border-subtle);
   font-size: 13px;
@@ -1253,12 +1307,12 @@ setTimeout(loadToolExpanded, 100)
   font-family: monospace;
 }
 .confirm-path {
-  color: var(--text-secondary);
+  color: #c5cfdd;
   font-family: monospace;
   word-break: break-all;
 }
 .confirm-count {
-  color: var(--text-secondary);
+  color: #c5cfdd;
 }
 .confirm-actions {
   display: flex;
@@ -1270,8 +1324,8 @@ setTimeout(loadToolExpanded, 100)
   padding: 8px 20px;
   box-shadow: var(--border-subtle);
   border-radius: var(--radius-sm);
-  background: var(--panel-l4);
-  color: var(--text-secondary);
+  background: #23344a;
+  color: #e1e7ef;
   cursor: pointer;
   font-size: 14px;
   border: none;
@@ -1352,6 +1406,10 @@ setTimeout(loadToolExpanded, 100)
   .scroll-bottom-btn {
     right: 16px;
     bottom: 92px;
+  }
+
+  .scroll-bottom-btn.above-active-skill {
+    bottom: 130px;
   }
 
   .connection-status {

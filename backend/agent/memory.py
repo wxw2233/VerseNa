@@ -3,6 +3,7 @@ from config import settings
 from datetime import datetime, timedelta
 import json
 import inspect
+from pathlib import Path
 
 MEMORY_KEYWORDS = ['记住', '我喜欢', '我不喜欢', '以后', '总是', '不要', '偏好', '习惯']
 CONTEXT_TRIGGER_RATIO = 0.82
@@ -15,6 +16,16 @@ class MemoryManager:
     def __init__(self, max_tokens=None, model=None):
         self.max_tokens = max_tokens or settings.MAX_CONTEXT_TOKENS
         self.model = model  # LLM adapter，用于摘要和记忆提取
+
+    @staticmethod
+    def _normalize_workspace(workspace_path):
+        if not workspace_path:
+            return None
+        try:
+            return str(Path(workspace_path).expanduser().resolve())
+        except (OSError, TypeError, ValueError):
+            value = str(workspace_path).strip()
+            return value or None
 
     @staticmethod
     def _estimate_tokens(text: str) -> int:
@@ -48,6 +59,7 @@ class MemoryManager:
         max_context=None,
         max_output_tokens=None,
         compaction_callback=None,
+        workspace_path=None,
     ):
         """按 token 预算构建上下文，max_history 仅作为兼容性的安全上限。"""
         max_ctx = max_context or self.max_tokens
@@ -59,9 +71,18 @@ class MemoryManager:
             messages.append({'role': 'system', 'content': system_prompt})
 
         # 2. 长期记忆先全部候选，最终由统一预算裁剪，避免固定条数直接挤占上下文。
-        memories = await db.get_memories(limit=50)
+        workspace_path = self._normalize_workspace(workspace_path)
+        memories = await db.get_memories(limit=50, workspace_path=workspace_path)
         if memories:
-            mem_text = '\n'.join(f'- {m["content"]}' for m in memories)
+            await db.mark_memories_used([memory.get("id") for memory in memories])
+            def format_memory(memory):
+                scope = memory.get('scope') or 'global'
+                if scope == 'workspace':
+                    location = memory.get('workspace_path') or workspace_path or '当前工作区'
+                    return f'- [工作区: {location}] {memory["content"]}'
+                return f'- [全局] {memory["content"]}'
+
+            mem_text = '\n'.join(format_memory(memory) for memory in memories)
             messages.append({
                 'role': 'system',
                 'content': f'## 用户偏好与记忆\n{mem_text}'
@@ -422,10 +443,16 @@ class MemoryManager:
         max_context=None,
         max_output_tokens=None,
         compaction_callback=None,
+        workspace_path=None,
     ):
         """对话结束后调用：自动提取记忆 + 生成摘要"""
         await db.delete_expired_memories()
-        await self._maybe_extract_memories(session_id, user_message, assistant_response)
+        await self._maybe_extract_memories(
+            session_id,
+            user_message,
+            assistant_response,
+            workspace_path=workspace_path,
+        )
         await self._maybe_summarize(
             session_id,
             max_context=max_context,
@@ -433,7 +460,13 @@ class MemoryManager:
             compaction_callback=compaction_callback,
         )
 
-    async def _maybe_extract_memories(self, session_id, user_message, assistant_response):
+    async def _maybe_extract_memories(
+        self,
+        session_id,
+        user_message,
+        assistant_response,
+        workspace_path=None,
+    ):
         """规则过滤 + 批量提取记忆"""
         combined = user_message + assistant_response
         has_keyword = any(kw in combined for kw in MEMORY_KEYWORDS)
@@ -442,6 +475,9 @@ class MemoryManager:
 
         if not self.model:
             return
+
+        workspace_path = self._normalize_workspace(workspace_path)
+        memory_scope = 'workspace' if workspace_path else 'global'
 
         prompt = f"""判断以下对话中是否有值得长期记住的用户偏好、事实或指令。
 只提取明确的、稳定的偏好，不要提取临时性需求。
@@ -463,11 +499,22 @@ class MemoryManager:
                 category = m.get('category', 'general')
                 if not content:
                     continue
-                dup_id = await db.check_duplicate_memory(content)
+                dup_id = await db.check_duplicate_memory(
+                    content,
+                    scope=memory_scope,
+                    workspace_path=workspace_path,
+                )
                 if dup_id:
                     continue
                 expired_at = datetime.now() + timedelta(days=30)
-                await db.save_memory(content, category=category, source='auto', expired_at=expired_at.isoformat())
+                await db.save_memory(
+                    content,
+                    category=category,
+                    source='auto',
+                    expired_at=expired_at.isoformat(),
+                    scope=memory_scope,
+                    workspace_path=workspace_path,
+                )
         except Exception:
             pass
 
@@ -572,9 +619,22 @@ class MemoryManager:
         except Exception:
             return False
 
-    async def save_memory_manual(self, content, category='general'):
+    async def save_memory_manual(self, content, category='general', workspace_path=None):
         """手动保存记忆（永不过期）"""
-        dup_id = await db.check_duplicate_memory(content)
+        workspace_path = self._normalize_workspace(workspace_path)
+        memory_scope = 'workspace' if workspace_path else 'global'
+        dup_id = await db.check_duplicate_memory(
+            content,
+            scope=memory_scope,
+            workspace_path=workspace_path,
+        )
         if dup_id:
             return dup_id
-        await db.save_memory(content, category=category, source='manual', expired_at=None)
+        return await db.save_memory(
+            content,
+            category=category,
+            source='manual',
+            expired_at=None,
+            scope=memory_scope,
+            workspace_path=workspace_path,
+        )
