@@ -372,6 +372,25 @@ class SkillManager:
     def get_skill(self, skill_id):
         return self._cache.get(skill_id)
 
+    @staticmethod
+    def _summarize_index_description(description, limit=MAX_SKILL_INDEX_DESCRIPTION_CHARS):
+        text = " ".join(str(description or "").split())
+        if len(text) <= limit:
+            return text
+
+        # Prefer a complete clause, then a word boundary. Never leave a cut-off word.
+        cutoff = max(1, limit - 3)
+        boundaries = [
+            match.end()
+            for match in re.finditer(r"[。！？!?；;，,:]", text[:cutoff])
+            if match.end() >= cutoff // 2
+        ]
+        if boundaries:
+            return text[:boundaries[-1]].rstrip("，,；;：:") + "..."
+        if " " in text[:cutoff]:
+            return text[:cutoff].rsplit(" ", 1)[0].rstrip("，,；;：:") + "..."
+        return text[:cutoff].rstrip("，,；;：:") + "..."
+
     def get_skill_prompt(self, max_chars=MAX_SKILL_INDEX_CHARS):
         if not self._cache:
             return ""
@@ -382,21 +401,22 @@ class SkillManager:
             "不要逐个枚举或比较候选技能；不明确时直接处理用户请求。",
             "",
         ]
+        command_counts = {skill_id: 0 for skill_id in self._cache}
+        for command in self.list_commands():
+            if command["command"] != command["skill_id"]:
+                command_counts[command["skill_id"]] = command_counts.get(command["skill_id"], 0) + 1
+
         entries = []
         for skill in self._cache.values():
-            description = str(skill.get("description") or "").strip()
-            entries.append(
+            description = self._summarize_index_description(skill.get("description"))
+            command_count = command_counts.get(skill["id"], 0)
+            entry = (
                 f"- `{skill['id']}`: {skill['name']}"
-                + (f" - {description[:MAX_SKILL_INDEX_DESCRIPTION_CHARS]}" if description else "")
+                + (f" - {description}" if description else "")
             )
-        for command in self.list_commands():
-            if command["command"] == command["skill_id"]:
-                continue
-            description = str(command.get("description") or "").strip()
-            entries.append(
-                f"- `/{command['command']}` -> `{command['skill_id']}`"
-                + (f": {description[:MAX_SKILL_INDEX_DESCRIPTION_CHARS]}" if description else "")
-            )
+            if command_count:
+                entry += f"（含 {command_count} 个斜杠指令，可在斜杠菜单中选择）"
+            entries.append(entry)
 
         limit = max(500, int(max_chars or MAX_SKILL_INDEX_CHARS))
         for index, entry in enumerate(entries):

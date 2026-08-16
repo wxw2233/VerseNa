@@ -75,6 +75,38 @@ def test_skill_prompt_uses_a_single_bounded_route_index(manager):
     assert "未注入当前上下文" in prompt
 
 
+def test_skill_prompt_groups_child_commands_under_one_skill_entry(manager):
+    skill_dir = manager.installed_dir / "command-package"
+    write_skill(skill_dir, id="command-package", name="Command Package")
+    write_skill_command(skill_dir, name="brainstorming")
+    write_skill_command(skill_dir, name="reviewing")
+    manager.reload()
+
+    prompt = manager.get_skill_prompt()
+
+    assert prompt.count("`command-package`") == 1
+    assert "含 2 个斜杠指令" in prompt
+    assert "/brainstorming" not in prompt
+    assert "/reviewing" not in prompt
+
+
+def test_skill_index_description_ends_at_a_boundary(manager):
+    write_skill(
+        manager.custom_dir / "long-description",
+        id="long-description",
+        description=(
+            "Superpowers is a complete software development methodology for your coding agents, "
+            "built on top of composable skills and detailed instructions."
+        ),
+    )
+    manager.reload()
+
+    prompt = manager.get_skill_prompt()
+
+    assert "for your coding agents..." in prompt
+    assert "composable s" not in prompt
+
+
 def test_custom_skill_loads_full_context(tmp_path):
     custom_dir = tmp_path / "custom"
     write_skill(custom_dir / "directory-name", id="custom-id")
@@ -103,7 +135,9 @@ def test_installed_skill_discovers_and_resolves_slash_commands(manager):
     assert commands["brainstorming"]["aliases"] == ["command-package:brainstorming"]
     assert resolved["arguments"] == "design a notes app"
     assert "Follow this slash command exactly." in context
-    assert "`/brainstorming`" in manager.get_skill_prompt()
+    prompt = manager.get_skill_prompt()
+    assert "`command-package`" in prompt
+    assert "含 1 个斜杠指令" in prompt
 
 
 def test_explicit_skill_command_metadata_is_supported(manager):
