@@ -15,6 +15,7 @@ from models.providers import get_provider, model_supports_reasoning
 from auth import SESSION_COOKIE_NAME, auth_manager, is_allowed_origin
 from agent.environment import collect_environment_facts, format_environment_facts
 from agent.checkpoint import decode_checkpoint, format_checkpoint
+from security_utils import redact_sensitive_data, redact_sensitive_text
 
 router = APIRouter()
 
@@ -252,7 +253,7 @@ async def websocket_chat(ws: WebSocket):
     send_lock = asyncio.Lock()
 
     async def send_event(event, generation_id):
-        payload = dict(event)
+        payload = redact_sensitive_data(dict(event))
         payload["generation_id"] = generation_id
         async with send_lock:
             await ws.send_text(json.dumps(payload, ensure_ascii=False))
@@ -268,7 +269,7 @@ async def websocket_chat(ws: WebSocket):
             "request_type": request_type,
         }
         if error:
-            payload["error"] = error
+            payload["error"] = redact_sensitive_text(error)
         await ws.send_text(json.dumps(payload, ensure_ascii=False))
 
     def message_generation(message, fallback):
@@ -333,7 +334,7 @@ async def websocket_chat(ws: WebSocket):
             client_message_id = msg.get("client_message_id") or f"legacy_{uuid.uuid4().hex}"
             generation_id = msg.get("generation_id") or f"gen_{uuid.uuid4().hex}"
             session_id = msg.get("session_id", "default")
-            content = msg.get("content", "")
+            content = redact_sensitive_text(msg.get("content", ""))
             image_url = msg.get("image_url", "")
             reasoning_enabled = msg.get("reasoning_enabled") is True
             requested_effort = msg.get("reasoning_effort")
@@ -360,7 +361,7 @@ async def websocket_chat(ws: WebSocket):
             # 处理 edit 消息：编辑消息内容并重新生成
             if request_type == "edit":
                 edit_id = msg.get("message_id")
-                new_content = msg.get("content", "")
+                new_content = redact_sensitive_text(msg.get("content", ""))
                 if not edit_id:
                     await send_accepted(
                         client_message_id,
@@ -535,6 +536,9 @@ async def websocket_chat(ws: WebSocket):
             approval_mode = session_meta.get("approval_mode", "ask")
             if approval_mode not in {"ask", "auto"}:
                 approval_mode = "ask"
+            host_execution_enabled = bool(
+                session_meta.get("host_execution_enabled", False)
+            )
 
             from skills.manager import skill_manager
             invoked_skill_command = skill_manager.resolve_slash_command(content)
@@ -583,8 +587,17 @@ async def websocket_chat(ws: WebSocket):
                 active_arguments=session_meta.get("active_skill_arguments", ""),
             )
 
-            available_tools = tool_registry.get_tools(role="main")
-            tool_desc = tool_registry.format_tool_descriptions(role="main")
+            execution_tools = set() if host_execution_enabled else {
+                "code_exec", "verification_exec"
+            }
+            available_tools = tool_registry.get_tools(
+                role="main",
+                exclude_names=execution_tools,
+            )
+            tool_desc = tool_registry.format_tool_descriptions(
+                role="main",
+                exclude_names=execution_tools,
+            )
             system_prompt += f"""\n\n## 可用工具
 你有以下工具可以调用：
 {tool_desc}
@@ -677,6 +690,7 @@ async def websocket_chat(ws: WebSocket):
             agent_config["reasoning_enabled"] = reasoning_enabled
             agent_config["tool_workspace"] = str(tool_workspace)
             agent_config["approval_mode"] = approval_mode
+            agent_config["host_execution_enabled"] = host_execution_enabled
 
             # 主题包角色的 temperature/top_p 覆盖全局配置
             try:
@@ -693,6 +707,7 @@ async def websocket_chat(ws: WebSocket):
             generation_failed = False
             stop_event.clear()  # 新消息开始前清除停止信号
             async def progress_event(event):
+                event = redact_sensitive_data(event)
                 if event.get("type") == "segment":
                     _append_response_segment(response_segments, event.get("segment", {}))
                 await send_event(event, generation_id)
@@ -712,6 +727,7 @@ async def websocket_chat(ws: WebSocket):
                     generation_id=generation_id,
                     progress_callback=progress_event,
                 ):
+                    event = redact_sensitive_data(event)
                     if event.get("type") == "done":
                         done_metadata = {
                             key: event.get(key)
@@ -742,9 +758,9 @@ async def websocket_chat(ws: WebSocket):
                 log_info("Chat", f"会话结束: session={session_id} generation={generation_id}")
                 if response_segments or done_metadata:
                     try:
-                        metadata_update = {**done_metadata}
+                        metadata_update = redact_sensitive_data({**done_metadata})
                         if response_segments:
-                            metadata_update["segments"] = response_segments
+                            metadata_update["segments"] = redact_sensitive_data(response_segments)
                         log_info("Chat", f"保存 {len(response_segments)} 个响应 segments")
                         await db.update_message_metadata_by_generation(
                             session_id,

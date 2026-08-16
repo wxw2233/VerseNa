@@ -9,6 +9,7 @@ from agent.memory import MemoryManager
 from config import settings
 from persona.manager import persona_manager
 from agent.diagnostics import runtime_diagnostics
+from security_utils import redact_sensitive_text
 
 class ReActAgent:
     def __init__(self, model: BaseModelAdapter, memory: MemoryManager, tool_registry=None, max_steps: int = None):
@@ -654,7 +655,7 @@ class ReActAgent:
                     break
 
         except Exception as e:
-            yield {"type": "error", "message": str(e)}
+            yield {"type": "error", "message": redact_sensitive_text(e)}
 
         reasoning_available = reasoning_known_available or reasoning_observed
         if reasoning_requested and not reasoning_available and first_reasoning_id:
@@ -669,7 +670,8 @@ class ReActAgent:
             message_metadata["reasoning_available"] = reasoning_available
 
         # done 事件
-        assistant_response = final_response or full_response
+        assistant_response = redact_sensitive_text(final_response or full_response)
+        user_message = redact_sensitive_text(user_message)
         await self.memory.add_message(
             session_id,
             "assistant",

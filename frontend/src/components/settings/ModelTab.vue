@@ -155,15 +155,15 @@
       <div class="search-keys">
         <div class="form-row">
           <label>SerpAPI Key <span class="hint-inline">（Google 搜索）</span></label>
-          <input v-model="searchConfig.serpapi_key" type="password" placeholder="留空则不使用" />
+          <input v-model="searchConfig.serpapi_key" type="password" :placeholder="searchConfig.has_serpapi_key ? '已保存，留空保持不变' : '尚未保存'" />
         </div>
         <div class="form-row">
           <label>Tavily Key <span class="hint-inline">（AI 优化搜索）</span></label>
-          <input v-model="searchConfig.tavily_key" type="password" placeholder="留空则不使用" />
+          <input v-model="searchConfig.tavily_key" type="password" :placeholder="searchConfig.has_tavily_key ? '已保存，留空保持不变' : '尚未保存'" />
         </div>
         <div class="form-row">
           <label>Bing Key <span class="hint-inline">（Azure 认知搜索）</span></label>
-          <input v-model="searchConfig.bing_key" type="password" placeholder="留空则不使用" />
+          <input v-model="searchConfig.bing_key" type="password" :placeholder="searchConfig.has_bing_key ? '已保存，留空保持不变' : '尚未保存'" />
         </div>
       </div>
 
@@ -251,6 +251,9 @@ const searchConfig = reactive({
   serpapi_key: '',
   tavily_key: '',
   bing_key: '',
+  has_serpapi_key: false,
+  has_tavily_key: false,
+  has_bing_key: false,
 })
 
 const currentProvider = computed(() =>
@@ -398,6 +401,7 @@ async function saveProvider() {
     })
     toast.success('提供商配置已保存')
     await loadProviders()
+    fillProviderForm()
   } catch (e) {
     toast.error('保存失败: ' + e.message)
   }
@@ -511,16 +515,27 @@ async function loadSearchConfig() {
     const resp = await fetch('/api/search/config')
     const data = await resp.json()
     Object.assign(searchConfig, data)
+    searchConfig.serpapi_key = ''
+    searchConfig.tavily_key = ''
+    searchConfig.bing_key = ''
   } catch {}
 }
 
 async function saveSearchConfig() {
   try {
-    await fetch('/api/search/config', {
+    const response = await fetch('/api/search/config', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(searchConfig),
+      body: JSON.stringify({
+        search_strategy: searchConfig.search_strategy,
+        search_provider: searchConfig.search_provider,
+        serpapi_key: searchConfig.serpapi_key,
+        tavily_key: searchConfig.tavily_key,
+        bing_key: searchConfig.bing_key,
+      }),
     })
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+    await loadSearchConfig()
     toast.success('搜索配置已保存')
   } catch (e) {
     toast.error('保存失败: ' + e.message)

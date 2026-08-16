@@ -190,7 +190,12 @@ async def test_verifier_runs_restricted_command_and_resolves_corrected_attempt(t
     result = json.loads(await SubagentManager().run(
         role="verifier",
         task="运行 unittest 验证",
-        context=ToolContext("verifier-retry", tmp_path, model=adapter),
+        context=ToolContext(
+            "verifier-retry",
+            tmp_path,
+            model=adapter,
+            agent_config={"host_execution_enabled": True},
+        ),
     ))
 
     assert result["success"] is True
@@ -219,7 +224,12 @@ async def test_verifier_marks_empty_test_suite_as_needs_attention(tmp_path):
     result = json.loads(await SubagentManager().run(
         role="verifier",
         task="运行 unittest 验证",
-        context=ToolContext("verifier-empty-suite", tmp_path, model=EmptyVerifierAdapter()),
+        context=ToolContext(
+            "verifier-empty-suite",
+            tmp_path,
+            model=EmptyVerifierAdapter(),
+            agent_config={"host_execution_enabled": True},
+        ),
     ))
 
     assert result["success"] is False
@@ -428,7 +438,8 @@ async def test_executor_writes_with_auto_approval_and_has_no_recursive_tools(tmp
     assert result["success"] is True
     assert tmp_path.joinpath("executor.txt").read_text(encoding="utf-8") == "written"
     assert json.loads(adapter.tool_result)["success"] is True
-    assert {"file_manager", "code_exec", "runtime_smoke"} <= adapter.tool_names
+    assert {"file_manager", "runtime_smoke"} <= adapter.tool_names
+    assert "code_exec" not in adapter.tool_names
     assert "delegate_task" not in adapter.tool_names
     assert "delegate_tasks" not in adapter.tool_names
     assert "delegate_plan" not in adapter.tool_names

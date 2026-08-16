@@ -1,4 +1,4 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Response
 from pydantic import BaseModel
 from adapters.qq_bot import QQBotAdapter
 from agent.react import ReActAgent
@@ -8,6 +8,7 @@ from persona.manager import persona_manager
 from tools.registry import tool_registry
 from config import settings
 from api.log_api import log_info, log_error
+from security_utils import redact_sensitive_text
 
 router = APIRouter()
 qq_adapter = QQBotAdapter()
@@ -17,7 +18,8 @@ def _qq_tools():
 
 async def handle_qq_message(msg):
     """处理 QQ 收到的消息"""
-    print(f"[QQ] 收到: type={msg.msg_type} user={msg.user_id} content={msg.content[:50]}", flush=True)
+    msg.content = redact_sensitive_text(msg.content)
+    print(redact_sensitive_text(f"[QQ] 收到: type={msg.msg_type} user={msg.user_id} content={msg.content[:50]}"), flush=True)
     log_info("QQ", f"收到 {msg.msg_type}: {msg.content[:80]}")
     if not msg.content:
         return
@@ -46,7 +48,8 @@ async def handle_qq_message(msg):
                     full_reply += seg.get("content", "")
 
         if full_reply:
-            print(f"[QQ] 回复({len(full_reply)}字): {full_reply[:100]}", flush=True)
+            full_reply = redact_sensitive_text(full_reply)
+            print(redact_sensitive_text(f"[QQ] 回复({len(full_reply)}字): {full_reply[:100]}"), flush=True)
             log_info("QQ", f"回复({len(full_reply)}字): {full_reply[:80]}")
             success = await qq_adapter.send(msg.channel_id, full_reply[:2000], msg_type=msg.msg_type)
             print(f"[QQ] 发送结果: {success}", flush=True)
@@ -55,9 +58,9 @@ async def handle_qq_message(msg):
             print("[QQ] 回复为空", flush=True)
     except Exception as e:
         import traceback
-        print(f"[QQ] 处理异常: {e}", flush=True)
+        print(redact_sensitive_text(f"[QQ] 处理异常: {e}"), flush=True)
         log_error("QQ", f"异常: {e}")
-        traceback.print_exc()
+        print(redact_sensitive_text(traceback.format_exc()), flush=True)
 
 
 # 注册消息回调
@@ -71,7 +74,8 @@ class QQConfig(BaseModel):
 
 
 @router.get("/api/qq/config")
-async def get_qq_config():
+async def get_qq_config(response: Response):
+    response.headers["Cache-Control"] = "no-store"
     from db.database import db
     try:
         app_id = await db.get_config("qq_app_id", "")
@@ -79,23 +83,33 @@ async def get_qq_config():
         sandbox = await db.get_config("qq_sandbox", "true")
         return {
             "app_id": app_id,
-            "app_secret": app_secret,
+            "app_secret": "",
+            "has_secret": bool(app_secret),
             "sandbox": sandbox == "true",
             "bot_status": "已连接" if qq_adapter.ws else "未连接",
         }
     except Exception:
-        return {"app_id": "", "app_secret": "", "sandbox": True, "bot_status": "未连接"}
+        return {
+            "app_id": "",
+            "app_secret": "",
+            "has_secret": False,
+            "sandbox": True,
+            "bot_status": "未连接",
+        }
 
 
 @router.post("/api/qq/config")
 async def set_qq_config(config: QQConfig):
     from db.database import db
+    existing_secret = await db.get_config("qq_app_secret", "")
+    app_secret = config.app_secret or existing_secret
     await db.set_config("qq_app_id", config.app_id)
-    await db.set_config("qq_app_secret", config.app_secret)
+    if config.app_secret:
+        await db.set_config("qq_app_secret", config.app_secret)
     await db.set_config("qq_sandbox", "true" if config.sandbox else "false")
 
     qq_adapter.app_id = config.app_id
-    qq_adapter.app_secret = config.app_secret
+    qq_adapter.app_secret = app_secret
     qq_adapter.sandbox = config.sandbox
 
     success = await qq_adapter.start()
@@ -115,4 +129,4 @@ async def load_qq_config():
             qq_adapter.sandbox = sandbox
             await qq_adapter.start()
     except Exception as e:
-        print(f"[QQ] 启动加载失败: {e}", flush=True)
+        print(redact_sensitive_text(f"[QQ] 启动加载失败: {e}"), flush=True)

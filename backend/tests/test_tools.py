@@ -287,7 +287,12 @@ def registry():
 
 @pytest.fixture
 def tool_context(tmp_path):
-    return ToolContext("test-session", tmp_path, lambda: False)
+    return ToolContext(
+        "test-session",
+        tmp_path,
+        lambda: False,
+        agent_config={"host_execution_enabled": True},
+    )
 
 
 @pytest.mark.asyncio
@@ -410,11 +415,12 @@ async def test_code_exec_requires_confirmation_and_runs_python(registry, tool_co
 
 
 @pytest.mark.asyncio
-async def test_auto_approval_applies_to_file_changes_and_code_execution(registry, tmp_path):
+async def test_auto_approval_only_applies_to_workspace_file_changes(registry, tmp_path):
     context = ToolContext(
         "auto-session",
         tmp_path,
         approval_mode="auto",
+        agent_config={"host_execution_enabled": True},
     )
     written = json.loads(await registry.execute(
         "file_manager",
@@ -428,8 +434,22 @@ async def test_auto_approval_applies_to_file_changes_and_code_execution(registry
     ))
 
     assert written["success"] is True
-    assert executed["success"] is True
-    assert executed["data"]["output"] == "auto"
+    assert executed["type"] == "confirm"
+    assert executed["action"] == "code_exec"
+    assert executed["code"] == "print('auto')"
+    assert "工作区之外" in executed["security_warning"]
+
+
+@pytest.mark.asyncio
+async def test_code_exec_is_disabled_without_explicit_session_permission(registry, tmp_path):
+    result = json.loads(await registry.execute(
+        "code_exec",
+        {"language": "python", "code": "print('blocked')"},
+        context=ToolContext("disabled-session", tmp_path, approval_mode="auto"),
+        confirmed=True,
+    ))
+
+    assert result["error"] == "HOST_EXECUTION_DISABLED"
 
 
 @pytest.mark.asyncio
@@ -448,7 +468,13 @@ async def test_code_exec_timeout_terminates_process(registry, tool_context):
 @pytest.mark.asyncio
 async def test_code_exec_honors_stop_event(registry, tmp_path):
     stop_event = asyncio.Event()
-    context = ToolContext("test-session", tmp_path, lambda: False, stop_event)
+    context = ToolContext(
+        "test-session",
+        tmp_path,
+        lambda: False,
+        stop_event,
+        agent_config={"host_execution_enabled": True},
+    )
 
     async def stop_soon():
         await asyncio.sleep(0.2)

@@ -106,7 +106,18 @@
             @click="selectApprovalMode('auto')"
           >
             <ShieldCheck :size="16" aria-hidden="true" />
-            <span><strong>自动审批</strong><small>本会话直接执行</small></span>
+            <span><strong>自动审批</strong><small>仅自动执行工作区文件操作</small></span>
+          </button>
+          <div class="approval-divider"></div>
+          <button
+            :class="{ selected: hostExecutionEnabled, dangerous: hostExecutionEnabled }"
+            @click="toggleHostExecution"
+          >
+            <TerminalSquare :size="16" aria-hidden="true" />
+            <span>
+              <strong>主机执行</strong>
+              <small>{{ hostExecutionEnabled ? '已启用，命令仍需逐次确认' : '关闭，隐藏命令执行工具' }}</small>
+            </span>
           </button>
         </div>
       </div>
@@ -169,7 +180,7 @@
 
 <script setup>
 import { computed, ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
-import { BrainCircuit, Command, FileText, LoaderCircle, Mic, Paperclip, Send, ShieldAlert, ShieldCheck, Square, Volume2, VolumeX, X } from 'lucide-vue-next'
+import { BrainCircuit, Command, FileText, LoaderCircle, Mic, Paperclip, Send, ShieldAlert, ShieldCheck, Square, TerminalSquare, Volume2, VolumeX, X } from 'lucide-vue-next'
 import { useToast } from '../composables/useToast'
 
 const props = defineProps({
@@ -178,9 +189,10 @@ const props = defineProps({
   isStopping: { type: Boolean, default: false },
   connected: { type: Boolean, default: false },
   approvalMode: { type: String, default: 'ask' },
+  hostExecutionEnabled: { type: Boolean, default: false },
   activeSkill: { type: Object, default: null },
 })
-const emit = defineEmits(['send', 'toggle-tts', 'stop', 'update:approval-mode', 'clear-active-skill'])
+const emit = defineEmits(['send', 'toggle-tts', 'stop', 'update:approval-mode', 'update:host-execution-enabled', 'clear-active-skill'])
 const text = ref('')
 const textareaRef = ref(null)
 const fileInput = ref(null)
@@ -275,6 +287,10 @@ function handleTextareaKeydown(event) {
 function selectApprovalMode(mode) {
   approvalMenuOpen.value = false
   if (mode !== props.approvalMode) emit('update:approval-mode', mode)
+}
+
+function toggleHostExecution() {
+  emit('update:host-execution-enabled', !props.hostExecutionEnabled)
 }
 
 function closeApprovalMenu(event) {
@@ -811,6 +827,15 @@ textarea:focus {
   background: rgba(255, 255, 255, 0.08);
 }
 .approval-menu button.selected { box-shadow: inset 2px 0 0 var(--primary); }
+.approval-menu button.dangerous {
+  color: #fbbf24;
+  background: rgba(245, 158, 11, 0.1);
+}
+.approval-divider {
+  height: 1px;
+  margin: 5px 4px;
+  background: rgba(255, 255, 255, 0.1);
+}
 .approval-menu span { display: flex; flex-direction: column; min-width: 0; }
 .approval-menu strong { font-size: 13px; font-weight: 600; }
 .approval-menu small { margin-top: 2px; color: var(--text-secondary); font-size: 11px; }

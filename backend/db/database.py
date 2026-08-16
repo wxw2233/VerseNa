@@ -1,6 +1,8 @@
 import json
 import aiosqlite
 from config import settings
+from secret_store import SENSITIVE_CONFIG_KEYS, secret_protector
+from security_utils import redact_sensitive_data, redact_sensitive_text
 
 class Database:
     def __init__(self, db_path=None):
@@ -28,7 +30,7 @@ class Database:
                 old_meta = json.loads(row[1] or "{}")
             except (json.JSONDecodeError, TypeError):
                 old_meta = {}
-            old_meta.update(metadata)
+            old_meta.update(redact_sensitive_data(metadata))
             await self._db.execute(
                 "UPDATE conversations SET metadata = ? WHERE id = ?",
                 (json.dumps(old_meta, ensure_ascii=False), msg_id)
@@ -50,7 +52,7 @@ class Database:
                 old_meta = {}
             if old_meta.get("generation_id") != generation_id:
                 continue
-            old_meta.update(metadata)
+            old_meta.update(redact_sensitive_data(metadata))
             await self._db.execute(
                 "UPDATE conversations SET metadata = ? WHERE id = ?",
                 (json.dumps(old_meta, ensure_ascii=False), row[0]),
@@ -121,6 +123,7 @@ class Database:
                 theme_pack_id TEXT DEFAULT 'default_pack',
                 tool_workspace TEXT DEFAULT '',
                 approval_mode TEXT DEFAULT 'ask',
+                host_execution_enabled INTEGER DEFAULT 0,
                 active_skill_command TEXT DEFAULT '',
                 active_skill_arguments TEXT DEFAULT '',
                 task_checkpoint TEXT DEFAULT '{}'
@@ -135,6 +138,10 @@ class Database:
         if "approval_mode" not in session_column_names:
             await self._db.execute(
                 "ALTER TABLE session_metadata ADD COLUMN approval_mode TEXT DEFAULT 'ask'"
+            )
+        if "host_execution_enabled" not in session_column_names:
+            await self._db.execute(
+                "ALTER TABLE session_metadata ADD COLUMN host_execution_enabled INTEGER DEFAULT 0"
             )
         if "active_skill_command" not in session_column_names:
             await self._db.execute(
@@ -202,11 +209,13 @@ class Database:
             )
         """)
         await self._db.commit()
+        await self._migrate_sensitive_config()
+        await self._redact_persisted_content()
 
     async def get_session_meta(self, session_id):
         cursor = await self._db.execute(
             "SELECT session_id, name, theme_pack_id, tool_workspace, approval_mode, "
-            "active_skill_command, active_skill_arguments, task_checkpoint "
+            "host_execution_enabled, active_skill_command, active_skill_arguments, task_checkpoint "
             "FROM session_metadata WHERE session_id = ?",
             (session_id,)
         )
@@ -218,9 +227,10 @@ class Database:
                 "theme_pack_id": row[2],
                 "tool_workspace": row[3] or "",
                 "approval_mode": row[4] if row[4] in {"ask", "auto"} else "ask",
-                "active_skill_command": row[5] or "",
-                "active_skill_arguments": row[6] or "",
-                "task_checkpoint": row[7] or "{}",
+                "host_execution_enabled": bool(row[5]),
+                "active_skill_command": row[6] or "",
+                "active_skill_arguments": row[7] or "",
+                "task_checkpoint": row[8] or "{}",
             }
         return {
             "session_id": session_id,
@@ -228,6 +238,7 @@ class Database:
             "theme_pack_id": "default_pack",
             "tool_workspace": "",
             "approval_mode": "ask",
+            "host_execution_enabled": False,
             "active_skill_command": "",
             "active_skill_arguments": "",
             "task_checkpoint": "{}",
@@ -240,6 +251,7 @@ class Database:
         theme_pack_id=None,
         tool_workspace=None,
         approval_mode=None,
+        host_execution_enabled=None,
         active_skill_command=None,
         active_skill_arguments=None,
         task_checkpoint=None,
@@ -253,6 +265,8 @@ class Database:
             meta["tool_workspace"] = tool_workspace
         if approval_mode is not None:
             meta["approval_mode"] = approval_mode
+        if host_execution_enabled is not None:
+            meta["host_execution_enabled"] = bool(host_execution_enabled)
         if active_skill_command is not None:
             meta["active_skill_command"] = active_skill_command
         if active_skill_arguments is not None:
@@ -262,14 +276,15 @@ class Database:
         await self._db.execute(
             "INSERT OR REPLACE INTO session_metadata "
             "(session_id, name, theme_pack_id, tool_workspace, approval_mode, "
-            "active_skill_command, active_skill_arguments, task_checkpoint) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "host_execution_enabled, active_skill_command, active_skill_arguments, task_checkpoint) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 session_id,
                 meta["name"],
                 meta["theme_pack_id"],
                 meta["tool_workspace"],
                 meta["approval_mode"],
+                int(meta["host_execution_enabled"]),
                 meta["active_skill_command"],
                 meta["active_skill_arguments"],
                 meta["task_checkpoint"],
@@ -281,7 +296,8 @@ class Database:
         meta = json.loads(metadata) if isinstance(metadata, str) else (metadata or {})
         if segments:
             meta["segments"] = segments
-        metadata_str = json.dumps(meta, ensure_ascii=False)
+        content = redact_sensitive_text(content)
+        metadata_str = json.dumps(redact_sensitive_data(meta), ensure_ascii=False)
         cursor = await self._db.execute(
             "INSERT OR IGNORE INTO conversations "
             "(session_id, role, content, persona, metadata, client_message_id) "
@@ -385,13 +401,69 @@ class Database:
     async def get_config(self, key: str, default: str = ""):
         cursor = await self._db.execute("SELECT value FROM app_config WHERE key = ?", (key,))
         row = await cursor.fetchone()
-        return row["value"] if row else default
+        if not row:
+            return default
+        value = row["value"]
+        return secret_protector.unprotect(value) if key in SENSITIVE_CONFIG_KEYS else value
 
     async def set_config(self, key: str, value: str):
+        stored_value = (
+            secret_protector.protect(value)
+            if key in SENSITIVE_CONFIG_KEYS
+            else value
+        )
         await self._db.execute(
-            "INSERT OR REPLACE INTO app_config (key, value) VALUES (?, ?)", (key, value)
+            "INSERT OR REPLACE INTO app_config (key, value) VALUES (?, ?)",
+            (key, stored_value),
         )
         await self._db.commit()
+
+    async def _migrate_sensitive_config(self):
+        placeholders = ",".join("?" for _ in SENSITIVE_CONFIG_KEYS)
+        cursor = await self._db.execute(
+            f"SELECT key, value FROM app_config WHERE key IN ({placeholders})",
+            tuple(sorted(SENSITIVE_CONFIG_KEYS)),
+        )
+        changed = False
+        for row in await cursor.fetchall():
+            value = row["value"] or ""
+            plaintext = secret_protector.unprotect(value)
+            if value and not secret_protector.is_protected(value):
+                await self._db.execute(
+                    "UPDATE app_config SET value = ? WHERE key = ?",
+                    (secret_protector.protect(plaintext), row["key"]),
+                )
+                changed = True
+        if changed:
+            await self._db.commit()
+
+    async def _redact_persisted_content(self):
+        changed = False
+        for table, columns in (
+            ("conversations", ("content", "metadata")),
+            ("memories", ("content",)),
+            ("summaries", ("content",)),
+        ):
+            cursor = await self._db.execute(
+                f"SELECT rowid AS _versena_rowid, {', '.join(columns)} FROM {table}"
+            )
+            for row in await cursor.fetchall():
+                updates = {}
+                for column in columns:
+                    original = row[column] or ""
+                    redacted = redact_sensitive_text(original)
+                    if redacted != original:
+                        updates[column] = redacted
+                if not updates:
+                    continue
+                assignments = ", ".join(f"{column} = ?" for column in updates)
+                await self._db.execute(
+                    f"UPDATE {table} SET {assignments} WHERE rowid = ?",
+                    (*updates.values(), row["_versena_rowid"]),
+                )
+                changed = True
+        if changed:
+            await self._db.commit()
 
     # --- Memory methods ---
 
@@ -474,7 +546,7 @@ class Database:
             "INSERT INTO memories "
             "(content, category, source, scope, workspace_path, use_count, last_used_at, expired_at) "
             "VALUES (?, ?, ?, ?, ?, 0, NULL, ?)",
-            (content, category, source, scope, workspace_path, expired_at)
+            (redact_sensitive_text(content), category, source, scope, workspace_path, expired_at)
         )
         await self._db.commit()
         return cursor.lastrowid
@@ -503,7 +575,10 @@ class Database:
         if not existing:
             return False
         if content:
-            await self._db.execute("UPDATE memories SET content = ? WHERE id = ?", (content, memory_id))
+            await self._db.execute(
+                "UPDATE memories SET content = ? WHERE id = ?",
+                (redact_sensitive_text(content), memory_id),
+            )
         if category:
             await self._db.execute("UPDATE memories SET category = ? WHERE id = ?", (category, memory_id))
         if scope in {'global', 'workspace'}:
@@ -561,7 +636,7 @@ class Database:
     async def save_summary(self, session_id, content, msg_from, msg_to, level=1):
         await self._db.execute(
             "INSERT INTO summaries (session_id, level, content, msg_from, msg_to) VALUES (?, ?, ?, ?, ?)",
-            (session_id, level, content, msg_from, msg_to)
+            (session_id, level, redact_sensitive_text(content), msg_from, msg_to)
         )
         await self._db.commit()
 

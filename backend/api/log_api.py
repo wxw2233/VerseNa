@@ -1,6 +1,7 @@
 import time
 from fastapi import APIRouter
 from config import settings
+from security_utils import redact_sensitive_text
 
 router = APIRouter()
 
@@ -13,7 +14,7 @@ def _log(level: str, tag: str, message: str):
     """写入运行日志"""
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     ts = time.strftime("%Y-%m-%d %H:%M:%S")
-    line = f"[{ts}] [{level}] [{tag}] {message}\n"
+    line = f"[{ts}] [{level}] [{tag}] {redact_sensitive_text(message)}\n"
     try:
         with open(LOG_FILE, "a", encoding="utf-8") as f:
             f.write(line)

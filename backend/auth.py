@@ -6,8 +6,11 @@ import time
 from collections import defaultdict, deque
 from pathlib import Path
 from urllib.parse import urlsplit
+from dotenv import dotenv_values, unset_key
 
 from config import settings
+from secret_store import SecretStoreError, secret_protector
+from security_utils import register_secret
 
 
 SESSION_COOKIE_NAME = "versena_session"
@@ -54,7 +57,10 @@ def persist_access_token(access_token: str, token_file: Path) -> None:
     token_file.parent.mkdir(parents=True, exist_ok=True)
     temporary_file = token_file.with_name(f".{token_file.name}.{secrets.token_hex(6)}.tmp")
     try:
-        temporary_file.write_text(access_token + "\n", encoding="utf-8")
+        temporary_file.write_text(
+            secret_protector.protect(access_token) + "\n",
+            encoding="utf-8",
+        )
         try:
             temporary_file.chmod(0o600)
         except OSError:
@@ -64,21 +70,43 @@ def persist_access_token(access_token: str, token_file: Path) -> None:
         temporary_file.unlink(missing_ok=True)
 
 
-def resolve_access_token(host: str, configured_token: str, token_file: Path) -> tuple[str, bool]:
+def resolve_access_token(
+    host: str,
+    configured_token: str,
+    token_file: Path,
+    dotenv_path: Path | None = None,
+) -> tuple[str, bool]:
     token_file = Path(token_file)
     stored_token = ""
+    stored_value = ""
     if token_file.is_file():
-        stored_token = token_file.read_text(encoding="utf-8").strip()
+        stored_value = token_file.read_text(encoding="utf-8").strip()
+        try:
+            stored_token = secret_protector.unprotect(stored_value)
+        except SecretStoreError as exc:
+            raise RuntimeError(
+                "VerseNa access token could not be decrypted for this OS user"
+            ) from exc
 
     access_token = stored_token or (configured_token or "").strip()
+    register_secret(access_token)
     initialized = False
     if not access_token and not is_loopback_host(host):
         access_token = secrets.token_urlsafe(32)
 
     validate_network_configuration(host, access_token)
-    if access_token and not stored_token:
+    if stored_token and not secret_protector.is_protected(stored_value):
+        persist_access_token(stored_token, token_file)
+    elif access_token and not stored_token:
         persist_access_token(access_token, token_file)
         initialized = True
+    if access_token and dotenv_path:
+        dotenv_path = Path(dotenv_path)
+        try:
+            if dotenv_path.is_file() and dotenv_values(dotenv_path).get("VERSENA_ACCESS_TOKEN"):
+                unset_key(str(dotenv_path), "VERSENA_ACCESS_TOKEN")
+        except OSError:
+            pass
     return access_token, initialized
 
 
@@ -173,6 +201,7 @@ _effective_token, _token_initialized = resolve_access_token(
     settings.HOST,
     settings.ACCESS_TOKEN,
     settings.ACCESS_TOKEN_FILE,
+    settings.BASE_DIR / ".env",
 )
 settings.ACCESS_TOKEN = _effective_token
 if _token_initialized:

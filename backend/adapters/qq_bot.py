@@ -4,6 +4,11 @@ import time
 import httpx
 import websockets
 from .base import BaseAdapter, AdapterMessage
+from security_utils import redact_sensitive_text, register_secret
+
+
+def _safe_print(message, *, flush=False):
+    print(redact_sensitive_text(message), flush=flush)
 
 
 class QQBotAdapter(BaseAdapter):
@@ -39,6 +44,7 @@ class QQBotAdapter(BaseAdapter):
                 token = token_data.get("access_token", "")
                 if not token:
                     return False
+                register_secret(token)
 
             # 2. 获取网关地址
             async with httpx.AsyncClient(timeout=10) as client:
@@ -59,7 +65,7 @@ class QQBotAdapter(BaseAdapter):
             return True
 
         except Exception as e:
-            print(f"QQ Bot connection error: {e}")
+            _safe_print(f"QQ Bot connection error: {e}")
             return False
 
     async def stop(self):
@@ -111,7 +117,7 @@ class QQBotAdapter(BaseAdapter):
             except asyncio.CancelledError:
                 raise
             except Exception as e:
-                print(f"QQ Bot WebSocket 断开: {e}")
+                _safe_print(f"QQ Bot WebSocket 断开: {e}")
                 if self._running:
                     await asyncio.sleep(5)  # 重连
                     # 重新获取 token
@@ -124,6 +130,7 @@ class QQBotAdapter(BaseAdapter):
                             if resp.status_code == 200:
                                 token_data = resp.json()
                                 self.token = token_data.get("access_token", "")
+                                register_secret(self.token)
                                 self._token_expires_at = (
                                     time.time() + int(token_data.get("expires_in", 7200)) - 300
                                 )
@@ -244,7 +251,7 @@ class QQBotAdapter(BaseAdapter):
             )
 
         if msg and msg.content and self._on_message:
-            print(f"QQ 收到消息: type={msg.msg_type}, user={msg.user_id}, content={msg.content[:50]}")
+            _safe_print(f"QQ 收到消息: type={msg.msg_type}, user={msg.user_id}, content={msg.content[:50]}")
             task = asyncio.create_task(self._on_message(msg))
             self._message_tasks.add(task)
             task.add_done_callback(self._message_tasks.discard)
@@ -279,17 +286,17 @@ class QQBotAdapter(BaseAdapter):
                 resp = await client.post(url, json=payload, headers={
                     "Authorization": f"QQBot {self.token}"
                 })
-                print(f"[QQ] send {msg_type} -> {resp.status_code}: {resp.text[:200]}", flush=True)
+                _safe_print(f"[QQ] send {msg_type} -> {resp.status_code}: {resp.text[:200]}", flush=True)
                 if resp.status_code == 401 or "token" in resp.text.lower():
                     print("[QQ] Token无效，刷新重试...", flush=True)
                     await self.start()
                     resp = await client.post(url, json=payload, headers={
                         "Authorization": f"QQBot {self.token}"
                     })
-                    print(f"[QQ] 重试 -> {resp.status_code}: {resp.text[:200]}", flush=True)
+                    _safe_print(f"[QQ] 重试 -> {resp.status_code}: {resp.text[:200]}", flush=True)
                 return resp.status_code in (200, 201)
         except Exception as e:
-            print(f"[QQ] send异常: {e}", flush=True)
+            _safe_print(f"[QQ] send异常: {e}", flush=True)
             return False
 
     async def ensure_token(self):

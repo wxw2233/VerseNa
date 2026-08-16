@@ -5,6 +5,7 @@ from pathlib import Path
 from config import settings
 from .base import BaseTool, ToolContext
 from .results import tool_error
+from security_utils import redact_sensitive_text
 
 
 # Centralized capability metadata keeps tool exposure rules in one place. The
@@ -22,8 +23,8 @@ TOOL_METADATA = {
     "delegate_task": {"group": "delegation", "risk": "medium", "roles": {"main", "qq"}},
     "delegate_tasks": {"group": "delegation", "risk": "medium", "roles": {"main", "qq"}},
     "delegate_plan": {"group": "delegation", "risk": "medium", "roles": {"main", "qq"}},
-    "verification_exec": {"group": "verification", "risk": "medium", "roles": {"main", "qq", "reviewer", "verifier"}},
-    "runtime_smoke": {"group": "verification", "risk": "medium", "roles": {"main", "qq", "executor", "verifier"}},
+    "verification_exec": {"group": "verification", "risk": "medium", "roles": {"main", "reviewer", "verifier"}},
+    "runtime_smoke": {"group": "verification", "risk": "medium", "roles": {"main", "executor", "verifier"}},
     "task_checkpoint": {"group": "workflow", "risk": "low", "roles": {"main", "qq", "executor"}},
     "ask_user_choice": {"group": "workflow", "risk": "low", "roles": {"main", "qq"}},
     "load_skill": {"group": "workflow", "risk": "low", "roles": {"main", "qq"}},
@@ -53,10 +54,18 @@ class ToolRegistry:
     def get_tool(self, name: str) -> BaseTool | None:
         return self._tools.get(name)
 
-    def get_tools(self, role: str | None = None, *, include_groups: set[str] | None = None) -> list[dict]:
+    def get_tools(
+        self,
+        role: str | None = None,
+        *,
+        include_groups: set[str] | None = None,
+        exclude_names: set[str] | None = None,
+    ) -> list[dict]:
         """Return OpenAI tool schemas filtered by role and optional groups."""
         tools = []
         for name, tool in self._tools.items():
+            if exclude_names and name in exclude_names:
+                continue
             metadata = TOOL_METADATA.get(name, {})
             if role and role not in metadata.get("roles", {"main"}):
                 continue
@@ -85,10 +94,15 @@ class ToolRegistry:
             })
         return tools
 
-    def format_tool_descriptions(self, role: str | None = None) -> str:
+    def format_tool_descriptions(
+        self,
+        role: str | None = None,
+        *,
+        exclude_names: set[str] | None = None,
+    ) -> str:
         """Format the visible tool catalog into compact capability groups."""
         grouped = {}
-        for tool in self.get_tools(role=role):
+        for tool in self.get_tools(role=role, exclude_names=exclude_names):
             function = tool["function"]
             group = self.get_tool_metadata(function["name"])["group"]
             grouped.setdefault(group, []).append(
@@ -143,13 +157,17 @@ class ToolRegistry:
                 if key not in {"confirmed", "_confirmed", "_context", "context"}
             }
             context = context or self.create_context("default")
-            return await tool.execute(
+            result = await tool.execute(
                 **safe_arguments,
                 _context=context,
                 _confirmed=confirmed,
             )
+            return redact_sensitive_text(result)
         except Exception as e:
-            return tool_error("TOOL_EXECUTION_FAILED", f"{name}: {type(e).__name__}: {e}")
+            return tool_error(
+                "TOOL_EXECUTION_FAILED",
+                redact_sensitive_text(f"{name}: {type(e).__name__}: {e}"),
+            )
 
     def load_builtins(self):
         builtin_dir = Path(__file__).parent / "builtin"

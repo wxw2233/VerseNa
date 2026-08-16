@@ -1,11 +1,12 @@
 import json
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
 import pydantic
 from pydantic import BaseModel
 from config import settings
 from db.database import db
 from models.providers import get_all_providers, get_provider, PROVIDER_PRESETS
+from security_utils import redact_sensitive_text
 
 router = APIRouter()
 PYDANTIC_V2 = int(pydantic.__version__.split(".", 1)[0]) >= 2
@@ -26,30 +27,36 @@ class ModelConfig(BaseModel):
     if PYDANTIC_V2:
         model_config = ConfigDict(protected_namespaces=())
 
-    api_key: str
+    api_key: str = ""
     base_url: str
     model_name: str
 
 @router.get("/api/config/model")
-async def get_model_config():
+async def get_model_config(response: Response):
     try:
         saved_key = await db.get_config("api_key", "")
         saved_url = await db.get_config("api_base", settings.DEFAULT_API_BASE)
         saved_model = await db.get_config("model_name", settings.DEFAULT_MODEL_NAME)
     except Exception:
         saved_key, saved_url, saved_model = "", settings.DEFAULT_API_BASE, settings.DEFAULT_MODEL_NAME
-    return {
-        "api_key": saved_key,
+    result = {
+        "api_key": "",
+        "has_key": bool(saved_key),
         "base_url": saved_url,
         "model_name": saved_model,
     }
+    response.headers["Cache-Control"] = "no-store"
+    return result
 
 @router.post("/api/config/model")
 async def set_model_config(config: ModelConfig):
-    settings.DEFAULT_API_KEY = config.api_key
+    existing_key = await db.get_config("api_key", "")
+    api_key = config.api_key or existing_key
+    settings.DEFAULT_API_KEY = api_key
     settings.DEFAULT_API_BASE = config.base_url
     settings.DEFAULT_MODEL_NAME = config.model_name
-    await db.set_config("api_key", config.api_key)
+    if config.api_key:
+        await db.set_config("api_key", config.api_key)
     await db.set_config("api_base", config.base_url)
     await db.set_config("model_name", config.model_name)
     return {"status": "ok"}
@@ -206,12 +213,22 @@ async def test_provider(req: ProviderTestReq):
                 headers={"Authorization": f"Bearer {api_key}"}
             )
             if resp.status_code != 200:
-                return {"success": False, "error": f"HTTP {resp.status_code}: {resp.text[:200]}", "models": []}
+                return {
+                    "success": False,
+                    "error": redact_sensitive_text(
+                        f"HTTP {resp.status_code}: {resp.text[:200]}"
+                    ),
+                    "models": [],
+                }
             data = resp.json()
             models = [m["id"] for m in data.get("data", [])]
             return {"success": True, "models": models}
     except Exception as e:
-        return {"success": False, "error": str(e), "models": []}
+        return {
+            "success": False,
+            "error": redact_sensitive_text(str(e)),
+            "models": [],
+        }
 
 
 @router.delete("/api/models/providers/{provider_id}")
@@ -482,11 +499,16 @@ SEARCH_API_DEFAULTS = {
 }
 
 @router.get("/api/search/config")
-async def get_search_config():
+async def get_search_config(response: Response):
     result = {}
     for key, default in SEARCH_API_DEFAULTS.items():
         raw = await db.get_config(f"search_{key}", None)
-        result[key] = raw if raw is not None else default
+        if key.endswith("_key"):
+            result[key] = ""
+            result[f"has_{key}"] = bool(raw)
+        else:
+            result[key] = raw if raw is not None else default
+    response.headers["Cache-Control"] = "no-store"
     return result
 
 class SearchConfigReq(BaseModel):
@@ -495,11 +517,18 @@ class SearchConfigReq(BaseModel):
     serpapi_key: str | None = None
     tavily_key: str | None = None
     bing_key: str | None = None
+    clear_serpapi_key: bool = False
+    clear_tavily_key: bool = False
+    clear_bing_key: bool = False
 
 @router.post("/api/search/config")
 async def set_search_config(req: SearchConfigReq):
     updates = _model_dump(req, exclude_none=True)
     for key, value in updates.items():
-        if key in SEARCH_API_DEFAULTS:
+        if key.endswith("_key") and key in SEARCH_API_DEFAULTS:
+            clear_requested = bool(updates.get(f"clear_{key}", False))
+            if value or clear_requested:
+                await db.set_config(f"search_{key}", str(value if not clear_requested else ""))
+        elif key in SEARCH_API_DEFAULTS:
             await db.set_config(f"search_{key}", str(value))
     return {"status": "ok"}

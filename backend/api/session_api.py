@@ -49,6 +49,7 @@ class SessionUpdate(BaseModel):
 class ToolSettingsUpdate(BaseModel):
     tool_workspace: str = None
     approval_mode: str = None
+    host_execution_enabled: bool = None
 
 
 class SkillStateUpdate(BaseModel):
@@ -86,6 +87,7 @@ async def rename_session(session_id: str, req: SessionRename):
         theme_pack_id=meta["theme_pack_id"],
         tool_workspace=meta["tool_workspace"],
         approval_mode=meta["approval_mode"],
+        host_execution_enabled=meta["host_execution_enabled"],
         active_skill_command=meta["active_skill_command"],
         active_skill_arguments=meta["active_skill_arguments"],
         task_checkpoint=meta["task_checkpoint"],
@@ -119,6 +121,7 @@ async def get_session_tool_settings(session_id: str):
         "tool_workspace": configured,
         "effective_workspace": str(workspace),
         "approval_mode": meta.get("approval_mode", "ask"),
+        "host_execution_enabled": bool(meta.get("host_execution_enabled", False)),
         "is_default": not bool(configured),
     }
 
@@ -141,6 +144,8 @@ async def update_session_tool_settings(session_id: str, req: ToolSettingsUpdate)
         if req.approval_mode not in {"ask", "auto"}:
             raise HTTPException(400, "审批模式必须是 ask 或 auto")
         updates["approval_mode"] = req.approval_mode
+    if req.host_execution_enabled is not None:
+        updates["host_execution_enabled"] = bool(req.host_execution_enabled)
     await db.set_session_meta(session_id, **updates)
     return await get_session_tool_settings(session_id)
 

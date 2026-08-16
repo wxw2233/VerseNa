@@ -13,6 +13,7 @@ from auth import (
 )
 from config import settings
 from main import app
+from secret_store import secret_protector
 
 
 TEST_TOKEN = "test-access-token-with-enough-entropy"
@@ -58,7 +59,10 @@ def test_first_lan_start_generates_persistent_token(tmp_path, capsys):
 
     assert generated is True
     assert len(token) >= 20
-    assert token_file.read_text(encoding="utf-8").strip() == token
+    stored = token_file.read_text(encoding="utf-8").strip()
+    assert secret_protector.is_protected(stored)
+    assert secret_protector.unprotect(stored) == token
+    assert token not in stored
 
     print_access_token_panel(token, 8002)
     panel = capsys.readouterr().out
@@ -72,12 +76,23 @@ def test_first_lan_start_generates_persistent_token(tmp_path, capsys):
 
 def test_existing_environment_token_is_migrated_to_persistent_file(tmp_path):
     token_file = tmp_path / "access_token"
+    dotenv_file = tmp_path / ".env"
+    dotenv_file.write_text(
+        f"VERSENA_HOST=0.0.0.0\nVERSENA_ACCESS_TOKEN={TEST_TOKEN}\n",
+        encoding="utf-8",
+    )
 
-    token, initialized = resolve_access_token("0.0.0.0", TEST_TOKEN, token_file)
+    token, initialized = resolve_access_token(
+        "0.0.0.0", TEST_TOKEN, token_file, dotenv_file
+    )
 
     assert token == TEST_TOKEN
     assert initialized is True
-    assert token_file.read_text(encoding="utf-8").strip() == TEST_TOKEN
+    stored = token_file.read_text(encoding="utf-8").strip()
+    assert secret_protector.is_protected(stored)
+    assert secret_protector.unprotect(stored) == TEST_TOKEN
+    assert "VERSENA_ACCESS_TOKEN" not in dotenv_file.read_text(encoding="utf-8")
+    assert "VERSENA_HOST=0.0.0.0" in dotenv_file.read_text(encoding="utf-8")
 
     restored_token, initialized_again = resolve_access_token(
         "0.0.0.0",
@@ -152,7 +167,10 @@ def test_authenticated_user_can_rotate_token(auth_client, tmp_path, monkeypatch)
         json={"current_token": TEST_TOKEN, "new_token": new_token},
     )
     assert response.status_code == 200
-    assert token_file.read_text(encoding="utf-8").strip() == new_token
+    stored = token_file.read_text(encoding="utf-8").strip()
+    assert secret_protector.is_protected(stored)
+    assert secret_protector.unprotect(stored) == new_token
+    assert new_token not in stored
     assert auth_client.get("/api/auth/status").json()["authenticated"] is True
 
     assert auth_client.get(

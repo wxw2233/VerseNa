@@ -248,6 +248,11 @@ class VerificationExecTool(BaseTool):
     ) -> str:
         if not _context:
             return tool_error("MISSING_CONTEXT", "工具执行上下文不可用")
+        if not _context.host_execution_enabled:
+            return tool_error(
+                "HOST_EXECUTION_DISABLED",
+                "Host verification execution is disabled for this session.",
+            )
         check_id = str(check_id or "").strip()
         if not CHECK_ID_PATTERN.fullmatch(check_id):
             return tool_error(

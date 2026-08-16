@@ -390,6 +390,12 @@ class SubagentManager:
         # The registry is the single source of truth for role capabilities.
         # Keep the legacy constants above for compatibility with older callers.
         registry = tool_registry.for_role(role)
+        if not bool((context.agent_config or {}).get("host_execution_enabled", False)):
+            registry = registry.subset({
+                tool["function"]["name"]
+                for tool in registry.get_tools()
+                if tool["function"]["name"] not in {"code_exec", "verification_exec"}
+            })
         tools = copy.deepcopy(registry.get_tools())
         if not executor:
             for tool in tools:

@@ -37,6 +37,13 @@ class Settings:
     ACCESS_TOKEN_FILE = Path(
         os.getenv("VERSENA_ACCESS_TOKEN_FILE", str(DATA_DIR / "access_token"))
     ).expanduser().resolve()
+    SECRET_KEY = os.getenv("VERSENA_SECRET_KEY", "").strip()
+    SECRET_KEY_FILE = Path(
+        os.getenv(
+            "VERSENA_SECRET_KEY_FILE",
+            str(Path.home() / ".config" / "versena" / "secret.key"),
+        )
+    ).expanduser().resolve()
     FRONTEND_DIST = Path(
         os.getenv("VERSENA_FRONTEND_DIST", str(BASE_DIR.parent / "frontend" / "dist"))
     ).expanduser().resolve()

@@ -13,6 +13,7 @@ from tts.adapter import (
     synthesize,
 )
 from config import settings
+from security_utils import redact_sensitive_text
 
 router = APIRouter()
 
@@ -54,7 +55,7 @@ async def tts_speak(req: TTSRequest):
     try:
         audio = await synthesize(config, req.text, voice_id, pack_id=req.pack_id)
     except TTSSynthesisError as exc:
-        raise HTTPException(exc.status_code, str(exc)) from exc
+        raise HTTPException(exc.status_code, redact_sensitive_text(exc)) from exc
     if not audio:
         raise HTTPException(500, f"语音合成失败 (provider={config['provider']}, model={config['model']})，请查看监控日志")
 

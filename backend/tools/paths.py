@@ -7,11 +7,41 @@ from tools.base import ToolContext
 
 SENSITIVE_NAMES = {
     "access_token",
+    ".git-credentials",
+    ".netrc",
+    ".npmrc",
+    ".pypirc",
     "credentials",
     "credentials.json",
+    "cookies",
+    "login data",
+    "local state",
+    "web data",
+    "wallet.dat",
     "id_rsa",
     "id_ed25519",
 }
+
+SENSITIVE_DIRECTORIES = {
+    ".aws",
+    ".azure",
+    ".docker",
+    ".gnupg",
+    ".kube",
+    ".ssh",
+    "gcloud",
+}
+
+SENSITIVE_SUFFIXES = (
+    ".db",
+    ".kdbx",
+    ".key",
+    ".p12",
+    ".pem",
+    ".pfx",
+    ".sqlite",
+    ".sqlite3",
+)
 
 
 class ToolPathError(ValueError):
@@ -53,8 +83,8 @@ def is_sensitive_path(path: Path, root: Path) -> bool:
         lowered = part.lower()
         if lowered.startswith(".env") or lowered in SENSITIVE_NAMES:
             return True
-        if lowered.endswith((".sqlite", ".sqlite3", ".db")):
+        if lowered.endswith(SENSITIVE_SUFFIXES):
             return True
-        if lowered in {".ssh", ".gnupg"}:
+        if lowered in SENSITIVE_DIRECTORIES:
             return True
     return False

@@ -23,6 +23,10 @@ class ToolContext:
             self.trust_mode_getter and self.trust_mode_getter()
         )
 
+    @property
+    def host_execution_enabled(self) -> bool:
+        return bool((self.agent_config or {}).get("host_execution_enabled", False))
+
 class BaseTool(ABC):
     name: str = ""
     description: str = ""

@@ -7,7 +7,7 @@
     </div>
     <div class="form-row">
       <label>App Secret</label>
-      <input v-model="form.app_secret" type="password" placeholder="App Secret" />
+      <input v-model="form.app_secret" type="password" :placeholder="hasSecret ? '已保存，留空保持不变' : 'App Secret'" />
     </div>
     <div class="form-row">
       <label>
@@ -34,13 +34,15 @@ const form = reactive({ app_id: '', app_secret: '', sandbox: true })
 const msg = ref('')
 const isError = ref(false)
 const botStatus = ref('未连接')
+const hasSecret = ref(false)
 
 onMounted(async () => {
   const resp = await fetch('/api/qq/config')
   if (resp.ok) {
     const data = await resp.json()
     form.app_id = data.app_id || ''
-    form.app_secret = data.app_secret || ''
+    form.app_secret = ''
+    hasSecret.value = data.has_secret === true
     form.sandbox = data.sandbox !== false
     botStatus.value = data.bot_status || '未连接'
   }
@@ -56,6 +58,8 @@ async function save() {
   })
   if (resp.ok) {
     const data = await resp.json()
+    if (form.app_secret) hasSecret.value = true
+    form.app_secret = ''
     botStatus.value = data.bot_status || '未知'
     msg.value = data.bot_status === '已连接' ? '保存成功，Bot 已连接！' : data.bot_status
     isError.value = data.bot_status !== '已连接'

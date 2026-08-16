@@ -115,8 +115,10 @@
         :is-stopping="store.isStopping"
         :connected="connected"
         :approval-mode="toolSettings.approval_mode"
+        :host-execution-enabled="toolSettings.host_execution_enabled"
         :active-skill="activeSkill"
         @update:approval-mode="updateApprovalMode"
+        @update:host-execution-enabled="updateHostExecution"
         @clear-active-skill="clearActiveSkill"
         @toggle-tts="autoTTS = !autoTTS; localStorage.setItem('auto-tts', autoTTS)"
       />
@@ -142,6 +144,9 @@
         </div>
         <div class="confirm-body">
           <p class="confirm-message">{{ confirmDialog.message }}</p>
+          <p v-if="confirmDialog.securityWarning" class="confirm-warning">
+            {{ confirmDialog.securityWarning }}
+          </p>
           <div v-if="confirmDialog.action" class="confirm-meta">
             <span class="confirm-action">{{ confirmDialog.action }}</span>
             <span v-if="confirmDialog.path" class="confirm-path">{{ confirmDialog.path }}</span>
@@ -149,6 +154,7 @@
             <span v-if="confirmDialog.file_count !== undefined" class="confirm-count">
               {{ confirmDialog.file_count }} 个文件, {{ confirmDialog.dir_count }} 个目录
             </span>
+            <pre v-if="confirmDialog.code" class="confirm-code">{{ confirmDialog.code }}</pre>
           </div>
         </div>
         <div class="confirm-actions">
@@ -204,6 +210,7 @@ const toolSettings = reactive({
   tool_workspace: '',
   effective_workspace: '',
   approval_mode: 'ask',
+  host_execution_enabled: false,
   is_default: true,
 })
 const activeSkill = ref({ active: false, command: '', arguments: '' })
@@ -276,7 +283,9 @@ const confirmDialog = reactive({
   src: '',
   dst: '',
   file_count: undefined,
-  dir_count: undefined
+  dir_count: undefined,
+  code: '',
+  securityWarning: '',
 })
 
 // 自动 TTS 开关
@@ -415,6 +424,7 @@ async function loadToolSettings() {
       tool_workspace: '',
       effective_workspace: '',
       approval_mode: 'ask',
+      host_execution_enabled: false,
       is_default: true,
     })
     toast.warning('工作目录设置加载失败')
@@ -443,6 +453,20 @@ async function updateApprovalMode(mode) {
   } catch (error) {
     toolSettings.approval_mode = previous
     toast.error(error.message || '审批模式保存失败')
+  }
+}
+
+async function updateHostExecution(enabled) {
+  const previous = toolSettings.host_execution_enabled
+  toolSettings.host_execution_enabled = enabled
+  try {
+    await updateToolSettings({ host_execution_enabled: enabled })
+    toast.warning(enabled
+      ? '主机执行已启用；每条命令仍需手动确认'
+      : '主机执行已关闭')
+  } catch (error) {
+    toolSettings.host_execution_enabled = previous
+    toast.error(error.message || '主机执行权限保存失败')
   }
 }
 
@@ -542,6 +566,8 @@ onMounted(() => {
       confirmDialog.dst = data.dst || ''
       confirmDialog.file_count = data.file_count
       confirmDialog.dir_count = data.dir_count
+      confirmDialog.code = data.code || data.data?.code || ''
+      confirmDialog.securityWarning = data.security_warning || data.data?.security_warning || ''
       confirmDialog.visible = true
     } else if (msg.type === 'skill_state') {
       activeSkill.value = msg.state || { active: false, command: '', arguments: '' }
@@ -1289,6 +1315,16 @@ setTimeout(loadToolExpanded, 100)
   line-height: 1.6;
   margin-bottom: 12px;
 }
+.confirm-warning {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  color: #fde68a;
+  background: rgba(245, 158, 11, 0.13);
+  border: 1px solid rgba(245, 158, 11, 0.32);
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+}
 .confirm-meta {
   display: flex;
   flex-direction: column;
@@ -1313,6 +1349,20 @@ setTimeout(loadToolExpanded, 100)
 }
 .confirm-count {
   color: #c5cfdd;
+}
+.confirm-code {
+  max-height: 240px;
+  margin: 4px 0 0;
+  padding: 10px;
+  overflow: auto;
+  color: #e5edf7;
+  background: #08111d;
+  border-radius: 5px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 .confirm-actions {
   display: flex;

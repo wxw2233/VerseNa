@@ -6,6 +6,7 @@ import subprocess
 import sys
 import threading
 import time
+import tempfile
 import uuid
 import re
 from pathlib import Path
@@ -19,11 +20,15 @@ MAX_OUTPUT_BYTES = 12_000
 OUTPUT_HEAD_BYTES = 5_500
 OUTPUT_TAIL_BYTES = 5_500
 MAX_TIMEOUT_SECONDS = 120
-SENSITIVE_ENV_PARTS = ("KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL")
+SENSITIVE_ENV_PARTS = (
+    "KEY", "TOKEN", "SECRET", "PASSWORD", "PASS", "CREDENTIAL", "AUTH",
+    "COOKIE", "SESSION", "PRIVATE", "SSH", "AWS", "AZURE", "GOOGLE",
+    "GITHUB", "NPM", "DOCKER", "KUBE", "PROXY",
+)
 BROAD_GIT_STAGE_PATTERN = re.compile(r"\bgit\s+add\s+(?:-A|--all|\.)(?:\s|$)", re.IGNORECASE)
 
 
-def _safe_environment() -> dict[str, str]:
+def _safe_environment(runtime_home: Path | None = None) -> dict[str, str]:
     environment = {}
     for key, value in os.environ.items():
         if any(part in key.upper() for part in SENSITIVE_ENV_PARTS):
@@ -31,6 +36,18 @@ def _safe_environment() -> dict[str, str]:
         environment[key] = value
     environment["PYTHONIOENCODING"] = "utf-8"
     environment["PYTHONUTF8"] = "1"
+    environment.pop("PYTHONPATH", None)
+    environment.pop("VIRTUAL_ENV", None)
+    if runtime_home is not None:
+        home = str(runtime_home)
+        environment.update({
+            "HOME": home,
+            "USERPROFILE": home,
+            "APPDATA": home,
+            "LOCALAPPDATA": home,
+            "TMP": home,
+            "TEMP": home,
+        })
     if os.name != "nt":
         environment["LC_ALL"] = "C.UTF-8"
         environment["LANG"] = "C.UTF-8"
@@ -69,71 +86,78 @@ def _terminate_process_tree(process: subprocess.Popen) -> None:
 
 def _run_process(command: list[str], cwd: Path, timeout: int, stop_event=None) -> dict:
     creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
-    process = subprocess.Popen(
-        command,
-        cwd=str(cwd),
-        env=_safe_environment(),
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        creationflags=creationflags,
-        start_new_session=os.name != "nt",
-    )
-    captured = bytearray()
-    tail = bytearray()
-    output_size = 0
+    runtime_home = Path(tempfile.mkdtemp(prefix="versena-exec-"))
+    process = None
+    try:
+        process = subprocess.Popen(
+            command,
+            cwd=str(cwd),
+            env=_safe_environment(runtime_home),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            creationflags=creationflags,
+            start_new_session=os.name != "nt",
+        )
+        captured = bytearray()
+        tail = bytearray()
+        output_size = 0
 
-    def drain_output():
-        nonlocal output_size
-        while True:
-            chunk = process.stdout.read(8192)
-            if not chunk:
+        def drain_output():
+            nonlocal output_size
+            while True:
+                chunk = process.stdout.read(8192)
+                if not chunk:
+                    break
+                output_size += len(chunk)
+                if len(captured) < MAX_OUTPUT_BYTES:
+                    captured.extend(chunk[:MAX_OUTPUT_BYTES - len(captured)])
+                tail.extend(chunk)
+                if len(tail) > OUTPUT_TAIL_BYTES:
+                    del tail[:-OUTPUT_TAIL_BYTES]
+
+        reader = threading.Thread(target=drain_output, daemon=True)
+        reader.start()
+        timed_out = False
+        cancelled = False
+        deadline = time.monotonic() + timeout
+        while process.poll() is None:
+            if stop_event is not None and stop_event.is_set():
+                cancelled = True
+                _terminate_process_tree(process)
                 break
-            output_size += len(chunk)
-            if len(captured) < MAX_OUTPUT_BYTES:
-                captured.extend(chunk[:MAX_OUTPUT_BYTES - len(captured)])
-            tail.extend(chunk)
-            if len(tail) > OUTPUT_TAIL_BYTES:
-                del tail[:-OUTPUT_TAIL_BYTES]
+            if time.monotonic() >= deadline:
+                timed_out = True
+                _terminate_process_tree(process)
+                break
+            time.sleep(0.05)
+        reader.join(timeout=5)
+        if reader.is_alive() and process.stdout:
+            process.stdout.close()
+            reader.join(timeout=1)
 
-    reader = threading.Thread(target=drain_output, daemon=True)
-    reader.start()
-    timed_out = False
-    cancelled = False
-    deadline = time.monotonic() + timeout
-    while process.poll() is None:
-        if stop_event is not None and stop_event.is_set():
-            cancelled = True
+        truncated = output_size > MAX_OUTPUT_BYTES
+        if truncated:
+            omitted = max(0, output_size - OUTPUT_HEAD_BYTES - len(tail))
+            marker = f"\n\n[输出已截断：中间省略 {omitted} 字节；以下为末尾内容]\n\n".encode("utf-8")
+            output_bytes = bytes(captured[:OUTPUT_HEAD_BYTES]) + marker + bytes(tail)
+        else:
+            output_bytes = bytes(captured)
+        output = _decode_output(output_bytes).rstrip()
+        return {
+            "returncode": process.returncode,
+            "output": output or "(无输出)",
+            "truncated": truncated,
+            "output_bytes": output_size,
+            "captured_head_bytes": min(output_size, OUTPUT_HEAD_BYTES),
+            "captured_tail_bytes": len(tail) if truncated else 0,
+            "timed_out": timed_out,
+            "cancelled": cancelled,
+        }
+    finally:
+        if process is not None and process.poll() is None:
             _terminate_process_tree(process)
-            break
-        if time.monotonic() >= deadline:
-            timed_out = True
-            _terminate_process_tree(process)
-            break
-        time.sleep(0.05)
-    reader.join(timeout=5)
-    if reader.is_alive() and process.stdout:
-        process.stdout.close()
-        reader.join(timeout=1)
-
-    truncated = output_size > MAX_OUTPUT_BYTES
-    if truncated:
-        omitted = max(0, output_size - OUTPUT_HEAD_BYTES - len(tail))
-        marker = f"\n\n[输出已截断：中间省略 {omitted} 字节；以下为末尾内容]\n\n".encode("utf-8")
-        output_bytes = bytes(captured[:OUTPUT_HEAD_BYTES]) + marker + bytes(tail)
-    else:
-        output_bytes = bytes(captured)
-    output = _decode_output(output_bytes).rstrip()
-    return {
-        "returncode": process.returncode,
-        "output": output or "(无输出)",
-        "truncated": truncated,
-        "output_bytes": output_size,
-        "captured_head_bytes": min(output_size, OUTPUT_HEAD_BYTES),
-        "captured_tail_bytes": len(tail) if truncated else 0,
-        "timed_out": timed_out,
-        "cancelled": cancelled,
-    }
+        shutil.rmtree(runtime_home, ignore_errors=True)
 
 
 class CodeExecTool(BaseTool):
@@ -180,6 +204,11 @@ class CodeExecTool(BaseTool):
             return tool_error("EMPTY_CODE", "没有提供要执行的代码")
         if not _context:
             return tool_error("MISSING_CONTEXT", "工具执行上下文不可用")
+        if not _context.host_execution_enabled:
+            return tool_error(
+                "HOST_EXECUTION_DISABLED",
+                "Host code execution is disabled. The user must enable it for this session.",
+            )
         if language == "shell" and BROAD_GIT_STAGE_PATTERN.search(code):
             return tool_error(
                 "BROAD_REPO_STAGE_BLOCKED",
@@ -198,7 +227,7 @@ class CodeExecTool(BaseTool):
         except (TypeError, ValueError):
             return tool_error("INVALID_TIMEOUT", "timeout 必须是整数")
 
-        if not _confirmed and not _context.trust_mode:
+        if not _confirmed:
             preview = code.replace("\n", " ")[:160]
             return tool_confirm(
                 str(uuid.uuid4()),
@@ -206,6 +235,11 @@ class CodeExecTool(BaseTool):
                 f"确认执行 {language}？\n{preview}",
                 language=language,
                 cwd=str(workdir),
+                code=code,
+                security_warning=(
+                    "该命令将以当前系统用户身份运行，可能访问工作区之外的数据。"
+                    "批准前请检查下方完整命令。"
+                ),
             )
 
         if language == "python":
