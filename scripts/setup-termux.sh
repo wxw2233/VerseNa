@@ -10,16 +10,17 @@ if ! command -v pkg >/dev/null 2>&1; then
 fi
 
 echo "Installing Termux runtime packages..."
-pkg install -y python git nodejs-lts
+pkg install -y python python-cryptography git nodejs-lts
 
-if [[ -x "$VENV_DIR/bin/python" ]]; then
-  if ! "$VENV_DIR/bin/python" -c 'import sys' >/dev/null 2>&1; then
-    echo "Recreating the virtual environment for the current Python version..."
-    python -m venv --clear "$VENV_DIR"
-  fi
+if [[ -x "$VENV_DIR/bin/python" ]] \
+  && "$VENV_DIR/bin/python" -c 'import sys, cryptography' >/dev/null 2>&1; then
+  :
+elif [[ -d "$VENV_DIR" ]]; then
+  echo "Recreating the virtual environment with Termux system packages..."
+  python -m venv --clear --system-site-packages "$VENV_DIR"
 else
   echo "Creating the VerseNa virtual environment..."
-  python -m venv "$VENV_DIR"
+  python -m venv --system-site-packages "$VENV_DIR"
 fi
 
 echo "Installing backend dependencies..."
@@ -29,7 +30,7 @@ echo "Installing backend dependencies..."
 echo "Verifying the backend runtime..."
 if ! (
   cd "$PROJECT_ROOT/backend"
-  "$VENV_DIR/bin/python" -c 'import main, pydantic; print(f"Backend runtime OK (Pydantic {pydantic.__version__})")'
+  "$VENV_DIR/bin/python" -c 'import cryptography, main, pydantic; print(f"Backend runtime OK (Pydantic {pydantic.__version__}, cryptography {cryptography.__version__})")'
 ); then
   echo "Backend verification failed; review the Python error above." >&2
   exit 1

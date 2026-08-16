@@ -24,7 +24,7 @@ powershell -ExecutionPolicy Bypass -File scripts/start-lan.ps1
 
 ```bash
 pkg update
-pkg install python git nodejs-lts
+pkg install python git nodejs-lts python-cryptography
 git clone https://github.com/wxw2233/VerseNa.git
 cd VerseNa
 bash scripts/setup-termux.sh

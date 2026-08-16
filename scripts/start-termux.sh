@@ -23,8 +23,8 @@ if [[ -z "$PYTHON_BIN" ]]; then
   exit 1
 fi
 
-if ! IMPORT_ERROR="$("$PYTHON_BIN" -c 'import fastapi, pydantic' 2>&1)"; then
-  echo "VerseNa requires compatible FastAPI and Pydantic packages." >&2
+if ! IMPORT_ERROR="$("$PYTHON_BIN" -c 'import cryptography, fastapi, pydantic' 2>&1)"; then
+  echo "VerseNa requires compatible FastAPI, Pydantic, and cryptography packages." >&2
   printf '%s\n' "$IMPORT_ERROR" >&2
   echo "Run: bash scripts/setup-termux.sh" >&2
   exit 1
