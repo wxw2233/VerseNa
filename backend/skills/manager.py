@@ -29,9 +29,13 @@ SLASH_INPUT_PATTERN = re.compile(
     r"^\s*/([A-Za-z0-9][A-Za-z0-9._:-]{0,127})(?:\s+([\s\S]*))?$"
 )
 RESERVED_SLASH_COMMANDS = {"skill"}
-MAX_COMMAND_CONTEXT_CHARS = 20000
+MAX_COMMAND_CONTEXT_CHARS = 12000
 MAX_SKILL_INDEX_CHARS = 7000
 MAX_SKILL_INDEX_DESCRIPTION_CHARS = 120
+MAX_ROOT_SKILL_CONTEXT_CHARS = 6000
+MAX_KNOWLEDGE_FILES = 3
+MAX_KNOWLEDGE_FILE_CHARS = 3000
+EXCLUDED_KNOWLEDGE_DIRECTORIES = {"docs", "tests", ".github", "examples"}
 
 BUILTIN_SKILLS = [
     {
@@ -128,9 +132,22 @@ class SkillManager:
 
         knowledge = data.get("knowledge") if isinstance(data.get("knowledge"), dict) else {}
         normalized_knowledge = {}
-        for name, content in list(knowledge.items())[:10]:
-            if isinstance(name, str) and isinstance(content, str):
-                normalized_knowledge[name[:160]] = content[:5000]
+        seen_content = set()
+        for name, content in knowledge.items():
+            if not isinstance(name, str) or not isinstance(content, str):
+                continue
+            relative_name = name.replace("\\", "/").strip("/")
+            parts = [part.casefold() for part in relative_name.split("/") if part]
+            if not relative_name or (parts and parts[0] in EXCLUDED_KNOWLEDGE_DIRECTORIES):
+                continue
+            normalized_content = content.strip()
+            content_key = normalized_content.casefold()
+            if not normalized_content or content_key in seen_content:
+                continue
+            seen_content.add(content_key)
+            normalized_knowledge[relative_name[:160]] = normalized_content[:MAX_KNOWLEDGE_FILE_CHARS]
+            if len(normalized_knowledge) >= MAX_KNOWLEDGE_FILES:
+                break
 
         normalized_commands = []
         raw_commands = data.get("commands")
@@ -340,7 +357,13 @@ class SkillManager:
             "arguments": (match.group(2) or "").strip(),
         }
 
-    def _render_skill_context(self, skill, max_chars):
+    def _child_commands(self, skill_id):
+        return [
+            command for command in self.list_commands()
+            if command["skill_id"] == skill_id and command["command"] != skill_id
+        ]
+
+    def _render_skill_context(self, skill, max_chars, include_knowledge=True):
         sections = [
             f"# {skill['name']}",
             skill.get("description", ""),
@@ -348,10 +371,21 @@ class SkillManager:
             skill.get("system_prompt", ""),
         ]
         knowledge = skill.get("knowledge") or {}
-        if knowledge:
+        if include_knowledge and knowledge:
             sections.append("## 知识库")
             for name, content in knowledge.items():
                 sections.append(f"### {name}\n{content}")
+        return "\n\n".join(part for part in sections if part).strip()[:max_chars]
+
+    def _render_skill_package_context(self, skill, commands, max_chars):
+        names = ", ".join(f"`/{command['command']}`" for command in commands)
+        sections = [
+            f"# {skill['name']}",
+            skill.get("description", ""),
+            "## 技能包导航",
+            "这是一个包含多个子指令的技能包。不要加载整个仓库文档；应根据用户目标直接使用对应的斜杠指令或调用 load_skill(子指令名)。",
+            f"可用子指令：{names}",
+        ]
         return "\n\n".join(part for part in sections if part).strip()[:max_chars]
 
     def get_command_context(self, command_name, max_chars=MAX_COMMAND_CONTEXT_CHARS):
@@ -359,7 +393,11 @@ class SkillManager:
         if not command:
             raise ValueError(f"斜杠指令 '{command_name}' 不存在")
         if command.get("kind") == "skill":
-            return self._render_skill_context(self._cache[command["skill_id"]], max_chars)
+            skill = self._cache[command["skill_id"]]
+            children = self._child_commands(command["skill_id"])
+            if children:
+                return self._render_skill_package_context(skill, children, max_chars)
+            return self._render_skill_context(skill, max_chars)
         sections = [
             f"# /{command['command']}",
             f"来源技能：{command['skill_name']}",
@@ -430,7 +468,13 @@ class SkillManager:
     def get_skill_context(self, skill_id, max_chars=12000):
         skill = self.get_skill(skill_id)
         if skill:
-            return self._render_skill_context(skill, max_chars)
+            children = self._child_commands(skill_id)
+            if children:
+                return self._render_skill_package_context(skill, children, max_chars)
+            return self._render_skill_context(
+                skill,
+                min(max_chars, MAX_ROOT_SKILL_CONTEXT_CHARS),
+            )
         command = self.get_command(skill_id)
         if command:
             return self.get_command_context(skill_id, max_chars=max_chars)
@@ -599,6 +643,7 @@ class SkillManager:
 
     def _scan_knowledge(self, skill_dir):
         knowledge = {}
+        seen_paths = set()
         priority_files = (
             "README.md", "readme.md", "USAGE.md", "usage.md", "GUIDE.md", "guide.md",
             "DOCS.md", "docs.md", "INSTRUCTIONS.md", "instructions.md", "prompt.md",
@@ -606,19 +651,14 @@ class SkillManager:
         )
         for name in priority_files:
             path = skill_dir / name
-            if path.is_file():
+            resolved = path.resolve()
+            if path.is_file() and resolved not in seen_paths:
+                seen_paths.add(resolved)
                 content = self._read_text(path)
                 if content:
-                    knowledge[name] = content
-
-        docs_dir = skill_dir / "docs"
-        if docs_dir.is_dir():
-            for path in sorted(docs_dir.glob("*.md")):
-                if len(knowledge) >= 10:
-                    break
-                content = self._read_text(path)
-                if content:
-                    knowledge[f"docs/{path.name}"] = content
+                    knowledge[name] = content[:MAX_KNOWLEDGE_FILE_CHARS]
+            if len(knowledge) >= MAX_KNOWLEDGE_FILES:
+                break
         return knowledge
 
     def delete_skill(self, skill_id):

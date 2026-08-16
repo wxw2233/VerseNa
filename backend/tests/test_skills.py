@@ -107,6 +107,59 @@ def test_skill_index_description_ends_at_a_boundary(manager):
     assert "composable s" not in prompt
 
 
+def test_skill_context_deduplicates_and_filters_distribution_documents(manager):
+    write_skill(
+        manager.custom_dir / "lean-skill",
+        id="lean-skill",
+        knowledge={
+            "README.md": "shared knowledge",
+            "readme.md": "shared knowledge",
+            "GUIDE.md": "task guidance",
+            "docs/porting.md": "unrelated distribution guide",
+        },
+    )
+    manager.reload()
+
+    context = manager.get_skill_context("lean-skill")
+
+    assert context.count("shared knowledge") == 1
+    assert "task guidance" in context
+    assert "unrelated distribution guide" not in context
+
+
+def test_skill_knowledge_scan_excludes_docs_and_case_duplicate_readmes(manager):
+    skill_dir = manager.installed_dir / "scan-skill"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "README.md").write_text("root guidance", encoding="utf-8")
+    (skill_dir / "docs").mkdir()
+    (skill_dir / "docs" / "porting.md").write_text("distribution only", encoding="utf-8")
+
+    knowledge = manager._scan_knowledge(skill_dir)
+
+    assert list(knowledge) == ["README.md"]
+    assert knowledge["README.md"] == "root guidance"
+
+
+def test_skill_package_root_loads_navigation_not_full_knowledge(manager):
+    skill_dir = manager.installed_dir / "command-package"
+    write_skill(
+        skill_dir,
+        id="command-package",
+        knowledge={"README.md": "large package documentation"},
+    )
+    write_skill_command(skill_dir, name="brainstorming")
+    write_skill_command(skill_dir, name="reviewing")
+    manager.reload()
+
+    root_context = manager.get_skill_context("command-package")
+    command_context = manager.get_skill_context("brainstorming")
+
+    assert "技能包导航" in root_context
+    assert "`/brainstorming`" in root_context
+    assert "large package documentation" not in root_context
+    assert "Follow this slash command exactly." in command_context
+
+
 def test_custom_skill_loads_full_context(tmp_path):
     custom_dir = tmp_path / "custom"
     write_skill(custom_dir / "directory-name", id="custom-id")
