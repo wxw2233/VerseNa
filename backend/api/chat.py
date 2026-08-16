@@ -536,10 +536,6 @@ async def websocket_chat(ws: WebSocket):
             approval_mode = session_meta.get("approval_mode", "ask")
             if approval_mode not in {"ask", "auto"}:
                 approval_mode = "ask"
-            host_execution_enabled = bool(
-                session_meta.get("host_execution_enabled", False)
-            )
-
             from skills.manager import skill_manager
             invoked_skill_command = skill_manager.resolve_slash_command(content)
             if invoked_skill_command:
@@ -587,17 +583,8 @@ async def websocket_chat(ws: WebSocket):
                 active_arguments=session_meta.get("active_skill_arguments", ""),
             )
 
-            execution_tools = set() if host_execution_enabled else {
-                "code_exec", "verification_exec"
-            }
-            available_tools = tool_registry.get_tools(
-                role="main",
-                exclude_names=execution_tools,
-            )
-            tool_desc = tool_registry.format_tool_descriptions(
-                role="main",
-                exclude_names=execution_tools,
-            )
+            available_tools = tool_registry.get_tools(role="main")
+            tool_desc = tool_registry.format_tool_descriptions(role="main")
             system_prompt += f"""\n\n## 可用工具
 你有以下工具可以调用：
 {tool_desc}
@@ -690,7 +677,6 @@ async def websocket_chat(ws: WebSocket):
             agent_config["reasoning_enabled"] = reasoning_enabled
             agent_config["tool_workspace"] = str(tool_workspace)
             agent_config["approval_mode"] = approval_mode
-            agent_config["host_execution_enabled"] = host_execution_enabled
 
             # 主题包角色的 temperature/top_p 覆盖全局配置
             try:

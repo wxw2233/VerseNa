@@ -123,7 +123,6 @@ class Database:
                 theme_pack_id TEXT DEFAULT 'default_pack',
                 tool_workspace TEXT DEFAULT '',
                 approval_mode TEXT DEFAULT 'ask',
-                host_execution_enabled INTEGER DEFAULT 0,
                 active_skill_command TEXT DEFAULT '',
                 active_skill_arguments TEXT DEFAULT '',
                 task_checkpoint TEXT DEFAULT '{}'
@@ -138,10 +137,6 @@ class Database:
         if "approval_mode" not in session_column_names:
             await self._db.execute(
                 "ALTER TABLE session_metadata ADD COLUMN approval_mode TEXT DEFAULT 'ask'"
-            )
-        if "host_execution_enabled" not in session_column_names:
-            await self._db.execute(
-                "ALTER TABLE session_metadata ADD COLUMN host_execution_enabled INTEGER DEFAULT 0"
             )
         if "active_skill_command" not in session_column_names:
             await self._db.execute(
@@ -215,7 +210,7 @@ class Database:
     async def get_session_meta(self, session_id):
         cursor = await self._db.execute(
             "SELECT session_id, name, theme_pack_id, tool_workspace, approval_mode, "
-            "host_execution_enabled, active_skill_command, active_skill_arguments, task_checkpoint "
+            "active_skill_command, active_skill_arguments, task_checkpoint "
             "FROM session_metadata WHERE session_id = ?",
             (session_id,)
         )
@@ -227,10 +222,9 @@ class Database:
                 "theme_pack_id": row[2],
                 "tool_workspace": row[3] or "",
                 "approval_mode": row[4] if row[4] in {"ask", "auto"} else "ask",
-                "host_execution_enabled": bool(row[5]),
-                "active_skill_command": row[6] or "",
-                "active_skill_arguments": row[7] or "",
-                "task_checkpoint": row[8] or "{}",
+                "active_skill_command": row[5] or "",
+                "active_skill_arguments": row[6] or "",
+                "task_checkpoint": row[7] or "{}",
             }
         return {
             "session_id": session_id,
@@ -238,7 +232,6 @@ class Database:
             "theme_pack_id": "default_pack",
             "tool_workspace": "",
             "approval_mode": "ask",
-            "host_execution_enabled": False,
             "active_skill_command": "",
             "active_skill_arguments": "",
             "task_checkpoint": "{}",
@@ -251,7 +244,6 @@ class Database:
         theme_pack_id=None,
         tool_workspace=None,
         approval_mode=None,
-        host_execution_enabled=None,
         active_skill_command=None,
         active_skill_arguments=None,
         task_checkpoint=None,
@@ -265,8 +257,6 @@ class Database:
             meta["tool_workspace"] = tool_workspace
         if approval_mode is not None:
             meta["approval_mode"] = approval_mode
-        if host_execution_enabled is not None:
-            meta["host_execution_enabled"] = bool(host_execution_enabled)
         if active_skill_command is not None:
             meta["active_skill_command"] = active_skill_command
         if active_skill_arguments is not None:
@@ -276,15 +266,14 @@ class Database:
         await self._db.execute(
             "INSERT OR REPLACE INTO session_metadata "
             "(session_id, name, theme_pack_id, tool_workspace, approval_mode, "
-            "host_execution_enabled, active_skill_command, active_skill_arguments, task_checkpoint) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "active_skill_command, active_skill_arguments, task_checkpoint) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 session_id,
                 meta["name"],
                 meta["theme_pack_id"],
                 meta["tool_workspace"],
                 meta["approval_mode"],
-                int(meta["host_execution_enabled"]),
                 meta["active_skill_command"],
                 meta["active_skill_arguments"],
                 meta["task_checkpoint"],

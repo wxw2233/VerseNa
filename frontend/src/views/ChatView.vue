@@ -115,10 +115,8 @@
         :is-stopping="store.isStopping"
         :connected="connected"
         :approval-mode="toolSettings.approval_mode"
-        :host-execution-enabled="toolSettings.host_execution_enabled"
         :active-skill="activeSkill"
         @update:approval-mode="updateApprovalMode"
-        @update:host-execution-enabled="updateHostExecution"
         @clear-active-skill="clearActiveSkill"
         @toggle-tts="autoTTS = !autoTTS; localStorage.setItem('auto-tts', autoTTS)"
       />
@@ -210,7 +208,6 @@ const toolSettings = reactive({
   tool_workspace: '',
   effective_workspace: '',
   approval_mode: 'ask',
-  host_execution_enabled: false,
   is_default: true,
 })
 const activeSkill = ref({ active: false, command: '', arguments: '' })
@@ -424,7 +421,6 @@ async function loadToolSettings() {
       tool_workspace: '',
       effective_workspace: '',
       approval_mode: 'ask',
-      host_execution_enabled: false,
       is_default: true,
     })
     toast.warning('工作目录设置加载失败')
@@ -453,20 +449,6 @@ async function updateApprovalMode(mode) {
   } catch (error) {
     toolSettings.approval_mode = previous
     toast.error(error.message || '审批模式保存失败')
-  }
-}
-
-async function updateHostExecution(enabled) {
-  const previous = toolSettings.host_execution_enabled
-  toolSettings.host_execution_enabled = enabled
-  try {
-    await updateToolSettings({ host_execution_enabled: enabled })
-    toast.warning(enabled
-      ? '主机执行已启用；每条命令仍需手动确认'
-      : '主机执行已关闭')
-  } catch (error) {
-    toolSettings.host_execution_enabled = previous
-    toast.error(error.message || '主机执行权限保存失败')
   }
 }
 

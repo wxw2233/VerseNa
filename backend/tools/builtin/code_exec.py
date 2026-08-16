@@ -204,11 +204,6 @@ class CodeExecTool(BaseTool):
             return tool_error("EMPTY_CODE", "没有提供要执行的代码")
         if not _context:
             return tool_error("MISSING_CONTEXT", "工具执行上下文不可用")
-        if not _context.host_execution_enabled:
-            return tool_error(
-                "HOST_EXECUTION_DISABLED",
-                "Host code execution is disabled. The user must enable it for this session.",
-            )
         if language == "shell" and BROAD_GIT_STAGE_PATTERN.search(code):
             return tool_error(
                 "BROAD_REPO_STAGE_BLOCKED",
@@ -227,7 +222,7 @@ class CodeExecTool(BaseTool):
         except (TypeError, ValueError):
             return tool_error("INVALID_TIMEOUT", "timeout 必须是整数")
 
-        if not _confirmed:
+        if not _confirmed and not _context.trust_mode:
             preview = code.replace("\n", " ")[:160]
             return tool_confirm(
                 str(uuid.uuid4()),

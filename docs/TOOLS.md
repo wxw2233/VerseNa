@@ -24,9 +24,8 @@ Relative paths supplied to `file_manager` and the `cwd` supplied to `code_exec` 
 
 ## Confirmation Rules
 
-- Host execution is disabled by default for every session. Enable it explicitly from the approval menu before `code_exec` or verifier process tools are exposed to the Agent.
-- `code_exec` always requires explicit confirmation in the active browser session.
-- Automatic approval applies only to workspace-scoped `file_manager` actions. It never bypasses `code_exec` confirmation.
+- `code_exec` requires explicit confirmation unless automatic approval is enabled for the session.
+- Automatic approval applies to workspace-scoped file actions and command execution.
 - Confirmation is internal state. Tool arguments supplied by the model cannot mark an operation as confirmed.
 - Local execution and file tools are not exposed through the QQ channel.
 
