@@ -54,8 +54,25 @@ def test_builtin_skills_are_discoverable(manager):
 
     assert diagnostics["status"] == "ok"
     assert diagnostics["counts"]["builtin"] == 5
-    assert "load_skill(skill_id)" in manager.get_skill_prompt()
+    assert "调用 load_skill(skill_id)" in manager.get_skill_prompt()
     assert "`translator`" in manager.get_skill_prompt()
+
+
+def test_skill_prompt_uses_a_single_bounded_route_index(manager):
+    for index in range(80):
+        write_skill(
+            manager.custom_dir / f"skill-{index}",
+            id=f"skill-{index}",
+            description="x" * 400,
+        )
+    manager.reload()
+
+    prompt = manager.get_skill_prompt(max_chars=900)
+
+    assert "## 技能索引" in prompt
+    assert "## 可用技能指令" not in prompt
+    assert len(prompt) <= 900
+    assert "未注入当前上下文" in prompt
 
 
 def test_custom_skill_loads_full_context(tmp_path):

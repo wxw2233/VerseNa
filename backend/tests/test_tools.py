@@ -63,6 +63,14 @@ def test_tool_descriptions_are_grouped_for_agent_prompt(registry):
     assert "- list_memory:" in descriptions
 
 
+def test_tool_index_is_compact_and_keeps_tool_names(registry):
+    index = registry.format_tool_index(role="main")
+
+    assert "`file_manager`" in index
+    assert "`code_exec`" in index
+    assert "- file_manager:" not in index
+
+
 @pytest.mark.asyncio
 async def test_delegate_task_requires_model_context(registry, tool_context):
     result = json.loads(await registry.execute(

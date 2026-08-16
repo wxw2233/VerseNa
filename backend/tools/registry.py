@@ -114,6 +114,23 @@ class ToolRegistry:
                 sections.append(f"### {TOOL_GROUP_LABELS[group]}\n" + "\n".join(grouped[group]))
         return "\n\n".join(sections)
 
+    def format_tool_index(
+        self,
+        role: str | None = None,
+        *,
+        exclude_names: set[str] | None = None,
+    ) -> str:
+        """Return a compact prompt index; detailed descriptions stay in tool schemas."""
+        grouped = {}
+        for tool in self.get_tools(role=role, exclude_names=exclude_names):
+            name = tool["function"]["name"]
+            group = self.get_tool_metadata(name)["group"]
+            grouped.setdefault(group, []).append(f"`{name}`")
+        return "\n".join(
+            f"- {TOOL_GROUP_LABELS[group]}: {', '.join(names)}"
+            for group, names in grouped.items()
+        )
+
     def create_context(
         self,
         session_id: str,

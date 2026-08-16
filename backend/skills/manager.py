@@ -30,6 +30,8 @@ SLASH_INPUT_PATTERN = re.compile(
 )
 RESERVED_SLASH_COMMANDS = {"skill"}
 MAX_COMMAND_CONTEXT_CHARS = 20000
+MAX_SKILL_INDEX_CHARS = 7000
+MAX_SKILL_INDEX_DESCRIPTION_CHARS = 120
 
 BUILTIN_SKILLS = [
     {
@@ -370,35 +372,39 @@ class SkillManager:
     def get_skill(self, skill_id):
         return self._cache.get(skill_id)
 
-    def get_skill_prompt(self):
+    def get_skill_prompt(self, max_chars=MAX_SKILL_INDEX_CHARS):
         if not self._cache:
             return ""
         lines = [
-            "## 可用技能",
-            "根据用户需求判断是否需要技能。需要时必须先调用 load_skill(skill_id) 读取完整技能指令，再按返回内容执行。",
+            "## 技能索引",
+            "用户输入 `/指令` 时直接使用对应路由。自然语言仅在唯一且高度匹配时才主动加载；需要时调用 load_skill(skill_id) 读取完整指令。",
             "不要声称已使用尚未加载的技能。",
-            "不要为了决定技能而逐个枚举或比较候选项；明确匹配时加载一次，不匹配时直接处理用户请求。",
+            "不要逐个枚举或比较候选技能；不明确时直接处理用户请求。",
             "",
         ]
+        entries = []
         for skill in self._cache.values():
-            lines.append(
-                f"- `{skill['id']}`：{skill['name']} - {skill['description']}"
+            description = str(skill.get("description") or "").strip()
+            entries.append(
+                f"- `{skill['id']}`: {skill['name']}"
+                + (f" - {description[:MAX_SKILL_INDEX_DESCRIPTION_CHARS]}" if description else "")
+            )
+        for command in self.list_commands():
+            if command["command"] == command["skill_id"]:
+                continue
+            description = str(command.get("description") or "").strip()
+            entries.append(
+                f"- `/{command['command']}` -> `{command['skill_id']}`"
+                + (f": {description[:MAX_SKILL_INDEX_DESCRIPTION_CHARS]}" if description else "")
             )
 
-        commands = [
-            command for command in self.list_commands()
-            if command["command"] != command["skill_id"]
-        ]
-        if commands:
-            lines.extend([
-                "",
-                "## 可用技能指令",
-                "用户可直接输入斜杠指令。自然语言需求明显符合某条指令时，也应主动调用 load_skill，skill_id 使用下列指令名。",
-            ])
-            for command in commands:
-                lines.append(
-                    f"- `/{command['command']}`：{command['description']}（来源：{command['skill_name']}）"
-                )
+        limit = max(500, int(max_chars or MAX_SKILL_INDEX_CHARS))
+        for index, entry in enumerate(entries):
+            if len("\n".join(lines + [entry])) > limit:
+                remaining = len(entries) - index
+                lines.append(f"- 其余 {remaining} 条技能路由未注入当前上下文，可在斜杠菜单中查看。")
+                break
+            lines.append(entry)
         return "\n".join(lines)
 
     def get_skill_context(self, skill_id, max_chars=12000):
