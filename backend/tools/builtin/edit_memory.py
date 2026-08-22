@@ -1,8 +1,10 @@
 from pathlib import Path
+import inspect
 
 from tools.base import BaseTool, ToolContext
 from tools.results import tool_error, tool_result
 from db.database import db
+from agent.task_state import workspace_id
 
 
 class EditMemoryTool(BaseTool):
@@ -26,10 +28,31 @@ class EditMemoryTool(BaseTool):
                 "enum": ["global", "workspace"],
                 "description": "Change visibility scope.",
             },
+            "auto_apply": {
+                "type": "boolean",
+                "description": "Whether the memory may be used automatically.",
+            },
         },
         "required": ["memory_id"],
         "additionalProperties": False,
     }
+
+    @staticmethod
+    def _supported_kwargs(function, values):
+        """Adapt optional governance fields without retrying a failed write."""
+        try:
+            signature = inspect.signature(function)
+        except (TypeError, ValueError):
+            return dict(values)
+        if any(
+            parameter.kind == inspect.Parameter.VAR_KEYWORD
+            for parameter in signature.parameters.values()
+        ):
+            return dict(values)
+        return {
+            key: value for key, value in values.items()
+            if key in signature.parameters
+        }
 
     async def execute(
         self,
@@ -37,6 +60,7 @@ class EditMemoryTool(BaseTool):
         content: str | None = None,
         category: str | None = None,
         scope: str | None = None,
+        auto_apply: bool | None = None,
         _context: ToolContext | None = None,
         **kwargs,
     ) -> str:
@@ -54,27 +78,38 @@ class EditMemoryTool(BaseTool):
             return tool_error("INVALID_SCOPE", "scope must be global or workspace.")
         if category is not None and category not in {"preference", "fact", "instruction", "general"}:
             return tool_error("INVALID_CATEGORY", "Unsupported memory category.")
-        if content is None and category is None and scope is None:
-            return tool_error("NO_CHANGES", "Provide content, category, or scope to edit.")
+        if content is None and category is None and scope is None and auto_apply is None:
+            return tool_error("NO_CHANGES", "Provide content, category, scope, or auto_apply to edit.")
 
         workspace_path = str(Path(_context.workspace).resolve())
-        visible = await db.get_memory(memory_id, workspace_path=workspace_path)
+        current_project_id = workspace_id(workspace_path)
+        visibility_kwargs = self._supported_kwargs(
+            db.get_memory,
+            {
+                "workspace_path": workspace_path,
+                "project_id": current_project_id,
+            },
+        )
+        visible = await db.get_memory(memory_id, **visibility_kwargs)
         if not visible:
             return tool_error(
                 "MEMORY_NOT_FOUND",
                 f"No visible memory found for memory_id={memory_id}.",
                 data={"memory_id": memory_id},
             )
-        updated = await db.update_memory(
-            memory_id,
-            content=str(content).strip() if content is not None else None,
-            category=category,
-            scope=scope,
-            workspace_path=workspace_path,
-        )
+        update_kwargs = {
+            "content": str(content).strip() if content is not None else None,
+            "category": category,
+            "scope": scope,
+            "workspace_path": workspace_path,
+        }
+        if auto_apply is not None:
+            update_kwargs["auto_apply"] = auto_apply
+        update_kwargs = self._supported_kwargs(db.update_memory, update_kwargs)
+        updated = await db.update_memory(memory_id, **update_kwargs)
         if not updated:
             return tool_error("MEMORY_NOT_FOUND", f"No visible memory found for memory_id={memory_id}.")
-        result = await db.get_memory(memory_id, workspace_path=workspace_path)
+        result = await db.get_memory(memory_id, **visibility_kwargs)
         return tool_result(True, data={"memory_id": memory_id, "memory": result})
 
 

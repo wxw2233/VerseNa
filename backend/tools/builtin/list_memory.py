@@ -1,6 +1,8 @@
 from tools.base import BaseTool, ToolContext
 from tools.results import tool_error, tool_result
+from agent.task_state import workspace_id
 from db.database import db
+import inspect
 
 
 class ListMemoryTool(BaseTool):
@@ -28,6 +30,23 @@ class ListMemoryTool(BaseTool):
         "additionalProperties": False,
     }
 
+    @staticmethod
+    def _supported_kwargs(function, values):
+        """Adapt old database adapters without retrying a failed read."""
+        try:
+            signature = inspect.signature(function)
+        except (TypeError, ValueError):
+            return dict(values)
+        if any(
+            parameter.kind == inspect.Parameter.VAR_KEYWORD
+            for parameter in signature.parameters.values()
+        ):
+            return dict(values)
+        return {
+            key: value for key, value in values.items()
+            if key in signature.parameters
+        }
+
     async def execute(
         self,
         category: str | None = None,
@@ -41,10 +60,17 @@ class ListMemoryTool(BaseTool):
             limit = max(1, min(int(limit), 100))
         except (TypeError, ValueError):
             return tool_error("INVALID_LIMIT", "limit must be an integer between 1 and 100.")
+        workspace_path = str(_context.workspace.resolve())
         memories = await db.get_memories(
-            limit=limit,
-            category=category,
-            workspace_path=str(_context.workspace.resolve()),
+            **self._supported_kwargs(
+                db.get_memories,
+                {
+                    "limit": limit,
+                    "category": category,
+                    "workspace_path": workspace_path,
+                    "project_id": workspace_id(_context.workspace),
+                },
+            ),
         )
         return tool_result(True, data={"memories": memories, "count": len(memories)})
 

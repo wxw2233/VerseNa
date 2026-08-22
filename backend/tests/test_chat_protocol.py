@@ -49,6 +49,38 @@ def test_reasoning_segments_are_compacted_for_persistence():
 
 
 @pytest.mark.asyncio
+async def test_generation_stream_survives_reconnect_and_accepts_stop():
+    from api.chat import GenerationStreamManager
+
+    class Socket:
+        def __init__(self):
+            self.sent = []
+
+        async def send_text(self, payload):
+            self.sent.append(payload)
+
+    manager = GenerationStreamManager()
+    stop_event = asyncio.Event()
+    first_socket = Socket()
+    second_socket = Socket()
+
+    manager.register("session", "generation", stop_event)
+    resumed = manager.attach("session", "generation", first_socket)
+    assert resumed == ([], False, False)
+
+    assert await manager.emit("generation", {"type": "segment", "generation_id": "generation"})
+    manager.detach("generation", first_socket)
+    assert await manager.emit("generation", {"type": "done", "generation_id": "generation"})
+
+    events, truncated, finished = manager.attach("session", "generation", second_socket, 1)
+    assert [event["type"] for event in events] == ["done"]
+    assert truncated is False
+    assert finished is False
+    assert manager.stop("session", "generation") is True
+    assert stop_event.is_set()
+
+
+@pytest.mark.asyncio
 async def test_client_message_id_is_unique(tmp_path):
     database = Database(tmp_path / "idempotency.db")
     await database.connect()

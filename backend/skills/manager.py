@@ -36,6 +36,22 @@ MAX_ROOT_SKILL_CONTEXT_CHARS = 6000
 MAX_KNOWLEDGE_FILES = 3
 MAX_KNOWLEDGE_FILE_CHARS = 3000
 EXCLUDED_KNOWLEDGE_DIRECTORIES = {"docs", "tests", ".github", "examples"}
+KNOWLEDGE_BASENAMES = {
+    "readme.md", "readme.rst", "readme.txt", "readme",
+    "usage.md", "guide.md", "instructions.md", "prompt.md",
+    "system.md", "context.md",
+}
+COMMAND_HINTS = {
+    "brainstorming": "脑暴 头脑风暴 需求探索 澄清想法",
+    "writing-plans": "制定计划 实施计划 任务计划",
+    "executing-plans": "执行计划 实施方案",
+    "systematic-debugging": "系统调试 排查问题 根因分析",
+    "test-driven-development": "测试驱动 TDD 先写测试",
+    "verification-before-completion": "完成前验证 验收 检查结果",
+    "requesting-code-review": "请求代码审查 review",
+    "receiving-code-review": "处理代码审查意见",
+    "subagent-driven-development": "子代理驱动开发 委派实现",
+}
 
 BUILTIN_SKILLS = [
     {
@@ -140,9 +156,19 @@ class SkillManager:
             parts = [part.casefold() for part in relative_name.split("/") if part]
             if not relative_name or (parts and parts[0] in EXCLUDED_KNOWLEDGE_DIRECTORIES):
                 continue
+            basename = Path(relative_name).name.casefold()
+            if basename not in KNOWLEDGE_BASENAMES:
+                continue
+            # Treat README.md/readme.md and equivalent casing as one logical
+            # document. This fixes repositories that were scanned on a
+            # case-sensitive filesystem and then loaded twice on Windows.
+            if basename.startswith("readme"):
+                relative_name = "README.md"
+            elif basename in {"usage.md", "guide.md", "instructions.md", "prompt.md", "system.md", "context.md"}:
+                relative_name = basename
             normalized_content = content.strip()
             content_key = normalized_content.casefold()
-            if not normalized_content or content_key in seen_content:
+            if not normalized_content or content_key in seen_content or relative_name in normalized_knowledge:
                 continue
             seen_content.add(content_key)
             normalized_knowledge[relative_name[:160]] = normalized_content[:MAX_KNOWLEDGE_FILE_CHARS]
@@ -172,6 +198,22 @@ class SkillManager:
                     "prompt": str(item.get("prompt") or "")[:MAX_COMMAND_CONTEXT_CHARS],
                 })
 
+        def metadata_list(*keys, limit=12, item_limit=300):
+            values = []
+            for key in keys:
+                raw = data.get(key)
+                if isinstance(raw, str):
+                    raw = [raw]
+                if not isinstance(raw, (list, tuple)):
+                    continue
+                for item in raw:
+                    value = str(item or "").strip()[:item_limit]
+                    if value and value not in values:
+                        values.append(value)
+                    if len(values) >= limit:
+                        return values
+            return values
+
         return {
             "id": skill_id,
             "name": str(data.get("name") or skill_id)[:120],
@@ -182,10 +224,19 @@ class SkillManager:
             "github_url": str(data.get("github_url") or "")[:500],
             "knowledge": normalized_knowledge,
             "commands": normalized_commands,
+            "applies_when": metadata_list("applies_when", "when_to_use", "triggers"),
+            "not_applicable_when": metadata_list("not_applicable_when", "when_not_to_use", "excludes"),
+            "requires_load": bool(data.get("requires_load", True)),
+            "output_constraints": metadata_list("output_constraints", "output_requirements"),
+            "tool_permissions": metadata_list("tool_permissions", "allowed_tools"),
         }
 
     def list_skills(self):
-        fields = ("id", "name", "icon", "description", "source", "github_url")
+        fields = (
+            "id", "name", "icon", "description", "source", "github_url",
+            "applies_when", "not_applicable_when", "requires_load",
+            "output_constraints", "tool_permissions",
+        )
         return [{field: skill.get(field, "") for field in fields} for skill in self._cache.values()]
 
     @staticmethod
@@ -236,6 +287,7 @@ class SkillManager:
         context,
         *,
         kind="command",
+        routing_description="",
     ):
         name = self._normalize_command_name(name)
         if not name:
@@ -266,6 +318,7 @@ class SkillManager:
             "source": skill.get("source", "installed"),
             "aliases": aliases,
             "context": str(context or "")[:MAX_COMMAND_CONTEXT_CHARS],
+            "routing_description": str(routing_description or "")[:500],
             "kind": kind,
         }
         self._commands[command_name] = command
@@ -280,6 +333,7 @@ class SkillManager:
             skill.get("description", ""),
             "",
             kind="skill",
+            routing_description=skill.get("description", ""),
         )
 
     def _command_document(self, path):
@@ -308,10 +362,17 @@ class SkillManager:
                 metadata, file_context = self._command_document(path)
                 seen_paths.add(path)
                 name = name or metadata.get("name") or path.parent.name
-                description = description or metadata.get("description", "")
+                routing_description = description or metadata.get("description", "")
+                description = routing_description
                 context = context or file_context
             if context:
-                self._register_command(skill_id, name, description, context)
+                self._register_command(
+                    skill_id,
+                    name,
+                    description,
+                    context,
+                    routing_description=routing_description if relative_path else description,
+                )
 
         patterns = (
             "skills/*/SKILL.md",
@@ -331,8 +392,15 @@ class SkillManager:
                     continue
                 default_name = path.parent.name if path.name.lower() == "skill.md" else path.stem
                 name = metadata.get("name") or default_name
-                description = metadata.get("description") or self._extract_description(context)
-                self._register_command(skill_id, name, description, context)
+                routing_description = metadata.get("description", "")
+                description = routing_description or self._extract_description(context)
+                self._register_command(
+                    skill_id,
+                    name,
+                    description,
+                    context,
+                    routing_description=routing_description,
+                )
 
     def list_commands(self):
         return [
@@ -357,6 +425,84 @@ class SkillManager:
             "arguments": (match.group(2) or "").strip(),
         }
 
+    def match_natural_language(self, content, *, limit=3):
+        """Return high-signal skill routes without injecting full skill text.
+
+        Matching is intentionally a hinting layer. The caller may auto-load a
+        single strong match; ambiguous matches are returned for the model to
+        resolve rather than turning the whole skill catalog into prompt text.
+        """
+        text = " ".join(str(content or "").lower().split())
+        if not text:
+            return []
+        candidates = []
+        for raw_command in self._commands.values():
+            command = self._public_command(raw_command)
+            skill = self._cache.get(command.get("skill_id"), {})
+            if command.get("command") == command.get("skill_id") and self._child_commands(command.get("skill_id")):
+                # A package entry is only a route when the user names its
+                # methodology, not for every generic coding request.
+                corpus = " ".join([
+                    str(skill.get("name") or ""),
+                    str(skill.get("description") or ""),
+                    " ".join(skill.get("applies_when") or []),
+                ]).lower()
+            else:
+                corpus = " ".join([
+                    str(command.get("command") or ""),
+                    str(raw_command.get("routing_description") or ""),
+                    " ".join(skill.get("applies_when") or []),
+                ]).lower()
+            hint_text = COMMAND_HINTS.get(command.get("command", ""), "").lower()
+            hint_words = list(dict.fromkeys(
+                re.findall(r"[a-z0-9_./-]{3,}|[\u4e00-\u9fff]{2,}", hint_text)
+            ))
+            score = 0
+            hits = []
+            for phrase in hint_words:
+                if phrase in text:
+                    score += 6
+                    hits.append(phrase)
+            words = [word for word in re.findall(r"[a-z0-9_./-]{3,}|[\u4e00-\u9fff]{2,}", corpus)]
+            for word in dict.fromkeys(words):
+                if word in text:
+                    weight = 2 if len(word) >= 5 or re.search(r"[\u4e00-\u9fff]", word) else 1
+                    score += weight
+                    hits.append(word)
+                elif re.search(r"[\u4e00-\u9fff]", word):
+                    fragments = {
+                        word[index:index + 2]
+                        for index in range(max(0, len(word) - 1))
+                    }
+                    fragment_hits = [fragment for fragment in fragments if fragment in text]
+                    if fragment_hits:
+                        score += min(3, len(fragment_hits))
+                        hits.extend(fragment_hits[:3])
+            if command.get("command") in text or skill.get("id", "").lower() in text:
+                score += 8
+            if score:
+                candidates.append({
+                    **self._public_command(command),
+                    "score": score,
+                    "matched_terms": hits[:10],
+                    "requires_load": bool(skill.get("requires_load", True)),
+                })
+        candidates.sort(key=lambda item: (-item["score"], item.get("command", "")))
+        return candidates[:max(1, int(limit or 3))]
+
+    @staticmethod
+    def select_natural_language_route(matches, *, minimum_score=5, minimum_margin=2):
+        """Return one route only when the match is strong and unambiguous."""
+        candidates = [item for item in (matches or []) if isinstance(item, dict)]
+        if not candidates:
+            return None
+        top = candidates[0]
+        second_score = int(candidates[1].get("score", 0) or 0) if len(candidates) > 1 else 0
+        score = int(top.get("score", 0) or 0)
+        if score < int(minimum_score) or score < second_score + int(minimum_margin):
+            return None
+        return top
+
     def _child_commands(self, skill_id):
         return [
             command for command in self.list_commands()
@@ -367,6 +513,7 @@ class SkillManager:
         sections = [
             f"# {skill['name']}",
             skill.get("description", ""),
+            self._render_skill_metadata(skill),
             "## 技能指令",
             skill.get("system_prompt", ""),
         ]
@@ -377,11 +524,29 @@ class SkillManager:
                 sections.append(f"### {name}\n{content}")
         return "\n\n".join(part for part in sections if part).strip()[:max_chars]
 
+    @staticmethod
+    def _render_skill_metadata(skill):
+        lines = ["## 使用边界", "加载后才可将本技能规则用于当前任务。"]
+        applies = skill.get("applies_when") or []
+        excludes = skill.get("not_applicable_when") or []
+        outputs = skill.get("output_constraints") or []
+        permissions = skill.get("tool_permissions") or []
+        if applies:
+            lines.append("适用：" + "；".join(applies[:8]))
+        if excludes:
+            lines.append("不适用：" + "；".join(excludes[:8]))
+        if outputs:
+            lines.append("输出约束：" + "；".join(outputs[:8]))
+        if permissions:
+            lines.append("工具权限：" + "、".join(permissions[:12]))
+        return "\n".join(lines)
+
     def _render_skill_package_context(self, skill, commands, max_chars):
         names = ", ".join(f"`/{command['command']}`" for command in commands)
         sections = [
             f"# {skill['name']}",
             skill.get("description", ""),
+            self._render_skill_metadata(skill),
             "## 技能包导航",
             "这是一个包含多个子指令的技能包。不要加载整个仓库文档；应根据用户目标直接使用对应的斜杠指令或调用 load_skill(子指令名)。",
             f"可用子指令：{names}",
@@ -436,6 +601,7 @@ class SkillManager:
             "## 技能索引",
             "用户输入 `/指令` 时直接使用对应路由。自然语言仅在唯一且高度匹配时才主动加载；需要时调用 load_skill(skill_id) 读取完整指令。",
             "不要声称已使用尚未加载的技能。",
+            "只有 record_skill_usage 成功后，才能将技能记录为本轮实际采用。",
             "不要逐个枚举或比较候选技能；不明确时直接处理用户请求。",
             "",
         ]
@@ -644,6 +810,7 @@ class SkillManager:
     def _scan_knowledge(self, skill_dir):
         knowledge = {}
         seen_paths = set()
+        seen_names = set()
         priority_files = (
             "README.md", "readme.md", "USAGE.md", "usage.md", "GUIDE.md", "guide.md",
             "DOCS.md", "docs.md", "INSTRUCTIONS.md", "instructions.md", "prompt.md",
@@ -652,11 +819,15 @@ class SkillManager:
         for name in priority_files:
             path = skill_dir / name
             resolved = path.resolve()
+            canonical_name = "README.md" if name.casefold().startswith("readme") else name.casefold()
+            if canonical_name in seen_names:
+                continue
             if path.is_file() and resolved not in seen_paths:
                 seen_paths.add(resolved)
                 content = self._read_text(path)
                 if content:
-                    knowledge[name] = content[:MAX_KNOWLEDGE_FILE_CHARS]
+                    knowledge[canonical_name] = content[:MAX_KNOWLEDGE_FILE_CHARS]
+                    seen_names.add(canonical_name)
             if len(knowledge) >= MAX_KNOWLEDGE_FILES:
                 break
         return knowledge

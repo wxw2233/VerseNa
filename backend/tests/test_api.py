@@ -142,11 +142,15 @@ def test_agent_config_can_be_saved_and_loaded(client, monkeypatch):
     monkeypatch.setattr("api.config_api.db.set_config", set_config)
 
     payload = {
-        "max_steps": 24,
-        "subagent_max_steps": 20,
+        "subagent_max_tokens": 32768,
+        "subagent_max_steps": 64,
+        "subagent_report_max_chars": 60000,
         "max_context": 64000,
         "max_tokens": 4096,
+        "tool_result_max_chars": 100000,
+        "code_exec_output_max_bytes": 100000,
         "tool_timeout": 120,
+        "subagent_timeout": 300,
         "reasoning_effort": "high",
         "custom_instructions": "Keep answers concise.",
     }
@@ -159,6 +163,23 @@ def test_agent_config_can_be_saved_and_loaded(client, monkeypatch):
     legacy_response = client.post("/api/config/agent", json={"max_history": 80})
     assert legacy_response.status_code == 200
     assert "max_history" not in client.get("/api/config/agent").json()
+
+
+def test_agent_config_exposes_subagent_step_budget(client, monkeypatch):
+    saved = {}
+
+    async def get_config(key, default=""):
+        return saved.get(key, default)
+
+    async def set_config(key, value):
+        saved[key] = value
+
+    monkeypatch.setattr("api.config_api.db.get_config", get_config)
+    monkeypatch.setattr("api.config_api.db.set_config", set_config)
+    response = client.post("/api/config/agent", json={"subagent_max_steps": 80})
+
+    assert response.status_code == 200
+    assert client.get("/api/config/agent").json()["subagent_max_steps"] == 80
 
 
 def test_model_dump_supports_pydantic_v1(monkeypatch):
@@ -219,6 +240,62 @@ def test_diagnostics_api_returns_runtime_and_memory_sections(client):
     assert set(data["memory"]) == {"total", "global", "workspace"}
     assert isinstance(data["runtime"], dict)
     assert isinstance(data["active_subagents"], list)
+
+
+@pytest.mark.asyncio
+async def test_diagnostics_task_cache_reuses_an_isolated_snapshot(monkeypatch):
+    import api.diagnostics_api as diagnostics_api
+
+    rows = [{
+        "session_id": "cached-session",
+        "name": "Cached task",
+        "tool_workspace": "E:/workspace",
+        "task_checkpoint": "{}",
+    }]
+    build_calls = []
+
+    async def list_session_meta(limit=20):
+        return [dict(row) for row in rows]
+
+    async def get_memory_stats(**kwargs):
+        return {"total": 0, "global": 0, "workspace": 0}
+
+    async def list_skill_events(session_id=None, limit=20):
+        return []
+
+    def build_tasks(source_rows, fallback_workspace):
+        build_calls.append((source_rows, fallback_workspace))
+        return [{"session_id": "cached-session", "marker": "original"}]
+
+    monkeypatch.setattr(diagnostics_api, "_task_cache", {
+        "key": "", "expires_at": 0.0, "tasks": [],
+    })
+    monkeypatch.setattr(diagnostics_api.db, "list_session_meta", list_session_meta)
+    monkeypatch.setattr(diagnostics_api.db, "get_memory_stats", get_memory_stats)
+    monkeypatch.setattr(diagnostics_api.db, "list_skill_events", list_skill_events)
+    monkeypatch.setattr(diagnostics_api, "_build_tasks", build_tasks)
+
+    first = await diagnostics_api.get_diagnostics()
+    first["tasks"][0]["marker"] = "mutated-by-caller"
+    second = await diagnostics_api.get_diagnostics()
+
+    assert len(build_calls) == 1
+    assert second["tasks"] == [{"session_id": "cached-session", "marker": "original"}]
+
+
+def test_runtime_diagnostics_exposes_configured_subagent_limits():
+    from agent.diagnostics import RuntimeDiagnostics
+
+    diagnostics = RuntimeDiagnostics()
+    diagnostics.start_generation(
+        "limits", "gen-1", max_context=1000,
+        subagent_max_steps=32, subagent_max_tokens=4096, subagent_timeout=900,
+    )
+    limits = diagnostics.snapshot("limits")["execution_limits"]
+
+    assert limits["subagent_steps"] == 32
+    assert limits["subagent_tokens"] == 4096
+    assert limits["subagent_timeout_seconds"] == 900
 
 
 def test_session_tool_settings_are_validated_and_persisted(client, tmp_path):

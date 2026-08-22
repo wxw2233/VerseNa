@@ -23,7 +23,7 @@ export const useChatStore = defineStore('chat', () => {
     })
   }
 
-  function startStreaming(generationId, reasoningEnabled = false) {
+  function startStreaming(generationId, reasoningEnabled = false, workStartedAt = Date.now()) {
     activeGenerationId.value = generationId || null
     isStreaming.value = true
     isStopping.value = false
@@ -36,6 +36,8 @@ export const useChatStore = defineStore('chat', () => {
       emoji: null,
       generationId: generationId || null,
       reasoningEnabled,
+      workStartedAt,
+      workDurationMs: 0,
     })
   }
 
@@ -66,6 +68,8 @@ export const useChatStore = defineStore('chat', () => {
         streaming: true,
         emoji: null,
         generationId: generationId || null,
+        workStartedAt: Date.now(),
+        workDurationMs: 0,
       })
     } else {
       // 追加到现有消息
@@ -149,7 +153,7 @@ export const useChatStore = defineStore('chat', () => {
     return true
   }
 
-  function finishStreaming(emoji, generationId) {
+  function finishStreaming(emoji, generationId, workDurationMs = 0, acceptanceReport = null) {
     if (!generationMatches(generationId)) return false
     isStreaming.value = false
     isStopping.value = false
@@ -174,7 +178,13 @@ export const useChatStore = defineStore('chat', () => {
       })
       last.segments = segs
       last.streaming = false
+      last.workDurationMs = Number(workDurationMs) > 0
+        ? Number(workDurationMs)
+        : Math.max(0, Date.now() - Number(last.workStartedAt || Date.now()))
       if (emoji) last.emoji = emoji
+      if (acceptanceReport && typeof acceptanceReport === 'object') {
+        last.acceptanceReport = acceptanceReport
+      }
     }
     activeGenerationId.value = null
     return true
@@ -207,6 +217,7 @@ export const useChatStore = defineStore('chat', () => {
       segs.push({ type: 'text', content: `⚠️ ${message}` })
       last.segments = segs
       last.streaming = false
+      last.workDurationMs = Math.max(0, Date.now() - Number(last.workStartedAt || Date.now()))
     }
     activeGenerationId.value = null
     return true
@@ -249,6 +260,10 @@ export const useChatStore = defineStore('chat', () => {
         reasoningEffort: message.reasoning_effort || null,
         reasoningModel: message.reasoning_model || null,
         reasoningDurationMs: message.reasoning_duration_ms || 0,
+        workDurationMs: message.work_duration_ms || 0,
+        finishReason: message.finish_reason || null,
+        taskState: message.task_state || null,
+        acceptanceReport: message.acceptance_report || null,
       }
       if (message.segments?.length) {
         restored.segments = message.content && message.segments.every(

@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 import httpx
 from fastapi import APIRouter, HTTPException, Response
 import pydantic
@@ -7,6 +8,7 @@ from config import settings
 from db.database import db
 from models.providers import get_all_providers, get_provider, PROVIDER_PRESETS
 from security_utils import redact_sensitive_text
+from agent.task_state import workspace_id
 
 router = APIRouter()
 PYDANTIC_V2 = int(pydantic.__version__.split(".", 1)[0]) >= 2
@@ -316,22 +318,30 @@ async def set_trust_mode(req: TrustModeReq):
 # ========== Agent 高级配置 ==========
 
 AGENT_CONFIG_DEFAULTS = {
-    "max_steps": 15,
-    "subagent_max_steps": 16,
-    "max_context": 128000,
-    "max_tokens": 8192,
+    "subagent_max_tokens": 32768,
+    "subagent_max_steps": 64,
+    "subagent_report_max_chars": 60000,
+    "max_context": 1000000,
+    "max_tokens": 100000,
+    "tool_result_max_chars": 100000,
+    "code_exec_output_max_bytes": 100000,
     "tool_timeout": 120,
+    "subagent_timeout": 300,
     "reasoning_effort": "medium",
     "custom_instructions": "",
 }
 
 # 配置值硬上限（MiMo 百万上下文，放宽限制）
 AGENT_CONFIG_LIMITS = {
-    "max_steps": (1, 100),
-    "subagent_max_steps": (4, 50),
+    "subagent_max_tokens": (1024, 100000),
+    "subagent_max_steps": (4, 256),
+    "subagent_report_max_chars": (4000, 200000),
     "max_context": (2000, 1000000),
-    "max_tokens": (256, 65536),
+    "max_tokens": (256, 100000),
+    "tool_result_max_chars": (8000, 500000),
+    "code_exec_output_max_bytes": (12000, 500000),
     "tool_timeout": (10, 300),
+    "subagent_timeout": (30, 900),
 }
 
 @router.get("/api/config/agent")
@@ -352,13 +362,17 @@ async def get_agent_config():
     return result
 
 class AgentConfigReq(BaseModel):
-    max_steps: int | None = None
+    subagent_max_tokens: int | None = None
     subagent_max_steps: int | None = None
+    subagent_report_max_chars: int | None = None
     max_context: int | None = None
     temperature: float | None = None
     top_p: float | None = None
     max_tokens: int | None = None
+    tool_result_max_chars: int | None = None
+    code_exec_output_max_bytes: int | None = None
     tool_timeout: int | None = None
+    subagent_timeout: int | None = None
     reasoning_effort: str | None = None
     custom_instructions: str | None = None
 
@@ -424,7 +438,13 @@ async def list_memories(category: str = None, scope: str = None, workspace_path:
         raise HTTPException(400, "无效的记忆作用域")
     if scope == "workspace" and not workspace_path:
         workspace_path = str(settings.TOOL_WORKSPACE)
-    memories = await db.get_memories(limit=100, category=category, workspace_path=workspace_path)
+    visible_workspace = workspace_path or str(settings.TOOL_WORKSPACE)
+    memories = await db.get_memories(
+        limit=100,
+        category=category,
+        workspace_path=visible_workspace,
+        project_id=workspace_id(visible_workspace),
+    )
     if scope == "global":
         memories = [memory for memory in memories if memory.get("scope") == "global"]
     elif scope == "workspace":
@@ -436,38 +456,61 @@ async def create_memory(req: dict):
     content = req.get('content', '')
     category = req.get('category', 'general')
     scope = req.get('scope', 'global')
+    auto_apply = bool(req.get('auto_apply', True))
     if not content:
         raise HTTPException(400, "内容不能为空")
     if scope not in {"global", "workspace"}:
         raise HTTPException(400, "无效的记忆作用域")
     workspace_path = str(settings.TOOL_WORKSPACE) if scope == "workspace" else None
-    dup_id = await db.check_duplicate_memory(content, scope=scope, workspace_path=workspace_path)
+    project = workspace_id(workspace_path) if workspace_path else None
+    dup_id = await db.check_duplicate_memory(
+        content,
+        scope=scope,
+        workspace_path=workspace_path,
+        project_id=project,
+    )
     if dup_id:
         return {"status": "duplicate", "id": dup_id, "scope": scope, "workspace_path": workspace_path}
     memory_id = await db.save_memory(
         content, category=category, source='manual', expired_at=None,
         scope=scope, workspace_path=workspace_path,
+        project_id=workspace_id(workspace_path) if workspace_path else None,
+        verified_at=datetime.now().isoformat(timespec='seconds'),
+        auto_apply=auto_apply,
     )
-    return {"status": "ok", "id": memory_id, "scope": scope, "workspace_path": workspace_path}
+    return {"status": "ok", "id": memory_id, "scope": scope, "workspace_path": workspace_path, "auto_apply": auto_apply}
 
 @router.put("/api/memories/{memory_id}")
 async def update_memory(memory_id: int, req: dict):
     scope = req.get('scope')
     if scope is not None and scope not in {"global", "workspace"}:
         raise HTTPException(400, "无效的记忆作用域")
-    workspace_path = str(settings.TOOL_WORKSPACE) if scope == "workspace" else None
-    await db.update_memory(
+    workspace_path = str(settings.TOOL_WORKSPACE)
+    current_project_id = workspace_id(workspace_path)
+    updated = await db.update_memory(
         memory_id,
         content=req.get('content'),
         category=req.get('category'),
         scope=scope,
         workspace_path=workspace_path,
+        project_id=current_project_id if scope == "workspace" else None,
+        auto_apply=req.get('auto_apply') if isinstance(req.get('auto_apply'), bool) else None,
+        verified_at=datetime.now().isoformat(timespec='seconds') if (
+            req.get('verify') is True or any(key in req for key in ('content', 'category', 'scope'))
+        ) else None,
     )
-    return {"status": "ok"}
+    if not updated:
+        raise HTTPException(404, "记忆不存在或不属于当前工作区")
+    return {"status": "ok", "id": memory_id}
 
 @router.delete("/api/memories/{memory_id}")
 async def delete_memory(memory_id: int):
-    deleted = await db.delete_memory(memory_id)
+    workspace_path = str(settings.TOOL_WORKSPACE)
+    deleted = await db.delete_memory(
+        memory_id,
+        workspace_path=workspace_path,
+        project_id=workspace_id(workspace_path),
+    )
     if not deleted:
         raise HTTPException(404, "记忆不存在")
     return {"status": "ok", "id": memory_id}

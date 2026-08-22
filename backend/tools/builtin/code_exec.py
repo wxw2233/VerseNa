@@ -16,10 +16,10 @@ from tools.paths import ToolPathError, resolve_tool_path
 from tools.results import tool_confirm, tool_error, tool_result
 
 
-MAX_OUTPUT_BYTES = 12_000
-OUTPUT_HEAD_BYTES = 5_500
-OUTPUT_TAIL_BYTES = 5_500
-MAX_TIMEOUT_SECONDS = 120
+DEFAULT_MAX_OUTPUT_BYTES = 100_000
+MIN_OUTPUT_BYTES = 12_000
+MAX_OUTPUT_BYTES = 500_000
+MAX_TIMEOUT_SECONDS = 300
 SENSITIVE_ENV_PARTS = (
     "KEY", "TOKEN", "SECRET", "PASSWORD", "PASS", "CREDENTIAL", "AUTH",
     "COOKIE", "SESSION", "PRIVATE", "SSH", "AWS", "AZURE", "GOOGLE",
@@ -84,7 +84,7 @@ def _terminate_process_tree(process: subprocess.Popen) -> None:
         process.wait(timeout=5)
 
 
-def _run_process(command: list[str], cwd: Path, timeout: int, stop_event=None) -> dict:
+def _run_process(command: list[str], cwd: Path, timeout: int, max_output_bytes: int, stop_event=None) -> dict:
     creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
     runtime_home = Path(tempfile.mkdtemp(prefix="versena-exec-"))
     process = None
@@ -102,6 +102,12 @@ def _run_process(command: list[str], cwd: Path, timeout: int, stop_event=None) -
         captured = bytearray()
         tail = bytearray()
         output_size = 0
+        max_output_bytes = max(MIN_OUTPUT_BYTES, min(int(max_output_bytes), MAX_OUTPUT_BYTES))
+        # Reserve space for the truncation marker so the returned payload never
+        # exceeds the user-configured output limit.
+        marker_reserve = min(512, max_output_bytes // 4)
+        head_bytes = max(1, int((max_output_bytes - marker_reserve) * 0.5))
+        tail_bytes = max(1, max_output_bytes - marker_reserve - head_bytes)
 
         def drain_output():
             nonlocal output_size
@@ -110,11 +116,11 @@ def _run_process(command: list[str], cwd: Path, timeout: int, stop_event=None) -
                 if not chunk:
                     break
                 output_size += len(chunk)
-                if len(captured) < MAX_OUTPUT_BYTES:
-                    captured.extend(chunk[:MAX_OUTPUT_BYTES - len(captured)])
+                if len(captured) < max_output_bytes:
+                    captured.extend(chunk[:max_output_bytes - len(captured)])
                 tail.extend(chunk)
-                if len(tail) > OUTPUT_TAIL_BYTES:
-                    del tail[:-OUTPUT_TAIL_BYTES]
+                if len(tail) > tail_bytes:
+                    del tail[:-tail_bytes]
 
         reader = threading.Thread(target=drain_output, daemon=True)
         reader.start()
@@ -136,11 +142,11 @@ def _run_process(command: list[str], cwd: Path, timeout: int, stop_event=None) -
             process.stdout.close()
             reader.join(timeout=1)
 
-        truncated = output_size > MAX_OUTPUT_BYTES
+        truncated = output_size > max_output_bytes
         if truncated:
-            omitted = max(0, output_size - OUTPUT_HEAD_BYTES - len(tail))
+            omitted = max(0, output_size - head_bytes - len(tail))
             marker = f"\n\n[输出已截断：中间省略 {omitted} 字节；以下为末尾内容]\n\n".encode("utf-8")
-            output_bytes = bytes(captured[:OUTPUT_HEAD_BYTES]) + marker + bytes(tail)
+            output_bytes = bytes(captured[:head_bytes]) + marker + bytes(tail)
         else:
             output_bytes = bytes(captured)
         output = _decode_output(output_bytes).rstrip()
@@ -149,7 +155,7 @@ def _run_process(command: list[str], cwd: Path, timeout: int, stop_event=None) -
             "output": output or "(无输出)",
             "truncated": truncated,
             "output_bytes": output_size,
-            "captured_head_bytes": min(output_size, OUTPUT_HEAD_BYTES),
+            "captured_head_bytes": min(output_size, head_bytes if truncated else max_output_bytes),
             "captured_tail_bytes": len(tail) if truncated else 0,
             "timed_out": timed_out,
             "cancelled": cancelled,
@@ -180,7 +186,7 @@ class CodeExecTool(BaseTool):
                 "type": "integer",
                 "minimum": 1,
                 "maximum": MAX_TIMEOUT_SECONDS,
-                "description": "超时秒数，默认 30，最大 120",
+                "description": "超时秒数，默认使用高级设置，最大 300",
             },
         },
         "required": ["language", "code"],
@@ -192,7 +198,7 @@ class CodeExecTool(BaseTool):
         language: str = "",
         code: str = "",
         cwd: str = "",
-        timeout: int = 30,
+        timeout: int | None = None,
         _context: ToolContext | None = None,
         _confirmed: bool = False,
         **kwargs,
@@ -217,8 +223,10 @@ class CodeExecTool(BaseTool):
         if not workdir.is_dir():
             return tool_error("INVALID_CWD", f"工作目录不存在: {cwd or '.'}")
 
+        default_timeout = ((_context.agent_config or {}).get("tool_timeout", 30)
+                           if timeout is None else timeout)
         try:
-            timeout = max(1, min(int(timeout), MAX_TIMEOUT_SECONDS))
+            timeout = max(1, min(int(default_timeout), MAX_TIMEOUT_SECONDS))
         except (TypeError, ValueError):
             return tool_error("INVALID_TIMEOUT", "timeout 必须是整数")
 
@@ -248,11 +256,13 @@ class CodeExecTool(BaseTool):
             command = [shell, "-lc", code]
 
         try:
+            max_output_bytes = self._output_limit(_context.agent_config)
             result = await asyncio.to_thread(
                 _run_process,
                 command,
                 workdir,
                 timeout,
+                max_output_bytes,
                 _context.stop_event,
             )
         except (OSError, subprocess.SubprocessError) as exc:
@@ -273,6 +283,14 @@ class CodeExecTool(BaseTool):
         if result["returncode"] != 0:
             return tool_error("PROCESS_EXIT", f"进程退出码: {result['returncode']}", data=data)
         return tool_result(True, data=data, message="执行完成")
+
+    @staticmethod
+    def _output_limit(agent_config) -> int:
+        try:
+            value = int((agent_config or {}).get("code_exec_output_max_bytes", DEFAULT_MAX_OUTPUT_BYTES))
+        except (TypeError, ValueError):
+            value = DEFAULT_MAX_OUTPUT_BYTES
+        return max(MIN_OUTPUT_BYTES, min(value, MAX_OUTPUT_BYTES))
 
     @staticmethod
     def _strip_code_fence(code: str) -> str:

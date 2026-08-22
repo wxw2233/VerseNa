@@ -28,12 +28,22 @@ class LoadSkillTool(BaseTool):
         try:
             context = skill_manager.get_skill_context(skill_id)
             command = skill_manager.get_command(skill_id)
-            if _context is not None and command:
+            skill = skill_manager.get_skill(skill_id)
+            canonical_skill_id = command["skill_id"] if command else (skill or {}).get("id", skill_id)
+            if _context is not None:
                 try:
-                    await db.set_session_meta(
+                    if command:
+                        await db.set_session_meta(
+                            _context.session_id,
+                            active_skill_command=command["command"],
+                            active_skill_arguments="",
+                        )
+                    await db.record_skill_event(
                         _context.session_id,
-                        active_skill_command=command["command"],
-                        active_skill_arguments="",
+                        canonical_skill_id,
+                        "loaded",
+                        command=command["command"] if command else "",
+                        detail="通过 load_skill 工具加载",
                     )
                 except Exception:
                     # Skill loading must still work if session persistence is unavailable.
@@ -41,7 +51,7 @@ class LoadSkillTool(BaseTool):
             return json.dumps(
                 {
                     "success": True,
-                    "skill_id": skill_id,
+                    "skill_id": canonical_skill_id,
                     "active_command": command["command"] if command else "",
                     "context": context,
                 },

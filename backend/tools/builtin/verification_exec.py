@@ -7,7 +7,7 @@ import subprocess
 from pathlib import Path
 
 from tools.base import BaseTool, ToolContext
-from tools.builtin.code_exec import MAX_TIMEOUT_SECONDS, _run_process
+from tools.builtin.code_exec import DEFAULT_MAX_OUTPUT_BYTES, MAX_TIMEOUT_SECONDS, _run_process
 from tools.paths import ToolPathError, resolve_tool_path
 from tools.results import tool_error, tool_result
 
@@ -205,6 +205,24 @@ def _resolve_executable(kind: str, workdir: Path, workspace: Path) -> tuple[str,
     return resolved, []
 
 
+def _prepare_process_command(command: list[str], *, platform: str | None = None) -> list[str]:
+    """Prepare a verified command for the platform process launcher.
+
+    Windows resolves npm and other package runners to .CMD/.BAT files. Passing
+    a pre-quoted command line as one /C argument makes cmd.exe treat the quote
+    characters as part of the executable name. Keep the executable and its
+    arguments as separate argv entries instead.
+    """
+    runtime_platform = platform or os.name
+    if (
+        runtime_platform == "nt"
+        and command
+        and Path(command[0]).suffix.lower() in {".cmd", ".bat"}
+    ):
+        return ["cmd.exe", "/D", "/S", "/C", "call", *command]
+    return command
+
+
 class VerificationExecTool(BaseTool):
     name = "verification_exec"
     description = (
@@ -274,12 +292,15 @@ class VerificationExecTool(BaseTool):
         except FileNotFoundError as exc:
             return tool_error("VERIFICATION_TOOL_NOT_FOUND", str(exc))
 
-        command = [executable, *prefix, *arguments]
-        if os.name == "nt" and Path(executable).suffix.lower() in {".cmd", ".bat"}:
-            command = ["cmd.exe", "/D", "/S", "/C", subprocess.list2cmdline(command)]
+        command = _prepare_process_command([executable, *prefix, *arguments])
         try:
             result = await asyncio.to_thread(
-                _run_process, command, workdir, timeout, _context.stop_event,
+                _run_process,
+                command,
+                workdir,
+                timeout,
+                DEFAULT_MAX_OUTPUT_BYTES,
+                _context.stop_event,
             )
         except (OSError, subprocess.SubprocessError) as exc:
             return tool_error("EXECUTION_FAILED", str(exc))

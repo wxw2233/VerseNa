@@ -172,6 +172,16 @@ async def get_session_skill_state(session_id: str):
             active_skill_command="",
             active_skill_arguments="",
         )
+        try:
+            await db.record_skill_event(
+                session_id,
+                "unknown",
+                "cleared",
+                command=meta.get("active_skill_command", ""),
+                detail="已移除的技能指令自动清理",
+            )
+        except Exception:
+            pass
     return state
 
 
@@ -180,11 +190,23 @@ async def update_session_skill_state(session_id: str, req: SkillStateUpdate):
     command_name = (req.active_command or "").strip().lstrip("/")
     arguments = (req.arguments or "").strip()[:MAX_ACTIVE_SKILL_ARGUMENTS]
     if not command_name:
+        previous = await db.get_session_meta(session_id)
         await db.set_session_meta(
             session_id,
             active_skill_command="",
             active_skill_arguments="",
         )
+        previous_state = _skill_state_payload(previous.get("active_skill_command", ""))
+        try:
+            await db.record_skill_event(
+                session_id,
+                previous_state.get("skill_id") or "unknown",
+                "cleared",
+                command=previous.get("active_skill_command", ""),
+                detail="用户关闭当前活动技能",
+            )
+        except Exception:
+            pass
         return _skill_state_payload("")
 
     command = skill_manager.get_command(command_name)
@@ -195,6 +217,23 @@ async def update_session_skill_state(session_id: str, req: SkillStateUpdate):
         active_skill_command=command["command"],
         active_skill_arguments=arguments,
     )
+    try:
+        await db.record_skill_event(
+            session_id,
+            command["skill_id"],
+            "loaded",
+            command=command["command"],
+            detail="由会话技能面板加载",
+        )
+        await db.record_skill_event(
+            session_id,
+            command["skill_id"],
+            "activated",
+            command=command["command"],
+            detail="由会话技能面板激活",
+        )
+    except Exception:
+        pass
     return _skill_state_payload(command["command"], arguments)
 
 

@@ -164,6 +164,9 @@ class Database:
                 use_count INTEGER DEFAULT 0,
                 last_used_at TIMESTAMP DEFAULT NULL,
                 expired_at TIMESTAMP DEFAULT NULL,
+                verified_at TIMESTAMP DEFAULT NULL,
+                auto_apply INTEGER DEFAULT 0,
+                project_id TEXT DEFAULT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
@@ -185,9 +188,46 @@ class Database:
             await self._db.execute(
                 "ALTER TABLE memories ADD COLUMN last_used_at TIMESTAMP DEFAULT NULL"
             )
+        if "verified_at" not in memory_column_names:
+            await self._db.execute(
+                "ALTER TABLE memories ADD COLUMN verified_at TIMESTAMP DEFAULT NULL"
+            )
+        if "auto_apply" not in memory_column_names:
+            await self._db.execute(
+                "ALTER TABLE memories ADD COLUMN auto_apply INTEGER DEFAULT 0"
+            )
+        if "project_id" not in memory_column_names:
+            await self._db.execute(
+                "ALTER TABLE memories ADD COLUMN project_id TEXT DEFAULT NULL"
+            )
         await self._db.execute(
             "CREATE INDEX IF NOT EXISTS idx_memories_scope_workspace "
             "ON memories(scope, workspace_path)"
+        )
+        await self._db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memories_scope_workspace_project "
+            "ON memories(scope, workspace_path, project_id)"
+        )
+        await self._db.commit()
+
+        # Skill events are intentionally separate from conversation text.  A
+        # loaded index entry, an activated slash command and actual adoption
+        # are different facts and must not be inferred from one another.
+        await self._db.execute("""
+            CREATE TABLE IF NOT EXISTS skill_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                generation_id TEXT DEFAULT '',
+                skill_id TEXT NOT NULL,
+                command TEXT DEFAULT '',
+                event_type TEXT NOT NULL,
+                detail TEXT DEFAULT '',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        await self._db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_skill_events_session_created "
+            "ON skill_events(session_id, id DESC)"
         )
         await self._db.commit()
 
@@ -236,6 +276,29 @@ class Database:
             "active_skill_arguments": "",
             "task_checkpoint": "{}",
         }
+
+    async def list_session_meta(self, limit: int = 20):
+        """Return recent session checkpoints for diagnostics and recovery UI."""
+        limit = max(1, min(int(limit or 20), 100))
+        cursor = await self._db.execute(
+            "SELECT session_id, name, theme_pack_id, tool_workspace, approval_mode, "
+            "active_skill_command, active_skill_arguments, task_checkpoint "
+            "FROM session_metadata ORDER BY rowid DESC LIMIT ?",
+            (limit,),
+        )
+        rows = []
+        for row in await cursor.fetchall():
+            rows.append({
+                "session_id": row[0],
+                "name": row[1] or "",
+                "theme_pack_id": row[2] or "default_pack",
+                "tool_workspace": row[3] or "",
+                "approval_mode": row[4] if row[4] in {"ask", "auto"} else "ask",
+                "active_skill_command": row[5] or "",
+                "active_skill_arguments": row[6] or "",
+                "task_checkpoint": row[7] or "{}",
+            })
+        return rows
 
     async def set_session_meta(
         self,
@@ -379,6 +442,10 @@ class Database:
                     "reasoning_effort",
                     "reasoning_model",
                     "reasoning_duration_ms",
+                    "work_duration_ms",
+                    "finish_reason",
+                    "task_state",
+                    "acceptance_report",
                 ):
                     if key in meta:
                         d[key] = meta[key]
@@ -456,13 +523,13 @@ class Database:
 
     # --- Memory methods ---
 
-    async def get_memories(self, limit=20, category=None, workspace_path=None):
+    async def get_memories(self, limit=20, category=None, workspace_path=None, project_id=None):
         """获取长期记忆，按权重+时间综合排序，排除已过期的"""
         # 权重：instruction=3 > fact=2 > preference=1 > general=0
         weight_case = "CASE category WHEN 'instruction' THEN 3 WHEN 'fact' THEN 2 WHEN 'preference' THEN 1 ELSE 0 END"
         query = (
             "SELECT id, content, category, source, scope, workspace_path, "
-            "use_count, last_used_at, expired_at, created_at FROM memories "
+            "use_count, last_used_at, expired_at, verified_at, auto_apply, project_id, created_at FROM memories "
             "WHERE (expired_at IS NULL OR datetime(expired_at) > datetime('now'))"
         )
         params = []
@@ -470,8 +537,12 @@ class Database:
             query += " AND category = ?"
             params.append(category)
         if workspace_path:
-            query += " AND (scope = 'global' OR (scope = 'workspace' AND workspace_path = ?))"
+            query += " AND (scope = 'global' OR (scope = 'workspace' AND workspace_path = ?"
             params.append(workspace_path)
+            if project_id:
+                query += " AND (project_id IS NULL OR project_id = ?)"
+                params.append(project_id)
+            query += "))"
             query += (
                 f" ORDER BY CASE WHEN scope = 'workspace' THEN 1 ELSE 0 END DESC, "
                 f"{weight_case} DESC, created_at DESC LIMIT ?"
@@ -482,28 +553,36 @@ class Database:
         cursor = await self._db.execute(query, params)
         return [dict(row) for row in await cursor.fetchall()]
 
-    async def get_memory(self, memory_id, workspace_path=None):
+    async def get_memory(self, memory_id, workspace_path=None, project_id=None):
         """Return one visible memory, or None when it does not exist/is out of scope."""
         query = (
             "SELECT id, content, category, source, scope, workspace_path, "
-            "use_count, last_used_at, expired_at, created_at FROM memories "
+            "use_count, last_used_at, expired_at, verified_at, auto_apply, project_id, created_at FROM memories "
             "WHERE id = ? AND (expired_at IS NULL OR datetime(expired_at) > datetime('now'))"
         )
         params = [memory_id]
         if workspace_path:
-            query += " AND (scope = 'global' OR (scope = 'workspace' AND workspace_path = ?))"
+            query += " AND (scope = 'global' OR (scope = 'workspace' AND workspace_path = ?"
             params.append(workspace_path)
+            if project_id:
+                query += " AND (project_id IS NULL OR project_id = ?)"
+                params.append(project_id)
+            query += "))"
         cursor = await self._db.execute(query, params)
         row = await cursor.fetchone()
         return dict(row) if row else None
 
-    async def get_memory_stats(self, workspace_path=None):
+    async def get_memory_stats(self, workspace_path=None, project_id=None):
         """Return lightweight memory counts for the settings diagnostics panel."""
         params = []
         scope_filter = ""
         if workspace_path:
-            scope_filter = " AND (scope = 'global' OR (scope = 'workspace' AND workspace_path = ?))"
+            scope_filter = " AND (scope = 'global' OR (scope = 'workspace' AND workspace_path = ?"
             params.append(workspace_path)
+            if project_id:
+                scope_filter += " AND (project_id IS NULL OR project_id = ?)"
+                params.append(project_id)
+            scope_filter += "))"
         cursor = await self._db.execute(
             "SELECT COUNT(*) AS total, "
             "SUM(CASE WHEN scope = 'global' THEN 1 ELSE 0 END) AS global_count, "
@@ -527,15 +606,21 @@ class Database:
         expired_at=None,
         scope='global',
         workspace_path=None,
+        project_id=None,
+        verified_at=None,
+        auto_apply=False,
     ):
         if scope != 'workspace':
             scope = 'global'
             workspace_path = None
         cursor = await self._db.execute(
             "INSERT INTO memories "
-            "(content, category, source, scope, workspace_path, use_count, last_used_at, expired_at) "
-            "VALUES (?, ?, ?, ?, ?, 0, NULL, ?)",
-            (redact_sensitive_text(content), category, source, scope, workspace_path, expired_at)
+            "(content, category, source, scope, workspace_path, use_count, last_used_at, expired_at, verified_at, auto_apply, project_id) "
+            "VALUES (?, ?, ?, ?, ?, 0, NULL, ?, ?, ?, ?)",
+            (
+                redact_sensitive_text(content), category, source, scope, workspace_path,
+                expired_at, verified_at, 1 if auto_apply else 0, project_id,
+            )
         )
         await self._db.commit()
         return cursor.lastrowid
@@ -559,10 +644,27 @@ class Database:
         category=None,
         scope=None,
         workspace_path=None,
+        project_id=None,
+        visibility_project_id=None,
+        verified_at=None,
+        auto_apply=None,
     ):
-        existing = await self.get_memory(memory_id, workspace_path=workspace_path)
+        if visibility_project_id is None and workspace_path:
+            # The current workspace is the authorization boundary.  Keep it
+            # separate from project_id, which may be the value being written.
+            try:
+                from agent.task_state import workspace_id as _workspace_id
+                visibility_project_id = _workspace_id(workspace_path)
+            except Exception:
+                visibility_project_id = None
+        existing = await self.get_memory(
+            memory_id,
+            workspace_path=workspace_path,
+            project_id=visibility_project_id,
+        )
         if not existing:
             return False
+        content_changed = content is not None or category is not None or scope is not None
         if content:
             await self._db.execute(
                 "UPDATE memories SET content = ? WHERE id = ?",
@@ -572,19 +674,54 @@ class Database:
             await self._db.execute("UPDATE memories SET category = ? WHERE id = ?", (category, memory_id))
         if scope in {'global', 'workspace'}:
             if scope == 'workspace' and workspace_path:
+                effective_project_id = project_id
+                if effective_project_id is None:
+                    try:
+                        from agent.task_state import workspace_id as _workspace_id
+                        effective_project_id = _workspace_id(workspace_path)
+                    except Exception:
+                        effective_project_id = None
                 await self._db.execute(
-                    "UPDATE memories SET scope = 'workspace', workspace_path = ? WHERE id = ?",
-                    (workspace_path, memory_id),
+                    "UPDATE memories SET scope = 'workspace', workspace_path = ?, "
+                    "project_id = COALESCE(?, project_id) WHERE id = ?",
+                    (workspace_path, effective_project_id, memory_id),
                 )
             else:
                 await self._db.execute(
-                    "UPDATE memories SET scope = 'global', workspace_path = NULL WHERE id = ?",
+                    "UPDATE memories SET scope = 'global', workspace_path = NULL, project_id = NULL WHERE id = ?",
                     (memory_id,),
                 )
+        if project_id is not None and scope != "global":
+            await self._db.execute(
+                "UPDATE memories SET project_id = ? WHERE id = ?",
+                (project_id, memory_id),
+            )
+        if verified_at is not None:
+            await self._db.execute(
+                "UPDATE memories SET verified_at = ? WHERE id = ?",
+                (verified_at, memory_id),
+            )
+        elif content_changed:
+            await self._db.execute(
+                "UPDATE memories SET verified_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (memory_id,),
+            )
+        if auto_apply is not None:
+            await self._db.execute(
+                "UPDATE memories SET auto_apply = ? WHERE id = ?",
+                (1 if auto_apply else 0, memory_id),
+            )
         await self._db.commit()
         return True
 
-    async def delete_memory(self, memory_id):
+    async def delete_memory(self, memory_id, workspace_path=None, project_id=None):
+        visible = await self.get_memory(
+            memory_id,
+            workspace_path=workspace_path,
+            project_id=project_id,
+        ) if workspace_path else True
+        if not visible:
+            return False
         cursor = await self._db.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
         await self._db.commit()
         return cursor.rowcount > 0
@@ -593,16 +730,70 @@ class Database:
         await self._db.execute("DELETE FROM memories WHERE expired_at IS NOT NULL AND datetime(expired_at) <= datetime('now')")
         await self._db.commit()
 
-    async def check_duplicate_memory(self, content, scope='global', workspace_path=None):
+    # --- Skill audit methods ---
+
+    async def record_skill_event(
+        self,
+        session_id,
+        skill_id,
+        event_type,
+        *,
+        command="",
+        generation_id="",
+        detail="",
+    ):
+        allowed = {"loaded", "activated", "adopted", "cleared"}
+        event_type = str(event_type or "").strip().lower()
+        if event_type not in allowed:
+            raise ValueError("invalid skill event type")
+        cursor = await self._db.execute(
+            "INSERT INTO skill_events "
+            "(session_id, generation_id, skill_id, command, event_type, detail) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                str(session_id or "")[:160],
+                str(generation_id or "")[:160],
+                str(skill_id or "")[:120],
+                str(command or "")[:120],
+                event_type,
+                redact_sensitive_text(str(detail or ""))[:1_000],
+            ),
+        )
+        await self._db.commit()
+        return cursor.lastrowid
+
+    async def list_skill_events(self, session_id=None, limit=50):
+        try:
+            bounded_limit = max(1, min(int(limit), 200))
+        except (TypeError, ValueError):
+            bounded_limit = 50
+        query = (
+            "SELECT id, session_id, generation_id, skill_id, command, event_type, detail, created_at "
+            "FROM skill_events"
+        )
+        params = []
+        if session_id:
+            query += " WHERE session_id = ?"
+            params.append(str(session_id))
+        query += " ORDER BY id DESC LIMIT ?"
+        params.append(bounded_limit)
+        cursor = await self._db.execute(query, params)
+        return [dict(row) for row in await cursor.fetchall()]
+
+    async def check_duplicate_memory(self, content, scope='global', workspace_path=None, project_id=None):
         """检查是否有相似记忆（字符串包含匹配）"""
         if scope != 'workspace':
             scope = 'global'
             workspace_path = None
-        cursor = await self._db.execute(
+        query = (
             "SELECT id, content FROM memories WHERE scope = ? "
-            "AND (workspace_path IS ? OR workspace_path = ?)",
-            (scope, workspace_path, workspace_path),
+            "AND (workspace_path IS ? OR workspace_path = ?)"
         )
+        params = [scope, workspace_path, workspace_path]
+        if project_id and scope == "workspace":
+            query += " AND (project_id IS NULL OR project_id = ?)"
+            params.append(project_id)
+        cursor = await self._db.execute(query, params)
         rows = await cursor.fetchall()
         for row in rows:
             existing = row['content']

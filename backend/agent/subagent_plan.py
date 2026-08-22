@@ -4,15 +4,24 @@ import json
 import re
 import time
 import uuid
+from pathlib import Path
 from typing import Any
 
-from agent.subagent import DEFAULT_TIMEOUT, READ_ONLY_ROLES, ROLES, subagent_manager
+from agent.subagent import (
+    DEFAULT_TIMEOUT,
+    MAX_TIMEOUT,
+    READ_ONLY_ROLES,
+    ROLES,
+    subagent_manager,
+)
 from tools.results import tool_error, tool_result
 
 
 MIN_PLAN_NODES = 2
 MAX_PLAN_NODES = 5
 MAX_DEPENDENCY_REPORT_CHARS = 8000
+MIN_DEPENDENCY_REPORT_CHARS = 4000
+MAX_DEPENDENCY_REPORT_CHARS = 200000
 REPAIRABLE_PLAN_ERRORS = {
     "INVALID_SUBAGENT_PLAN",
     "INVALID_SUBAGENT_NODE_ID",
@@ -110,6 +119,8 @@ class SubagentPlanManager:
                 state["subagent_id"] = data.get("run_id") or ""
                 state["duration_ms"] = data.get("duration_ms") or 0
                 state["budget"] = data.get("budget") or {}
+                if node["role"] == "executor" and state["status"] == "done":
+                    self._audit_executor_result(state, context)
 
             await self._emit(context, plan_id, "running", states, "正在更新任务计划")
 
@@ -141,13 +152,14 @@ class SubagentPlanManager:
         )
 
     async def _run_node(self, plan_id, node, states, context) -> str:
+        report_limit = self._dependency_report_limit(context)
         dependency_context = []
         for dependency in node["depends_on"]:
             state = states[dependency]
             dependency_context.append({
                 "id": dependency,
                 "role": state.get("role") or "",
-                "report": str(state.get("report") or "")[:MAX_DEPENDENCY_REPORT_CHARS],
+                "report": str(state.get("report") or "")[:report_limit],
                 "evidence": state.get("evidence") or {},
             })
         return await subagent_manager.run(
@@ -163,6 +175,21 @@ class SubagentPlanManager:
             depends_on=node["depends_on"],
             dependency_context=dependency_context,
         )
+
+    @staticmethod
+    def _dependency_report_limit(context) -> int:
+        """Use the same configurable handoff budget as direct delegation.
+
+        The plan layer used to clip every dependency at 8K characters even
+        after the user increased the subagent report budget. That discarded
+        the most useful portion of investigations before the executor saw it.
+        """
+        config = getattr(context, "agent_config", None) or {}
+        try:
+            configured = int(config.get("subagent_report_max_chars", MAX_DEPENDENCY_REPORT_CHARS))
+        except (TypeError, ValueError):
+            configured = MAX_DEPENDENCY_REPORT_CHARS
+        return max(MIN_DEPENDENCY_REPORT_CHARS, min(configured, MAX_DEPENDENCY_REPORT_CHARS))
 
     @staticmethod
     def _skip_blocked(states: dict[str, dict[str, Any]]) -> bool:
@@ -217,6 +244,69 @@ class SubagentPlanManager:
             ],
             "unmatched_checks": list(dict.fromkeys(unmatched_checks)),
         }
+
+    @staticmethod
+    def _audit_executor_result(state: dict[str, Any], context) -> None:
+        """Downgrade executor claims that do not match the current worktree.
+
+        The executor's narrative remains useful reference data, but the plan
+        cannot treat a reported change as completed until its declared paths
+        still exist beneath the shared workspace.  This guards against stale
+        reports, path mistakes and concurrent worktree changes without
+        attempting to infer file contents from natural-language prose.
+        """
+        evidence = state.get("evidence") if isinstance(state.get("evidence"), dict) else {}
+        parent_audit = evidence.get("parent_audit") if isinstance(evidence.get("parent_audit"), dict) else {}
+        if parent_audit.get("status") == "mismatch":
+            state["status"] = "needs_attention"
+            return
+        # SubagentManager already compares the executor's before/after workspace
+        # snapshots.  Do not overwrite that richer audit with a paths-exist
+        # check when it is available.
+        if parent_audit.get("status") in {"verified", "no_changes"}:
+            return
+        reported_paths = [str(path).strip() for path in evidence.get("modified_files") or [] if str(path).strip()]
+        if not reported_paths:
+            return
+        try:
+            workspace = Path(context.workspace).resolve()
+        except (OSError, TypeError, ValueError):
+            return
+        missing = []
+        outside = []
+        for raw_path in reported_paths:
+            try:
+                candidate = Path(raw_path)
+                if not candidate.is_absolute():
+                    candidate = workspace / candidate
+                candidate = candidate.resolve()
+            except (OSError, TypeError, ValueError):
+                missing.append(raw_path)
+                continue
+            if not candidate.is_relative_to(workspace):
+                outside.append(raw_path)
+            elif not candidate.exists():
+                missing.append(raw_path)
+        if not missing and not outside:
+            evidence["parent_audit"] = {
+                "status": "paths_present",
+                "checked_files": reported_paths[:20],
+            }
+            return
+        details = []
+        if missing:
+            details.append("报告的改动文件不存在: " + ", ".join(missing[:8]))
+        if outside:
+            details.append("报告的改动路径超出工作区: " + ", ".join(outside[:8]))
+        message = "；".join(details)
+        evidence.setdefault("failures", []).append("父代理二次核验: " + message)
+        evidence["parent_audit"] = {
+            "status": "mismatch",
+            "message": message,
+            "checked_files": reported_paths[:20],
+        }
+        state["status"] = "needs_attention"
+        state["report"] = (str(state.get("report") or "") + "\n\n父代理二次核验失败: " + message).strip()
 
     @staticmethod
     def _with_repair_guidance(result: str, nodes) -> str:
@@ -290,7 +380,7 @@ class SubagentPlanManager:
             if any(not dep for dep in dependencies) or len(set(dependencies)) != len(dependencies):
                 return tool_error("INVALID_SUBAGENT_DEPENDENCY", f"节点 {node_id} 包含空白或重复依赖")
             try:
-                timeout = max(10, min(int(raw.get("timeout") or DEFAULT_TIMEOUT), 300))
+                timeout = max(10, min(int(raw.get("timeout") or DEFAULT_TIMEOUT), MAX_TIMEOUT))
             except (TypeError, ValueError):
                 return tool_error("INVALID_SUBAGENT_TIMEOUT", f"节点 {node_id} 的超时参数无效")
             ids.add(node_id)

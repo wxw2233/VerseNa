@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from db.database import Database
 from skills.manager import SkillManager
 from tools.base import ToolContext
 from tools.registry import ToolRegistry
@@ -125,6 +126,54 @@ def test_skill_context_deduplicates_and_filters_distribution_documents(manager):
     assert context.count("shared knowledge") == 1
     assert "task guidance" in context
     assert "unrelated distribution guide" not in context
+
+
+def test_skill_metadata_and_natural_language_route_are_bounded(manager):
+    write_skill(
+        manager.custom_dir / "focused",
+        id="focused",
+        applies_when=["用户需要整理需求"],
+        not_applicable_when=["用户只要求运行测试"],
+        output_constraints=["先列出假设，再给出结论"],
+        tool_permissions=["file_manager:read"],
+    )
+    manager.reload()
+
+    skill = manager.get_skill("focused")
+    matches = manager.match_natural_language("请帮我整理需求并列出假设")
+
+    assert skill["applies_when"] == ["用户需要整理需求"]
+    assert skill["not_applicable_when"] == ["用户只要求运行测试"]
+    assert skill["output_constraints"] == ["先列出假设，再给出结论"]
+    assert matches
+    assert matches[0]["skill_id"] == "focused"
+
+
+def test_natural_language_route_requires_a_clear_winner(manager):
+    skill_dir = manager.installed_dir / "command-package"
+    write_skill(skill_dir, id="command-package", name="Command Package")
+    write_skill_command(skill_dir, name="brainstorming", description="Explore ideas first.")
+    write_skill_command(skill_dir, name="writing-plans", description="Create an implementation plan.")
+    manager.reload()
+
+    brainstorming = manager.match_natural_language("请先脑暴这个功能")
+    assert brainstorming[0]["command"] == "brainstorming"
+    assert manager.select_natural_language_route(brainstorming)["command"] == "brainstorming"
+
+    ambiguous = manager.match_natural_language("帮我处理这个任务")
+    assert manager.select_natural_language_route(ambiguous) is None
+
+
+def test_natural_language_matching_does_not_scan_full_command_body(manager):
+    skill_dir = manager.installed_dir / "command-package"
+    write_skill(skill_dir, id="command-package", name="Command Package")
+    command_dir = write_skill_command(skill_dir, name="focused", description="A focused command.")
+    (command_dir / "SKILL.md").write_text(
+        "# focused\n内部说明包含一个不应触发路由的长句关键词", encoding="utf-8"
+    )
+    manager.reload()
+
+    assert manager.match_natural_language("不应触发路由") == []
 
 
 def test_skill_knowledge_scan_excludes_docs_and_case_duplicate_readmes(manager):
@@ -384,3 +433,39 @@ async def test_load_skill_tool_switches_session_active_command(manager, monkeypa
         "active_skill_command": "writing-plans",
         "active_skill_arguments": "",
     }
+
+
+@pytest.mark.asyncio
+async def test_skill_audit_distinguishes_loading_from_material_adoption(manager, monkeypatch):
+    write_skill(manager.custom_dir / "audit-directory", id="audit-skill")
+    manager.reload()
+    database = Database(":memory:")
+    await database.connect()
+    try:
+        from tools.builtin import load_skill as load_skill_module
+        from tools.builtin import record_skill_usage as usage_module
+
+        monkeypatch.setattr(load_skill_module, "skill_manager", manager)
+        monkeypatch.setattr(usage_module, "skill_manager", manager)
+        monkeypatch.setattr(load_skill_module, "db", database)
+        monkeypatch.setattr(usage_module, "db", database)
+        context = ToolContext("skill-audit-session", manager.custom_dir.parent)
+
+        before_load = json.loads(await usage_module.RecordSkillUsageTool().execute(
+            "audit-skill", detail="attempted before loading", _context=context,
+        ))
+        loaded = json.loads(await load_skill_module.LoadSkillTool().execute(
+            "audit-skill", _context=context,
+        ))
+        adopted = json.loads(await usage_module.RecordSkillUsageTool().execute(
+            "audit-skill", detail="used its task guidance", _context=context,
+        ))
+        events = await database.list_skill_events("skill-audit-session")
+
+        assert before_load["error"] == "SKILL_NOT_LOADED"
+        assert loaded["success"] is True
+        assert adopted["success"] is True
+        assert [event["event_type"] for event in reversed(events)] == ["loaded", "adopted"]
+        assert events[0]["detail"] == "used its task guidance"
+    finally:
+        await database.close()

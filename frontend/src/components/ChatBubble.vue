@@ -203,6 +203,52 @@
           </div>
         </section>
 
+        <section
+          v-if="acceptanceReport"
+          class="acceptance-report"
+          :data-status="acceptanceStatus"
+        >
+          <button
+            type="button"
+            class="acceptance-report-header"
+            :aria-expanded="acceptanceExpanded"
+            @click="acceptanceExpanded = !acceptanceExpanded"
+          >
+            <ShieldCheck :size="14" aria-hidden="true" />
+            <span>{{ acceptanceLabel }}</span>
+            <span class="acceptance-report-meta">
+              已验证 {{ acceptanceCounts.verified }} · 待处理 {{ acceptanceCounts.pending + acceptanceCounts.unverified }}
+            </span>
+            <ChevronDown class="work-entry-arrow" :class="{ open: acceptanceExpanded }" :size="13" aria-hidden="true" />
+          </button>
+          <div v-if="acceptanceExpanded" class="acceptance-report-content">
+            <div v-if="acceptanceReport.modified_files?.length" class="acceptance-report-row">
+              <span>改动</span>
+              <code>{{ acceptanceReport.modified_files.join('、') }}</code>
+            </div>
+            <div v-if="acceptanceReport.acceptance_matrix?.length" class="acceptance-report-matrix">
+              <div v-for="(item, index) in acceptanceReport.acceptance_matrix" :key="`${item.kind}-${index}`">
+                <span :data-status="item.status">{{ acceptanceItemLabel(item.status) }}</span>
+                <span>{{ item.kind }}</span>
+                <small>{{ item.evidence }}</small>
+              </div>
+            </div>
+            <div v-if="acceptanceReport.unverified?.length" class="acceptance-report-warning">
+              未验证：{{ acceptanceReport.unverified.join('；') }}
+            </div>
+            <div v-if="acceptanceReport.pending?.length" class="acceptance-report-warning">
+              待完成：{{ acceptanceReport.pending.join('；') }}
+            </div>
+            <div v-if="acceptanceReport.context_conflicts?.length" class="acceptance-report-warning">
+              上下文待核对：{{ acceptanceReport.context_conflicts.map(item => item.message || item.kind).join('；') }}
+            </div>
+            <div v-if="acceptanceReport.commands?.length" class="acceptance-report-row">
+              <span>命令</span>
+              <code>{{ acceptanceReport.commands.map(item => item.command).join('；') }}</code>
+            </div>
+          </div>
+        </section>
+
         <template v-for="(seg, index) in answerSegments" :key="seg.choice_id || 'answer-' + index">
           <div
             v-if="seg.type === 'text'"
@@ -319,7 +365,7 @@
 <script setup>
 import { ref, reactive, computed, nextTick, onBeforeUnmount, watch } from 'vue'
 import { marked } from 'marked'
-import { BrainCircuit, ChevronDown, FileText, GitBranch, ListTree, MessageSquareText, MousePointerClick, Pencil, RefreshCcw, Send, Square, Volume1, Volume2 } from 'lucide-vue-next'
+import { BrainCircuit, ChevronDown, FileText, GitBranch, ListTree, MessageSquareText, MousePointerClick, Pencil, RefreshCcw, Send, ShieldCheck, Square, Volume1, Volume2 } from 'lucide-vue-next'
 import { useSessionStore } from '../stores/session'
 import { useThemeStore } from '../stores/theme'
 import { useToast } from '../composables/useToast'
@@ -353,12 +399,11 @@ const expandedReasoning = reactive({})
 const expandedSubagents = reactive({})
 const otherChoiceOpen = reactive({})
 const otherChoiceText = reactive({})
-const reasoningClock = ref(Date.now())
+const acceptanceExpanded = ref(false)
+const workClock = ref(Date.now())
 const workContentRef = ref(null)
 const workFollowsBottom = ref(true)
-let reasoningTimer = null
-let activeReasoningId = null
-let activeReasoningStartedAt = 0
+let workTimer = null
 
 // 编辑模式
 const isEditing = ref(false)
@@ -393,6 +438,36 @@ const answerSegments = computed(() => {
 const hasTools = computed(() => workSegments.value.some(segment => (
   ['tool', 'subagent', 'subagent_plan'].includes(segment.type)
 )))
+const acceptanceReport = computed(() => (
+  props.msg?.acceptanceReport && typeof props.msg.acceptanceReport === 'object'
+    ? props.msg.acceptanceReport
+    : null
+))
+const acceptanceCounts = computed(() => ({
+  verified: acceptanceReport.value?.verified?.length || 0,
+  pending: acceptanceReport.value?.pending?.length || 0,
+  unverified: acceptanceReport.value?.unverified?.length || 0,
+  failures: acceptanceReport.value?.failures?.length || 0,
+}))
+const acceptanceStatus = computed(() => {
+  const counts = acceptanceCounts.value
+  if (counts.failures || counts.unverified || counts.pending) return 'warning'
+  return acceptanceReport.value?.status === 'completed' ? 'verified' : 'pending'
+})
+const acceptanceLabel = computed(() => ({
+  verified: '验收已完成',
+  warning: '验收仍有待处理项',
+  pending: '验收状态',
+})[acceptanceStatus.value])
+
+function acceptanceItemLabel(status) {
+  return ({
+    verified: '已验证',
+    partially_verified: '部分验证',
+    unverified: '未验证',
+    blocked: '受阻',
+  })[status] || status || '未知'
+}
 
 const reasoningEntries = computed(() =>
   workSegments.value.filter(segment => segment.type === 'reasoning')
@@ -410,50 +485,34 @@ const workEntries = computed(() => {
   })
 })
 
-const completedReasoningMs = computed(() =>
-  reasoningEntries.value.reduce((total, segment) => {
-    if (segment.status === 'running') return total
-    return total + Number(segment.duration_ms || 0)
-  }, 0)
-)
-
-const reasoningDurationMs = computed(() => {
-  const active = reasoningEntries.value.find(segment => segment.status === 'running')
-  if (!active || !activeReasoningStartedAt) return completedReasoningMs.value
-  return completedReasoningMs.value + Math.max(0, reasoningClock.value - activeReasoningStartedAt)
+const workDurationMs = computed(() => {
+  const persisted = Number(props.msg.workDurationMs || 0)
+  if (persisted > 0 || !props.msg.streaming) return persisted
+  const startedAt = Number(props.msg.workStartedAt || 0)
+  return startedAt ? Math.max(0, workClock.value - startedAt) : 0
 })
 
-function stopReasoningClock() {
-  if (reasoningTimer) {
-    clearInterval(reasoningTimer)
-    reasoningTimer = null
+function stopWorkClock() {
+  if (workTimer) {
+    clearInterval(workTimer)
+    workTimer = null
   }
-  activeReasoningId = null
-  activeReasoningStartedAt = 0
 }
 
-function syncReasoningClock(entries) {
-  const active = entries.find(segment => segment.status === 'running')
-  if (!active) {
-    stopReasoningClock()
+function syncWorkClock(streaming) {
+  if (!streaming) {
+    stopWorkClock()
     return
   }
-
-  const activeId = active.reasoning_id || active
-  if (activeReasoningId !== activeId) {
-    activeReasoningId = activeId
-    activeReasoningStartedAt = Date.now() - Number(active.duration_ms || 0)
-  }
-
-  reasoningClock.value = Date.now()
-  if (!reasoningTimer) {
-    reasoningTimer = setInterval(() => {
-      reasoningClock.value = Date.now()
+  workClock.value = Date.now()
+  if (!workTimer) {
+    workTimer = setInterval(() => {
+      workClock.value = Date.now()
     }, 200)
   }
 }
 
-watch(reasoningEntries, syncReasoningClock, { deep: true, immediate: true })
+watch(() => props.msg.streaming, syncWorkClock, { immediate: true })
 
 const WORK_SCROLL_THRESHOLD = 12
 
@@ -519,11 +578,7 @@ function formatReasoningDuration(duration) {
 }
 
 const workMeta = computed(() => {
-  const parts = []
-  if (reasoningEntries.value.length) {
-    const duration = reasoningDurationMs.value
-    parts.push(duration ? `思考 ${formatReasoningDuration(duration)}` : `${reasoningEntries.value.length} 段思考`)
-  }
+  const parts = [`工作 ${formatReasoningDuration(workDurationMs.value)}`]
   if (toolCount.value) parts.push(`${toolCount.value} 个工具`)
   if (subagentCount.value) parts.push(`${subagentCount.value} 个子代理`)
   if (planCount.value) parts.push(`${planCount.value} 个任务计划`)
@@ -803,7 +858,7 @@ function stopSpeech() {
 }
 
 onBeforeUnmount(() => {
-  stopReasoningClock()
+  stopWorkClock()
   stopSpeech()
 })
 </script>
@@ -844,6 +899,36 @@ onBeforeUnmount(() => {
 }
 
 .text-seg { text-shadow: var(--text-glow); line-height: var(--line-height); font-size: var(--font-size-base); word-break: break-word; }
+
+.acceptance-report {
+  margin: 10px 0;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.035);
+  overflow: hidden;
+}
+.acceptance-report[data-status="verified"] { border-color: rgba(74, 222, 128, 0.36); }
+.acceptance-report[data-status="warning"] { border-color: rgba(250, 204, 21, 0.4); }
+.acceptance-report-header {
+  width: 100%; min-height: 34px; display: flex; align-items: center; gap: 7px;
+  padding: 7px 9px; border: 0; color: var(--text-secondary);
+  background: transparent; cursor: pointer; text-align: left; font-size: 12px;
+}
+.acceptance-report-header:hover { background: rgba(255, 255, 255, 0.045); color: var(--text-primary); }
+.acceptance-report-header > svg:first-child { color: #4ade80; flex: 0 0 auto; }
+.acceptance-report[data-status="warning"] .acceptance-report-header > svg:first-child { color: #facc15; }
+.acceptance-report-meta { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.acceptance-report-content { display: flex; flex-direction: column; gap: 7px; padding: 8px 9px 10px; border-top: 1px solid rgba(255, 255, 255, 0.08); font-size: 11px; }
+.acceptance-report-row { display: grid; grid-template-columns: 42px minmax(0, 1fr); gap: 8px; align-items: start; color: var(--text-secondary); }
+.acceptance-report-row > span { color: var(--text-secondary); }
+.acceptance-report-row code { max-height: 70px; overflow: auto; color: var(--text-primary); white-space: pre-wrap; word-break: break-word; font-family: inherit; }
+.acceptance-report-matrix { display: flex; flex-direction: column; gap: 4px; }
+.acceptance-report-matrix > div { display: grid; grid-template-columns: 56px 92px minmax(0, 1fr); gap: 7px; align-items: baseline; color: var(--text-secondary); }
+.acceptance-report-matrix > div > span:first-child { color: #86efac; }
+.acceptance-report-matrix > div > span:first-child[data-status="partially_verified"], .acceptance-report-matrix > div > span:first-child[data-status="unverified"] { color: #facc15; }
+.acceptance-report-matrix > div > span:first-child[data-status="blocked"] { color: #f87171; }
+.acceptance-report-matrix small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.acceptance-report-warning { color: #facc15; line-height: 1.5; word-break: break-word; }
 
 /* 图片消息 */
 .image-msg {

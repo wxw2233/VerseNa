@@ -48,8 +48,8 @@ class DelegateTaskTool(BaseTool):
             "timeout": {
                 "type": "integer",
                 "minimum": 10,
-                "maximum": 300,
-                "description": "超时秒数，默认 120",
+                "maximum": 900,
+                "description": "超时秒数，默认使用高级设置中的子 Agent 超时时间",
             },
         },
         "required": ["role", "task"],
@@ -60,7 +60,7 @@ class DelegateTaskTool(BaseTool):
         self,
         role: str,
         task: str,
-        timeout: int = DEFAULT_TIMEOUT,
+        timeout: int | None = None,
         allowed_paths: list[str] | None = None,
         constraints: list[str] | None = None,
         acceptance_criteria: list[str] | None = None,
@@ -119,7 +119,7 @@ class DelegateTasksTool(BaseTool):
                         "timeout": {
                             "type": "integer",
                             "minimum": 10,
-                            "maximum": 300,
+                            "maximum": 900,
                         },
                     },
                     "required": ["role", "task"],
@@ -156,7 +156,7 @@ class DelegateTasksTool(BaseTool):
             operations.append(subagent_manager.run(
                 role=str(spec.get("role") or ""),
                 task=str(spec.get("task") or ""),
-                timeout=spec.get("timeout", DEFAULT_TIMEOUT),
+                timeout=spec.get("timeout"),
                 context=_context,
                 **optional,
             ))
@@ -217,7 +217,7 @@ class DelegatePlanTool(BaseTool):
         "timeout": {
             "type": "integer",
             "minimum": 10,
-            "maximum": 300,
+            "maximum": 900,
         },
     }
     parameters = {

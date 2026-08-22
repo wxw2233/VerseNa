@@ -44,6 +44,9 @@
         <option value="global">全局</option>
         <option value="workspace">当前工作区</option>
       </select>
+      <label class="memory-auto-apply">
+        <input type="checkbox" v-model="newMemoryAutoApply" /> 自动参考
+      </label>
       <button type="button" @click="addMemory">添加</button>
     </div>
 
@@ -72,6 +75,9 @@
                 <option value="global">全局</option>
                 <option value="workspace">当前工作区</option>
               </select>
+              <label class="memory-auto-apply">
+                <input type="checkbox" v-model="editingMemoryAutoApply" /> 自动参考
+              </label>
             </div>
           </template>
 
@@ -81,8 +87,12 @@
               {{ mem.scope === 'workspace' ? '工作区' : '全局' }}
             </span>
             <span class="memory-source">{{ mem.source === 'auto' ? '自动' : '手动' }}</span>
+            <span class="memory-auto-state" :class="{ enabled: mem.auto_apply }">
+              {{ mem.auto_apply ? '自动参考' : '仅供参考' }}
+            </span>
             <span class="memory-id">#{{ mem.id }}</span>
             <span class="memory-usage">命中 {{ mem.use_count || 0 }} 次</span>
+            <span v-if="mem.verified_at" class="memory-verified" :title="formatTime(mem.verified_at)">已验证</span>
             <span class="memory-time">{{ formatTime(mem.created_at) }}</span>
           </div>
           <div v-if="mem.scope === 'workspace' && mem.workspace_path" class="memory-path" :title="mem.workspace_path">
@@ -91,6 +101,7 @@
           <div class="memory-actions">
             <button v-if="editingMemoryId !== mem.id" type="button" @click="startEditMemory(mem)">编辑</button>
             <button v-else type="button" @click="saveEditMemory(mem.id)">保存</button>
+            <button v-if="editingMemoryId !== mem.id" type="button" @click="verifyMemory(mem.id)">确认有效</button>
             <button type="button" @click="deleteMemory(mem.id)" class="btn-danger">删除</button>
           </div>
         </div>
@@ -112,10 +123,12 @@ const memorySearch = ref('')
 const newMemoryContent = ref('')
 const newMemoryCategory = ref('preference')
 const newMemoryScope = ref('global')
+const newMemoryAutoApply = ref(true)
 const editingMemoryId = ref(null)
 const editingMemoryContent = ref('')
 const editingMemoryCategory = ref('general')
 const editingMemoryScope = ref('global')
+const editingMemoryAutoApply = ref(true)
 const loading = ref(false)
 
 const categoryFilters = [
@@ -177,7 +190,12 @@ async function addMemory() {
   const response = await fetch('/api/memories', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ content, category: newMemoryCategory.value, scope: newMemoryScope.value }),
+    body: JSON.stringify({
+      content,
+      category: newMemoryCategory.value,
+      scope: newMemoryScope.value,
+      auto_apply: newMemoryAutoApply.value,
+    }),
   })
   if (response.ok) {
     newMemoryContent.value = ''
@@ -190,6 +208,7 @@ function startEditMemory(memory) {
   editingMemoryContent.value = memory.content
   editingMemoryCategory.value = memory.category || 'general'
   editingMemoryScope.value = memory.scope || 'global'
+  editingMemoryAutoApply.value = Boolean(memory.auto_apply)
 }
 
 async function saveEditMemory(id) {
@@ -202,12 +221,22 @@ async function saveEditMemory(id) {
       content,
       category: editingMemoryCategory.value,
       scope: editingMemoryScope.value,
+      auto_apply: editingMemoryAutoApply.value,
     }),
   })
   if (response.ok) {
     editingMemoryId.value = null
     await loadMemories()
   }
+}
+
+async function verifyMemory(id) {
+  const response = await fetch(`/api/memories/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ verify: true }),
+  })
+  if (response.ok) await loadMemories()
 }
 
 async function deleteMemory(id) {
@@ -240,14 +269,16 @@ onMounted(async () => {
 .filter-divider { width: 1px; height: 20px; background: rgba(255,255,255,0.18); margin: 0 2px; }
 .workspace-note { color: var(--text-secondary); font-size: 12px; margin: 0 0 12px; }
 .workspace-note code, .memory-path { color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.memory-search, .memory-add input, .memory-add select, .edit-input, .edit-options select {
+.memory-search, .memory-add input[type="text"], .memory-add select, .edit-input, .edit-options select {
   border: 0; outline: none; border-radius: 6px; color: var(--text-primary);
   background: rgba(20, 20, 40, 0.60); box-shadow: 0 0 0 1px rgba(255,255,255,0.20);
 }
 .memory-search { width: 100%; padding: 8px 12px; margin-bottom: 12px; }
 .memory-add { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
-.memory-add input { flex: 1 1 240px; padding: 8px 12px; }
+.memory-add input[type="text"] { flex: 1 1 240px; padding: 8px 12px; }
 .memory-add select, .edit-options select { padding: 8px; }
+.memory-auto-apply { display: inline-flex; align-items: center; gap: 5px; padding: 0 3px; color: var(--text-secondary); font-size: 12px; white-space: nowrap; cursor: pointer; }
+.memory-auto-apply input { accent-color: var(--primary); }
 .memory-add button { padding: 8px 16px; background: var(--primary); color: #fff; }
 .memory-list { display: flex; flex-direction: column; gap: 8px; }
 .memory-card { padding: 12px; background: rgba(20, 20, 40, 0.60); border-radius: var(--radius); box-shadow: var(--ui-border); }
@@ -262,6 +293,9 @@ onMounted(async () => {
 .memory-category.general { color: #aaa; background: rgba(136,136,170,0.15); }
 .memory-scope.global { color: #c4b5fd; background: rgba(124,92,252,0.15); }
 .memory-scope.workspace { color: #67e8f9; background: rgba(34,211,238,0.15); }
+.memory-auto-state { color: #a1a1aa; }
+.memory-auto-state.enabled { color: #86efac; }
+.memory-verified { color: #86efac; }
 .memory-id { font-family: monospace; color: var(--text-secondary); }
 .memory-path { font-size: 11px; margin-bottom: 8px; }
 .memory-actions { display: flex; gap: 8px; }

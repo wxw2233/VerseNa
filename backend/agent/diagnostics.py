@@ -15,7 +15,10 @@ class RuntimeDiagnostics:
             "generation_id": "",
             "workspace": "",
             "max_context": 0,
-            "max_steps": 0,
+            "execution_limits": {
+                "steps": "unlimited",
+                "tool_calls": "unlimited",
+            },
             "context_tokens": 0,
             "context_messages": 0,
             "started_at": "",
@@ -31,14 +34,30 @@ class RuntimeDiagnostics:
     def _now():
         return datetime.now().isoformat(timespec="seconds")
 
-    def start_generation(self, session_id, generation_id, workspace="", max_context=0, max_steps=0):
+    def start_generation(
+        self,
+        session_id,
+        generation_id,
+        workspace="",
+        max_context=0,
+        max_steps=0,
+        subagent_max_steps=0,
+        subagent_max_tokens=0,
+        subagent_timeout=0,
+    ):
         state = self._get(session_id)
         state.update({
             "active": True,
             "generation_id": str(generation_id or ""),
             "workspace": str(workspace or ""),
             "max_context": int(max_context or 0),
-            "max_steps": int(max_steps or 0),
+            "execution_limits": {
+                "steps": "unlimited",
+                "tool_calls": "unlimited",
+                "subagent_steps": int(subagent_max_steps or 0) or "unlimited",
+                "subagent_tokens": int(subagent_max_tokens or 0) or "unlimited",
+                "subagent_timeout_seconds": int(subagent_timeout or 0) or "default",
+            },
             "context_tokens": 0,
             "context_messages": 0,
             "started_at": self._now(),

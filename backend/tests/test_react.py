@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from agent.react import ReActAgent
 from agent.models.base import BaseModelAdapter, ModelResponse
 from agent.memory import MemoryManager
+from agent.diagnostics import runtime_diagnostics
 from db.database import db
 from tools.registry import ToolRegistry
 from typing import AsyncGenerator
@@ -22,6 +23,174 @@ class MockAdapter(BaseModelAdapter):
 
     async def list_models(self):
         return ["mock-model"]
+
+
+@pytest.mark.asyncio
+async def test_long_tool_loop_compacts_instead_of_ending_on_message_count():
+    class LongRunningAdapter(BaseModelAdapter):
+        def __init__(self):
+            self.calls = 0
+
+        async def chat(self, messages, tools=None, stream=True, **kwargs):
+            self.calls += 1
+            if self.calls <= 25:
+                yield ModelResponse(tool_calls=[{
+                    "id": f"tool-{self.calls}",
+                    "type": "function",
+                    "function": {
+                        "name": "counter",
+                        "arguments": json.dumps({"index": self.calls}),
+                    },
+                }])
+            else:
+                yield ModelResponse(content="long task completed")
+
+        async def list_models(self):
+            return ["long-running-model"]
+
+    class Registry:
+        def create_context(self, session_id, **kwargs):
+            return object()
+
+        async def execute(self, name, arguments, **kwargs):
+            return json.dumps({"success": True, "data": {"index": arguments["index"]}})
+
+    events = [event async for event in ReActAgent(
+        LongRunningAdapter(), MemoryManager(), tool_registry=Registry(),
+    ).run(
+        "long-tool-loop",
+        "finish the long task",
+        tools=[{}],
+        agent_config={"max_steps": 30, "max_context": 1_000_000},
+    )]
+
+    assert runtime_diagnostics.snapshot("long-tool-loop")["last_compaction"]["reason"] == "tool_loop_message_count"
+    assert any(
+        event.get("segment", {}).get("content") == "long task completed"
+        for event in events
+    )
+    assert not any("对话过长" in event.get("segment", {}).get("content", "") for event in events)
+
+
+@pytest.mark.asyncio
+async def test_long_tool_loop_stops_only_when_requested():
+    stop_event = asyncio.Event()
+
+    class LongToolAdapter(BaseModelAdapter):
+        def __init__(self):
+            self.calls = 0
+
+        async def chat(self, messages, tools=None, stream=True, **kwargs):
+            self.calls += 1
+            yield ModelResponse(tool_calls=[{
+                "id": f"loop-tool-{self.calls}",
+                "type": "function",
+                "function": {"name": "counter", "arguments": json.dumps({"index": self.calls})},
+            }])
+
+        async def list_models(self):
+            return ["endless-tool-model"]
+
+    class Registry:
+        def create_context(self, session_id, **kwargs):
+            return object()
+
+        async def execute(self, name, arguments, **kwargs):
+            if arguments["index"] >= 4:
+                stop_event.set()
+            return json.dumps({"success": True, "data": {"ok": True}})
+
+    events = [event async for event in ReActAgent(
+        LongToolAdapter(), MemoryManager(), tool_registry=Registry(),
+    ).run(
+        "unlimited-loop",
+        "continue until the stop signal arrives",
+        tools=[{}],
+        stop_event=stop_event,
+        agent_config={"max_steps": 1},
+    )]
+
+    assert events[-1]["type"] == "done"
+    assert events[-1]["finish_reason"] == "stopped"
+
+
+def test_tool_result_context_is_bounded_without_losing_result_ends():
+    result = "start" + ("x" * 20_000) + "end"
+
+    compacted = ReActAgent._tool_result_for_context(result)
+
+    assert len(compacted) < len(result)
+    assert compacted.startswith("start")
+    assert compacted.endswith("end")
+    assert "truncated for context" in compacted
+
+
+def test_tool_result_context_uses_configured_limit():
+    result = "start" + ("x" * 20_000) + "end"
+
+    compacted = ReActAgent._tool_result_for_context(result, 16_000)
+
+    assert len(compacted) < 16_100
+    assert compacted.startswith("start")
+    assert compacted.endswith("end")
+
+
+def test_untrusted_large_tool_result_keeps_compatible_status_fields():
+    from agent.context_protocol import format_untrusted_tool_output
+
+    framed = json.loads(format_untrusted_tool_output(
+        {"success": True, "data": {"output": "x" * 50_000}, "message": "done"},
+        source="code_exec",
+        max_chars=1200,
+    ))
+
+    assert framed["success"] is True
+    assert framed["status"] == "success"
+    assert framed["truncated"] is True
+    assert framed["_versena_context"]["untrusted"] is True
+
+
+def test_untrusted_partial_read_keeps_continuation_fields():
+    from agent.context_protocol import format_untrusted_tool_output
+
+    framed = json.loads(format_untrusted_tool_output(
+        {
+            "success": True,
+            "data": {
+                "path": "large.txt",
+                "output": "x" * 50_000,
+                "next_offset": 12_345,
+                "remaining_bytes": 50_000,
+                "eof": False,
+            },
+        },
+        source="file_manager",
+        max_chars=2_000,
+    ))
+
+    assert framed["truncated"] is True
+    assert framed["data"]["next_offset"] == 12_345
+    assert framed["data"]["eof"] is False
+
+
+@pytest.mark.parametrize("limit", [512, 800, 1200, 2000])
+def test_untrusted_tool_result_never_exceeds_configured_limit(limit):
+    from agent.context_protocol import format_untrusted_tool_output
+
+    encoded = format_untrusted_tool_output(
+        {
+            "success": False,
+            "error": "PROCESS_EXIT",
+            "message": "m" * 10_000,
+            "data": {"output": "x" * 50_000, "exit_code": 1},
+        },
+        source="code_exec",
+        max_chars=limit,
+    )
+
+    assert len(encoded) <= limit
+    framed = json.loads(encoded)
+    assert framed["_versena_context"]["untrusted"] is True
 
 @pytest_asyncio.fixture(autouse=True)
 async def setup_db():

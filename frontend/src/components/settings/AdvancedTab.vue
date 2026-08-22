@@ -1,24 +1,31 @@
 <template>
   <div class="tab-content">
     <h2>高级配置</h2>
-    <p class="tab-desc">调整 Agent 运行参数。点击保存按钮生效。</p>
+    <p class="tab-desc">调整 Agent 运行参数。模型与工具循环不设次数上限，任务会在主动停止、超时或重复调用保护触发时结束。点击保存按钮生效。</p>
 
     <div class="config-section">
-      <!-- Agent 执行步数 -->
       <div class="config-item">
         <div class="config-label">
-          <span class="label-title">主 Agent 最大执行步数</span>
-          <span class="label-desc">主 Agent 单轮任务最多进行的模型与工具循环次数</span>
+          <span class="label-title">子 Agent 单轮输出上限 (Token)</span>
+          <span class="label-desc">每次子 Agent 请求模型时可生成的最大 Token。模型服务商可能另有更低上限。</span>
         </div>
-        <input type="number" v-model.number="config.max_steps" :min="1" :max="100" class="num-input" />
+        <input type="number" v-model.number="config.subagent_max_tokens" :min="1024" :max="100000" :step="1024" class="num-input" />
       </div>
 
       <div class="config-item">
         <div class="config-label">
-          <span class="label-title">子 Agent 最大执行步数</span>
-          <span class="label-desc">每个子 Agent 最多执行的模型轮数，executor 会按此值获得对应的工具预算</span>
+          <span class="label-title">子 Agent 最大执行轮次</span>
+          <span class="label-desc">单个子 Agent 最多进行多少次模型决策。达到上限会如实返回 partial，避免长任务无止境调查。</span>
         </div>
-        <input type="number" v-model.number="config.subagent_max_steps" :min="4" :max="50" class="num-input" />
+        <input type="number" v-model.number="config.subagent_max_steps" :min="4" :max="256" :step="4" class="num-input" />
+      </div>
+
+      <div class="config-item">
+        <div class="config-label">
+          <span class="label-title">子 Agent 汇报上限 (字符)</span>
+          <span class="label-desc">子 Agent 最终交接给主 Agent 的报告长度。较大报告会占用更多上下文。</span>
+        </div>
+        <input type="number" v-model.number="config.subagent_report_max_chars" :min="4000" :max="200000" :step="1000" class="num-input" />
       </div>
 
       <!-- 上下文长度 -->
@@ -27,7 +34,7 @@
           <span class="label-title">📏 上下文长度 (Token)</span>
           <span class="label-desc">发送给模型的最大 Token 数，接近上限时会自动压缩较早的上下文</span>
         </div>
-        <input type="number" v-model.number="config.max_context" :min="1000" :max="200000" :step="1000" class="num-input" />
+        <input type="number" v-model.number="config.max_context" :min="2000" :max="1000000" :step="1000" class="num-input" />
       </div>
 
       <!-- Max Tokens -->
@@ -36,7 +43,23 @@
           <span class="label-title">📝 最大输出长度 (Token)</span>
           <span class="label-desc">单次回复的最大 Token 数</span>
         </div>
-        <input type="number" v-model.number="config.max_tokens" :min="64" :max="65536" :step="256" class="num-input" />
+        <input type="number" v-model.number="config.max_tokens" :min="64" :max="100000" :step="256" class="num-input" />
+      </div>
+
+      <div class="config-item">
+        <div class="config-label">
+          <span class="label-title">工具结果上下文上限 (字符)</span>
+          <span class="label-desc">单次工具结果最多保留多少内容给模型；同时作为文件读取的默认单次读取大小。</span>
+        </div>
+        <input type="number" v-model.number="config.tool_result_max_chars" :min="8000" :max="500000" :step="1000" class="num-input" />
+      </div>
+
+      <div class="config-item">
+        <div class="config-label">
+          <span class="label-title">命令输出上限 (字节)</span>
+          <span class="label-desc">code_exec 保留的原始终端输出量。过大输出会增加上下文和传输开销。</span>
+        </div>
+        <input type="number" v-model.number="config.code_exec_output_max_bytes" :min="12000" :max="500000" :step="1000" class="num-input" />
       </div>
 
       <div class="config-item">
@@ -45,6 +68,14 @@
           <span class="label-desc">单个工具超过这个时间没有返回时自动终止，避免文件读取或外部请求永久卡住</span>
         </div>
         <input type="number" v-model.number="config.tool_timeout" :min="10" :max="300" class="num-input" />
+      </div>
+
+      <div class="config-item">
+        <div class="config-label">
+          <span class="label-title">子 Agent 超时时间（秒）</span>
+          <span class="label-desc">每个子 Agent 的总运行时限。安装依赖、构建等长操作可适当提高，不会影响普通工具超时。</span>
+        </div>
+        <input type="number" v-model.number="config.subagent_timeout" :min="30" :max="900" class="num-input" />
       </div>
 
       <div class="config-item">
@@ -92,11 +123,15 @@ import { useToast } from '../../composables/useToast'
 const toast = useToast()
 
 const config = reactive({
-  max_steps: 15,
-  subagent_max_steps: 16,
-  max_context: 4096,
-  max_tokens: 4096,
+  subagent_max_tokens: 32768,
+  subagent_max_steps: 64,
+  subagent_report_max_chars: 60000,
+  max_context: 1000000,
+  max_tokens: 100000,
+  tool_result_max_chars: 100000,
+  code_exec_output_max_bytes: 100000,
   tool_timeout: 120,
+  subagent_timeout: 300,
   reasoning_effort: 'medium',
   custom_instructions: '',
 })
@@ -111,11 +146,15 @@ const defaults = { ...config }
 const saving = ref(false)
 
 const numericFields = {
-  max_steps: [1, 100],
-  subagent_max_steps: [4, 50],
+  subagent_max_tokens: [1024, 100000],
+  subagent_max_steps: [4, 256],
+  subagent_report_max_chars: [4000, 200000],
   max_context: [2000, 1000000],
-  max_tokens: [256, 65536],
+  max_tokens: [256, 100000],
+  tool_result_max_chars: [8000, 500000],
+  code_exec_output_max_bytes: [12000, 500000],
   tool_timeout: [10, 300],
+  subagent_timeout: [30, 900],
 }
 
 function buildPayload() {

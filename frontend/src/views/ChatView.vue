@@ -211,10 +211,12 @@ const toolSettings = reactive({
   is_default: true,
 })
 const activeSkill = ref({ active: false, command: '', arguments: '' })
+const streamSequences = new Map()
 const {
   connected,
   status: connectionStatus,
   reconnectAttempts,
+  reconnectVersion,
   maxReconnectAttempts,
   connect,
   reconnect,
@@ -465,10 +467,25 @@ async function saveToolWorkspace(path) {
   }
 }
 
-watch(connectionStatus, (nextStatus, previousStatus) => {
-  if (previousStatus !== 'connected' || nextStatus === 'connected' || !store.isStreaming) return
-  store.handleError('连接中断，请重新生成', store.activeGenerationId)
-  toast.warning('生成因连接中断而停止')
+watch(connectionStatus, (nextStatus) => {
+  // Short reconnections are common on LAN and must not immediately invalidate a long task.
+  if (nextStatus !== 'disconnected' || !store.isStreaming) return
+  store.handleError('连接已断开，生成已停止', store.activeGenerationId)
+  toast.warning('重连未成功，本轮生成已停止')
+})
+
+watch(reconnectVersion, (version) => {
+  if (!version || !store.isStreaming) return
+  const resumed = send({
+    type: 'resume',
+    session_id: sessionStore.currentSessionId,
+    generation_id: store.activeGenerationId,
+    after_seq: streamSequences.get(store.activeGenerationId) || 0,
+  })
+  if (!resumed) {
+    store.handleError('连接恢复失败，本轮任务已中断。', store.activeGenerationId)
+    toast.warning('无法恢复本轮任务')
+  }
 })
 
 
@@ -527,6 +544,11 @@ onMounted(() => {
   connect()
   scrollToBottom()
   onMessage.value = (msg) => {
+    if (msg.generation_id && Number.isInteger(msg.stream_seq)) {
+      const previous = streamSequences.get(msg.generation_id) || 0
+      if (msg.stream_seq <= previous) return
+      streamSequences.set(msg.generation_id, msg.stream_seq)
+    }
     const shouldFollowOutput = isAtBottom.value
     const updatesMessageContent = msg.type === 'segment' || msg.type === 'answer' || msg.type === 'error'
     let applied = true
@@ -573,9 +595,22 @@ onMounted(() => {
           contextCompaction.visible = false
         }, msg.phase === 'error' ? 2400 : 1200)
       }
+    } else if (msg.type === 'resume_unavailable') {
+      applied = store.handleError('无法恢复本轮任务，服务端可能已重启。', msg.generation_id)
+      if (applied) toast.warning('恢复任务失败')
     } else if (msg.type === 'done') {
-      applied = store.finishStreaming(msg.emoji, msg.generation_id)
+      applied = store.finishStreaming(
+        msg.emoji,
+        msg.generation_id,
+        msg.work_duration_ms,
+        msg.acceptance_report,
+      )
       if (!applied) return
+      if (msg.finish_reason && msg.finish_reason !== 'completed') {
+        toast.warning(
+          '本轮任务已结束，请查看最后一条状态说明',
+        )
+      }
       setDesktopPetState('done', themeStore.current)
       if (petDoneTimer) clearTimeout(petDoneTimer)
       petDoneTimer = setTimeout(syncPetState, 1400)

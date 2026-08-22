@@ -141,7 +141,7 @@ def test_authenticated_post_accepts_same_origin_referer(auth_client, monkeypatch
     )
 
     assert response.status_code == 200
-    assert saved["agent_max_steps"] == "20"
+    assert "agent_max_steps" not in saved
     assert "agent_max_history" not in saved
 
 

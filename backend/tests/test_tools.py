@@ -6,7 +6,7 @@ import httpx
 import pytest
 from tools.base import ToolContext
 from tools.registry import ToolRegistry
-from tools.builtin.verification_exec import _analyze_verification_output
+from tools.builtin.verification_exec import _analyze_verification_output, _prepare_process_command
 from tools.web_utils import UnsafeUrlError, validate_public_http_url
 
 def test_registry_loads_builtins():
@@ -20,6 +20,7 @@ def test_registry_loads_builtins():
     assert "ask_user_choice" in names
     assert "runtime_smoke" in names
     assert "task_checkpoint" in names
+    assert "project_map" in names
     assert "delegate_task" in names
     assert "delegate_tasks" in names
     assert "delegate_plan" in names
@@ -69,6 +70,17 @@ def test_tool_index_is_compact_and_keeps_tool_names(registry):
     assert "`file_manager`" in index
     assert "`code_exec`" in index
     assert "- file_manager:" not in index
+
+
+def test_verification_exec_wraps_windows_batch_commands_as_argv():
+    command = [r"C:\Program Files\nodejs\npm.CMD", "test"]
+
+    prepared = _prepare_process_command(command, platform="nt")
+
+    assert prepared == [
+        "cmd.exe", "/D", "/S", "/C", "call",
+        r"C:\Program Files\nodejs\npm.CMD", "test",
+    ]
 
 
 @pytest.mark.asyncio
@@ -336,6 +348,27 @@ async def test_file_manager_confirmed_write_and_read(registry, tool_context):
 
 
 @pytest.mark.asyncio
+async def test_file_manager_mkdir_requires_confirmation_and_creates_directory(registry, tool_context):
+    pending = json.loads(await registry.execute(
+        "file_manager",
+        {"action": "mkdir", "path": "generated/assets"},
+        context=tool_context,
+    ))
+    created = json.loads(await registry.execute(
+        "file_manager",
+        {"action": "mkdir", "path": "generated/assets"},
+        context=tool_context,
+        confirmed=True,
+    ))
+
+    assert pending["type"] == "confirm"
+    assert pending["action"] == "mkdir"
+    assert created["success"] is True
+    assert created["data"]["type"] == "dir"
+    assert tool_context.workspace.joinpath("generated", "assets").is_dir()
+
+
+@pytest.mark.asyncio
 async def test_file_manager_read_does_not_block_stop_event(registry, tmp_path, monkeypatch):
     target = tmp_path / "slow.txt"
     target.write_text("content", encoding="utf-8")
@@ -481,6 +514,7 @@ async def test_code_exec_honors_stop_event(registry, tmp_path):
 
 @pytest.mark.asyncio
 async def test_code_exec_caps_captured_output(registry, tool_context):
+    tool_context.agent_config = {"code_exec_output_max_bytes": 12_000}
     result = json.loads(await registry.execute(
         "code_exec",
         {"language": "python", "code": "print('x' * 20000)"},
@@ -592,6 +626,53 @@ def test_qq_does_not_expose_local_execution_tools():
     assert "file_manager" not in names
 
 
+@pytest.mark.asyncio
+async def test_service_status_reports_a_listening_local_port(registry, tool_context):
+    import socket
+
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    try:
+        port = listener.getsockname()[1]
+        result = json.loads(await registry.execute(
+            "service_status", {"port": port}, context=tool_context,
+        ))
+    finally:
+        listener.close()
+
+    assert result["success"] is True
+    assert result["data"]["port"] == port
+    assert result["data"]["listening"] is True
+
+
+def test_service_status_pid_probe_handles_protected_windows_process(monkeypatch):
+    from tools.builtin import service_status
+
+    monkeypatch.setattr(service_status.os, "name", "nt")
+
+    class Completed:
+        returncode = 0
+        stdout = '"System","4","Services","0","1,234 K"\n'
+
+    monkeypatch.setattr(service_status.subprocess, "run", lambda *args, **kwargs: Completed())
+
+    assert service_status._pid_alive(4) is True
+
+
+def test_service_status_pid_probe_handles_unavailable_process(monkeypatch):
+    from tools.builtin import service_status
+
+    monkeypatch.setattr(service_status.os, "name", "posix")
+
+    def raise_system_error(_pid, _signal):
+        raise SystemError("access denied")
+
+    monkeypatch.setattr(service_status.os, "kill", raise_system_error)
+
+    assert service_status._pid_alive(4) is None
+
+
 def test_memory_tools_expose_scope_and_delete_schema(registry):
     tools = {tool["function"]["name"]: tool["function"] for tool in registry.get_tools()}
 
@@ -664,6 +745,38 @@ async def test_save_memory_rejects_workspace_scope_without_context(registry):
     ))
 
     assert result["error"] == "MISSING_CONTEXT"
+
+
+@pytest.mark.asyncio
+async def test_save_memory_uses_session_context_manager_before_legacy_fallback(tmp_path):
+    from tools.builtin.save_memory import SaveMemoryTool
+
+    class Memory:
+        def __init__(self, result):
+            self.result = result
+            self.calls = []
+
+        async def save_memory_manual(self, content, category="general", workspace_path=None, auto_apply=True):
+            self.calls.append((content, category, workspace_path, auto_apply))
+            return self.result
+
+    first = Memory(101)
+    second = Memory(202)
+    tool = SaveMemoryTool()
+    first_context = ToolContext("first", tmp_path, memory_manager=first)
+    second_context = ToolContext("second", tmp_path, memory_manager=second)
+
+    first_result = json.loads(await tool.execute(
+        content="first", scope="workspace", auto_apply=False, _context=first_context,
+    ))
+    second_result = json.loads(await tool.execute(
+        content="second", scope="workspace", _context=second_context,
+    ))
+
+    assert first_result["data"]["memory_id"] == 101
+    assert second_result["data"]["memory_id"] == 202
+    assert first.calls[0][3] is False
+    assert second.calls[0][3] is True
 
 
 @pytest.mark.asyncio

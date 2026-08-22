@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 from typing import Any
@@ -16,6 +16,13 @@ class ToolContext:
     progress_callback: Callable[[dict], Any] | None = None
     agent_config: dict[str, Any] | None = None
     confirm_callback: Callable[[dict], Any] | None = None
+    operation_id: str = ""
+    operation_attempt: int = 1
+    operation_ledger: dict[str, dict[str, Any]] = field(default_factory=dict)
+    operation_sequence: int = 0
+    # Session-scoped services belong on the context, not on singleton tool
+    # instances.  This prevents concurrent conversations from sharing state.
+    memory_manager: Any = None
 
     @property
     def trust_mode(self) -> bool:

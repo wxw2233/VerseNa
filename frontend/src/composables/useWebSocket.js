@@ -4,6 +4,7 @@ import { notifyAuthenticationRequired } from '../utils/auth.js'
 
 const MAX_RECONNECT_ATTEMPTS = 5
 const ACK_TIMEOUT_MS = 10000
+const HEARTBEAT_INTERVAL_MS = 15000
 
 function defaultWebSocketUrl() {
   const protocol = location.protocol === 'https:' ? 'wss' : 'ws'
@@ -15,11 +16,13 @@ export function useWebSocket(url = defaultWebSocketUrl()) {
   const connected = ref(false)
   const status = ref('idle')
   const reconnectAttempts = ref(0)
+  const reconnectVersion = ref(0)
   const onMessage = ref(null)
   const toast = useToast()
   let reconnectTimer = null
   let connectionId = 0
   let manualClose = false
+  let heartbeatTimer = null
   const pendingAcknowledgements = new Map()
 
   function rejectPendingAcknowledgements(message) {
@@ -34,6 +37,22 @@ export function useWebSocket(url = defaultWebSocketUrl()) {
     if (!reconnectTimer) return
     clearTimeout(reconnectTimer)
     reconnectTimer = null
+  }
+
+  function stopHeartbeat() {
+    if (!heartbeatTimer) return
+    clearInterval(heartbeatTimer)
+    heartbeatTimer = null
+  }
+
+  function startHeartbeat(socket, id) {
+    stopHeartbeat()
+    heartbeatTimer = setInterval(() => {
+      if (id !== connectionId || socket.readyState !== WebSocket.OPEN) return
+      try {
+        socket.send(JSON.stringify({ type: 'ping' }))
+      } catch {}
+    }, HEARTBEAT_INTERVAL_MS)
   }
 
   function scheduleReconnect() {
@@ -71,13 +90,18 @@ export function useWebSocket(url = defaultWebSocketUrl()) {
       status.value = 'connected'
       reconnectAttempts.value = 0
       clearReconnectTimer()
-      if (recovered) toast.success('连接已恢复')
+      startHeartbeat(socket, myId)
+      if (recovered) {
+        reconnectVersion.value += 1
+        toast.success('连接已恢复')
+      }
     }
 
     socket.onclose = (event) => {
       if (myId !== connectionId) return
       connected.value = false
       ws.value = null
+      stopHeartbeat()
       rejectPendingAcknowledgements('连接已中断，服务端未确认消息')
 
       if (event.code === 4401) {
@@ -193,6 +217,7 @@ export function useWebSocket(url = defaultWebSocketUrl()) {
   function disconnect() {
     manualClose = true
     clearReconnectTimer()
+    stopHeartbeat()
     connected.value = false
     status.value = 'disconnected'
     rejectPendingAcknowledgements('连接已关闭，服务端未确认消息')
@@ -218,6 +243,7 @@ export function useWebSocket(url = defaultWebSocketUrl()) {
     connected,
     status,
     reconnectAttempts,
+    reconnectVersion,
     maxReconnectAttempts: MAX_RECONNECT_ATTEMPTS,
     connect,
     reconnect,

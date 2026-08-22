@@ -48,6 +48,33 @@
       </div>
     </div>
 
+    <div v-if="diagnostics.tasks?.length" class="task-list">
+      <div v-for="task in diagnostics.tasks" :key="task.session_id" class="task-row">
+        <div class="task-row-main">
+          <strong>{{ task.name || task.session_id }}</strong>
+          <span class="task-phase" :class="task.status">{{ task.phase }}</span>
+          <span v-if="!task.recovery_ok" class="task-warning">需要恢复核对</span>
+        </div>
+        <small>已验证 {{ task.acceptance?.verified?.length || 0 }} · 待完成 {{ task.acceptance?.pending?.length || 0 }} · 未验证 {{ task.acceptance?.unverified?.length || 0 }}</small>
+        <div v-if="task.recovery_findings?.length" class="task-findings">
+          {{ task.recovery_findings[0].message }}
+        </div>
+        <div v-else-if="task.context_conflicts?.length" class="task-findings">
+          {{ task.context_conflicts[0].message }}
+        </div>
+      </div>
+    </div>
+
+    <div v-if="diagnostics.skill_events?.length" class="skill-audit-list">
+      <div class="skill-audit-title">最近技能审计</div>
+      <div v-for="event in diagnostics.skill_events.slice(0, 8)" :key="event.id" class="skill-audit-row">
+        <span class="skill-audit-event" :data-event="event.event_type">{{ skillEventLabel(event.event_type) }}</span>
+        <strong>{{ event.skill_id }}</strong>
+        <code v-if="event.command">/{{ event.command }}</code>
+        <small>{{ formatTime(event.created_at) }}</small>
+      </div>
+    </div>
+
     <div class="monitor-log" ref="logRef">
       <div v-for="(line, i) in logLines" :key="i" class="log-line" :class="logLevel(line)">
         {{ line }}
@@ -114,6 +141,16 @@ function logLevel(line) {
   return 'log-info'
 }
 
+function skillEventLabel(eventType) {
+  return ({ loaded: '已加载', activated: '已激活', adopted: '已采用', cleared: '已关闭' })[eventType] || eventType
+}
+
+function formatTime(value) {
+  if (!value) return ''
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString('zh-CN')
+}
+
 watch(autoRefresh, (enabled) => {
   if (enabled) {
     refreshAll()
@@ -145,6 +182,23 @@ onBeforeUnmount(() => {
 .runtime-row code { min-width: 120px; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .runtime-status { width: 7px; height: 7px; flex: 0 0 7px; border-radius: 50%; background: #71717a; }
 .runtime-status.active { background: #4ade80; box-shadow: 0 0 8px rgba(74,222,128,0.75); }
+.task-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+.task-row { padding: 9px 10px; border-radius: 6px; background: rgba(20,20,40,0.34); color: var(--text-secondary); font-size: 11px; }
+.task-row-main { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.task-row-main strong { color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task-phase { padding: 2px 6px; border-radius: 4px; background: rgba(255,255,255,0.08); }
+.task-phase.completed { color: #4ade80; } .task-phase.blocked { color: #f87171; } .task-phase.validating { color: #facc15; }
+.task-warning { color: #facc15; }
+.task-row small { display: block; margin-top: 4px; }
+.task-findings { margin-top: 4px; color: #fca5a5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.skill-audit-list { display: flex; flex-direction: column; gap: 5px; margin-bottom: 12px; }
+.skill-audit-title { color: var(--text-secondary); font-size: 11px; }
+.skill-audit-row { display: flex; align-items: center; gap: 7px; min-width: 0; padding: 7px 10px; border-radius: 6px; color: var(--text-secondary); background: rgba(20,20,40,0.34); font-size: 11px; }
+.skill-audit-row strong, .skill-audit-row code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); }
+.skill-audit-row small { margin-left: auto; white-space: nowrap; color: var(--text-secondary); }
+.skill-audit-event { color: #a1a1aa; }
+.skill-audit-event[data-event="activated"] { color: #67e8f9; }
+.skill-audit-event[data-event="adopted"] { color: #86efac; }
 .monitor-log { background: #0d1117; border-radius: var(--radius); padding: 12px; max-height: calc(100vh - 390px); min-height: 180px; overflow-y: auto; font-family: 'Cascadia Code', 'Fira Code', monospace; font-size: 12px; line-height: 1.6; }
 .log-line { padding: 1px 0; white-space: pre-wrap; word-break: break-all; }
 .log-info { color: #8b949e; } .log-warn { color: #d29922; } .log-error { color: #f85149; }

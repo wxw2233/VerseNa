@@ -4,6 +4,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from skills.manager import skill_manager
 from security_utils import redact_sensitive_text
+from db.database import db
 
 router = APIRouter()
 
@@ -20,6 +21,13 @@ async def list_skills():
 @router.get("/api/skills/status")
 async def skill_status():
     return skill_manager.diagnostics()
+
+
+@router.get("/api/skills/events")
+async def list_skill_events(session_id: str = "", limit: int = 30):
+    """Expose an audit trail without treating activation as actual adoption."""
+    events = await db.list_skill_events(session_id or None, limit=limit)
+    return {"events": events}
 
 
 @router.get("/api/skills/commands")

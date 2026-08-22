@@ -8,17 +8,18 @@ import uuid
 from pathlib import Path
 
 from config import settings
+from agent.project_map import mark_project_map_stale
 from tools.base import BaseTool, ToolContext
 from tools.paths import ToolPath, ToolPathError, resolve_tool_path
 from tools.results import tool_confirm, tool_error, tool_result
 
 
-MAX_READ_BYTES = 100_000
+MAX_READ_BYTES = 500_000
 MAX_LIST_ITEMS = 500
 MAX_SEARCH_RESULTS = 500
 MAX_REPLACE_BYTES = 500 * 1024
 MAX_DIRECTORY_SCAN = 5_000
-MUTATING_ACTIONS = {"write", "find_replace", "copy", "move", "delete"}
+MUTATING_ACTIONS = {"write", "find_replace", "copy", "move", "delete", "mkdir"}
 
 
 def _audit_log(context: ToolContext, action: str, path: str, result: str, error: str = "") -> None:
@@ -65,7 +66,7 @@ class FileManagerTool(BaseTool):
         "properties": {
             "action": {
                 "type": "string",
-                "enum": ["read", "write", "list", "search", "find_replace", "copy", "move", "delete", "info"],
+                "enum": ["read", "write", "list", "search", "find_replace", "copy", "move", "delete", "mkdir", "info"],
                 "description": "操作类型",
             },
             "path": {"type": "string", "description": "工作区内的相对路径"},
@@ -87,7 +88,7 @@ class FileManagerTool(BaseTool):
                 "type": "integer",
                 "minimum": 1,
                 "maximum": MAX_READ_BYTES,
-                "description": "单次读取字节数，默认 50000，最大 100000",
+                "description": "单次读取字节数；省略时使用高级设置中的工具结果上限，最大 500000",
             },
             "limit": {"type": "integer", "minimum": 1, "maximum": MAX_LIST_ITEMS},
         },
@@ -109,7 +110,7 @@ class FileManagerTool(BaseTool):
         dst: str = "",
         encoding: str = "utf-8",
         offset: int = 0,
-        max_size: int = 50_000,
+        max_size: int | None = None,
         limit: int = 200,
         _context: ToolContext | None = None,
         _confirmed: bool = False,
@@ -158,6 +159,8 @@ class FileManagerTool(BaseTool):
                 return self._confirm(action, path=path)
 
             if action == "read":
+                if max_size is None:
+                    max_size = self._read_limit(_context.agent_config)
                 return await self._run_interruptible(
                     _context,
                     self._read,
@@ -210,6 +213,8 @@ class FileManagerTool(BaseTool):
                     recursive if recursive is not None else False,
                     _context,
                 )
+            if action == "mkdir":
+                return await asyncio.to_thread(self._mkdir, target, _context)
             return await self._run_interruptible(
                 _context,
                 self._info,
@@ -227,6 +232,14 @@ class FileManagerTool(BaseTool):
         except OSError as exc:
             _audit_log(_context, action, path or f"{src}->{dst}", "error", str(exc))
             return tool_error("OS_ERROR", str(exc))
+
+    @staticmethod
+    def _read_limit(agent_config) -> int:
+        try:
+            value = int((agent_config or {}).get("tool_result_max_chars", 100_000))
+        except (TypeError, ValueError):
+            value = 100_000
+        return max(1, min(value, MAX_READ_BYTES))
 
     @staticmethod
     async def _run_interruptible(
@@ -277,6 +290,7 @@ class FileManagerTool(BaseTool):
             "copy": "复制文件",
             "move": "移动文件",
             "delete": "删除文件",
+            "mkdir": "新建文件夹",
         }
         return tool_confirm(str(uuid.uuid4()), action, f"确认{labels[action]}？", **details)
 
@@ -312,7 +326,18 @@ class FileManagerTool(BaseTool):
                 return tool_error("FILE_NOT_FOUND", f"路径不存在: {path}")
             if path.is_dir() and not path.is_symlink() and not recursive:
                 return tool_error("RECURSIVE_REQUIRED", "删除目录需要 recursive=true")
+        elif action == "mkdir":
+            if path.exists() or path.is_symlink():
+                return tool_error("DESTINATION_EXISTS", f"目标路径已存在: {path}")
         return None
+
+    @staticmethod
+    def _mark_project_index_stale(context: ToolContext) -> None:
+        """Ensure a later project_map call never reuses a pre-mutation cache."""
+        try:
+            mark_project_map_stale(context.workspace)
+        except (OSError, TypeError, ValueError):
+            pass
 
     @staticmethod
     def _read(cancel_event: threading.Event, target: ToolPath, encoding: str, offset: int, max_size: int) -> str:
@@ -363,6 +388,7 @@ class FileManagerTool(BaseTool):
         else:
             bytes_written = _atomic_write(path, content, encoding)
         _audit_log(context, "write", str(path), "success")
+        FileManagerTool._mark_project_index_stale(context)
         return tool_result(True, data={"bytes_written": bytes_written, "path": str(path)})
 
     @staticmethod
@@ -451,6 +477,7 @@ class FileManagerTool(BaseTool):
         if replacements:
             _atomic_write(path, content.replace(old, new), encoding)
             _audit_log(context, "find_replace", str(path), "success")
+            FileManagerTool._mark_project_index_stale(context)
         return tool_result(True, data={"replacements": replacements, "path": str(path)})
 
     @staticmethod
@@ -463,6 +490,7 @@ class FileManagerTool(BaseTool):
         else:
             shutil.move(str(src), str(dst))
         _audit_log(context, action, f"{src}->{dst}", "success")
+        FileManagerTool._mark_project_index_stale(context)
         return tool_result(True, data={"src": str(src), "dst": str(dst), "action": action})
 
     @staticmethod
@@ -475,7 +503,16 @@ class FileManagerTool(BaseTool):
         else:
             path.unlink()
         _audit_log(context, "delete", str(path), "success")
+        FileManagerTool._mark_project_index_stale(context)
         return tool_result(True, data={"deleted": True, "path": str(path)})
+
+    @staticmethod
+    def _mkdir(target: ToolPath, context: ToolContext) -> str:
+        path = target.op_path
+        path.mkdir(parents=True, exist_ok=False)
+        _audit_log(context, "mkdir", str(path), "success")
+        FileManagerTool._mark_project_index_stale(context)
+        return tool_result(True, data={"created": True, "path": str(path), "type": "dir"})
 
     @staticmethod
     def _info(cancel_event: threading.Event, target: ToolPath) -> str:

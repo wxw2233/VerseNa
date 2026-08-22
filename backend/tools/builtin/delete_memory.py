@@ -2,6 +2,8 @@ from tools.base import BaseTool, ToolContext
 from tools.results import tool_error, tool_result
 from db.database import db
 from pathlib import Path
+import inspect
+from agent.task_state import workspace_id
 
 
 class DeleteMemoryTool(BaseTool):
@@ -19,6 +21,23 @@ class DeleteMemoryTool(BaseTool):
         "additionalProperties": False,
     }
 
+    @staticmethod
+    def _supported_kwargs(function, values):
+        """Adapt old database adapters without retrying a failed operation."""
+        try:
+            signature = inspect.signature(function)
+        except (TypeError, ValueError):
+            return dict(values)
+        if any(
+            parameter.kind == inspect.Parameter.VAR_KEYWORD
+            for parameter in signature.parameters.values()
+        ):
+            return dict(values)
+        return {
+            key: value for key, value in values.items()
+            if key in signature.parameters
+        }
+
     async def execute(
         self,
         memory_id: int | str | None = None,
@@ -35,14 +54,33 @@ class DeleteMemoryTool(BaseTool):
             return tool_error("INVALID_MEMORY_ID", "memory_id must be positive.")
 
         workspace_path = str(Path(_context.workspace).resolve())
-        visible = await db.get_memory(memory_id, workspace_path=workspace_path)
+        current_project_id = workspace_id(workspace_path)
+        visible = await db.get_memory(
+            memory_id,
+            **self._supported_kwargs(
+                db.get_memory,
+                {
+                    "workspace_path": workspace_path,
+                    "project_id": current_project_id,
+                },
+            ),
+        )
         if not visible:
             return tool_error(
                 "MEMORY_NOT_FOUND",
                 f"No visible memory found for memory_id={memory_id}.",
                 data={"memory_id": memory_id},
             )
-        deleted = await db.delete_memory(memory_id)
+        deleted = await db.delete_memory(
+            memory_id,
+            **self._supported_kwargs(
+                db.delete_memory,
+                {
+                    "workspace_path": workspace_path,
+                    "project_id": current_project_id,
+                },
+            ),
+        )
         if not deleted:
             return tool_error(
                 "MEMORY_NOT_FOUND",

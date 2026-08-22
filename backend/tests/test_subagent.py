@@ -16,6 +16,19 @@ class ReportAdapter(BaseModelAdapter):
         return ["report-model"]
 
 
+class CapturingReportAdapter(BaseModelAdapter):
+    def __init__(self, report):
+        self.report = report
+        self.kwargs = {}
+
+    async def chat(self, messages, tools=None, stream=True, **kwargs):
+        self.kwargs = kwargs
+        yield ModelResponse(content=self.report)
+
+    async def list_models(self):
+        return ["capturing-report-model"]
+
+
 class ExecutorWriteAdapter(BaseModelAdapter):
     def __init__(self, path="executor.txt", content="written", verify=True):
         self.calls = 0
@@ -165,6 +178,24 @@ async def test_subagent_returns_report_without_writing_memory(tmp_path):
     assert subagent_segments[0]["status"] == "running"
     assert subagent_segments[-1]["status"] == "done"
     assert subagent_segments[0]["subagent_id"] == subagent_segments[-1]["subagent_id"]
+
+
+@pytest.mark.asyncio
+async def test_subagent_output_and_report_limits_follow_advanced_settings(tmp_path):
+    adapter = CapturingReportAdapter("x" * 80_000)
+    context = ToolContext(
+        "limits",
+        tmp_path,
+        model=adapter,
+        agent_config={"subagent_max_tokens": 48_000, "subagent_report_max_chars": 70_000},
+    )
+
+    result = json.loads(await SubagentManager().run(
+        role="explorer", task="report limits", context=context,
+    ))
+
+    assert adapter.kwargs["max_tokens"] == 48_000
+    assert len(result["data"]["report"]) == 70_000
 
 
 @pytest.mark.asyncio
@@ -433,6 +464,32 @@ async def test_executor_writes_with_auto_approval_and_has_no_recursive_tools(tmp
     assert "delegate_tasks" not in adapter.tool_names
     assert "delegate_plan" not in adapter.tool_names
     assert "load_skill" not in adapter.tool_names
+    audit = result["data"]["evidence"]["parent_audit"]
+    assert audit["status"] == "verified"
+    assert audit["observed_changed_files"] == ["executor.txt"]
+
+
+@pytest.mark.asyncio
+async def test_delegate_task_executor_audits_actual_worktree_changes(tmp_path):
+    from tools.builtin.delegate_task import DelegateTaskTool
+
+    result = json.loads(await DelegateTaskTool().execute(
+        role="executor",
+        task="创建 delegated.txt 并验证内容",
+        allowed_paths=["delegated.txt"],
+        _context=ToolContext(
+            "delegate-audit",
+            tmp_path,
+            approval_mode="auto",
+            model=ExecutorWriteAdapter(path="delegated.txt"),
+        ),
+    ))
+
+    assert result["success"] is True
+    audit = result["data"]["evidence"]["parent_audit"]
+    assert audit["status"] == "verified"
+    assert audit["reported_modified_files"] == ["delegated.txt"]
+    assert audit["observed_changed_files"] == ["delegated.txt"]
 
 
 @pytest.mark.asyncio
@@ -566,7 +623,7 @@ async def test_subagent_duplicate_calls_force_summary(tmp_path):
                     },
                 }])
             else:
-                assert "资源预算即将耗尽" in messages[-1]["content"]
+                assert "检测到重复工具调用" in messages[-1]["content"]
                 yield ModelResponse(content="已停止重复读取并基于已有证据总结。")
 
         async def list_models(self):
@@ -582,20 +639,30 @@ async def test_subagent_duplicate_calls_force_summary(tmp_path):
     assert result["success"] is True
     assert result["data"]["tool_calls"] == 3
     assert result["data"]["steps"] == 4
-    assert result["data"]["budget"]["max_steps"] == 16
-    assert result["data"]["budget"]["tool_limit"] == 32
+    assert result["data"]["budget"]["unlimited_steps"] is True
+    assert result["data"]["budget"]["unlimited_tool_calls"] is True
     assert result["data"]["budget"]["tool_calls_used"] == 3
-    assert result["data"]["budget"]["remaining_tool_calls"] == 29
     assert adapter.last_tools == []
 
 
-def test_subagent_resource_limits_follow_advanced_setting():
+def test_subagent_timeout_uses_advanced_setting_and_allows_long_tasks():
     manager = SubagentManager()
 
-    assert manager._resource_limits("explorer", None) == (16, 32)
-    assert manager._resource_limits("executor", {"subagent_max_steps": 20}) == (20, 60)
-    assert manager._resource_limits("executor", {"subagent_max_steps": 2}) == (4, 12)
-    assert manager._resource_limits("reviewer", {"subagent_max_steps": 999}) == (50, 100)
+    assert manager._timeout_limit(None, None) == 300
+    assert manager._timeout_limit(None, {"subagent_timeout": 480}) == 480
+    assert manager._timeout_limit(1200, {"subagent_timeout": 480}) == 900
+
+
+def test_subagent_tool_result_context_includes_truncation_marker_within_limit():
+    manager = SubagentManager()
+    encoded = manager._tool_result_for_context(
+        "start" + "x" * 10_000 + "end",
+        {"tool_result_max_chars": 8_000},
+    )
+
+    assert len(encoded) <= 8_000
+    assert encoded.startswith("start")
+    assert "truncated for context" in encoded
 
 
 def test_executor_resolves_corrected_verification_command_failure(tmp_path):
@@ -911,7 +978,8 @@ async def test_executor_handoff_limits_repeated_research_and_preserves_dependenc
 
     assert "前序任务结构化交接" in adapter.first_prompt
     assert adapter.first_prompt.count("已定位 source.txt") == 1
-    assert json.loads(adapter.blocked_result)["error"] == "SUBAGENT_HANDOFF_RESEARCH_LIMIT"
+    assert adapter.calls == 10
+    assert "交接后的重复调查已停止" in result["data"]["report"]
     assert result["data"]["plan_id"] == "plan_1"
     assert result["data"]["node_id"] == "implement"
     assert result["data"]["depends_on"] == ["explore_game"]
@@ -1014,3 +1082,18 @@ async def test_executor_command_honors_stop_signals(tmp_path, stop_kind):
     assert result["data"]["status"] == "stopped"
     if stop_kind == "individual":
         assert parent_stop.is_set() is False
+
+
+def test_dynamic_acceptance_criteria_are_owned_by_verifier_nodes_only():
+    criteria = ["运行 pytest 单元测试并执行 npx tsc --noEmit 类型检查"]
+
+    for role in ("explorer", "researcher", "reviewer", "executor"):
+        effective = SubagentManager._criteria_for_role(role, criteria)
+        evidence = SubagentManager._empty_evidence(effective)
+        assert effective == []
+        assert evidence["required_checks"] == []
+
+    verifier_evidence = SubagentManager._empty_evidence(
+        SubagentManager._criteria_for_role("verifier", criteria)
+    )
+    assert verifier_evidence["required_checks"] == ["unit_tests", "typecheck"]

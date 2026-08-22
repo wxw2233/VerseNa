@@ -1,6 +1,8 @@
 import json
 from typing import Any
 
+from agent.task_state import compact_task_state, normalize_task_state, format_task_state
+
 
 MAX_CHECKPOINT_BYTES = 12_000
 
@@ -16,7 +18,8 @@ def decode_checkpoint(raw: str | None) -> dict[str, Any]:
 
 
 def encode_checkpoint(value: dict[str, Any]) -> str:
-    encoded = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    normalized = compact_task_state(value)
+    encoded = json.dumps(normalized, ensure_ascii=False, separators=(",", ":"))
     if len(encoded.encode("utf-8")) > MAX_CHECKPOINT_BYTES:
         raise ValueError(f"任务检查点不能超过 {MAX_CHECKPOINT_BYTES} 字节")
     return encoded
@@ -25,6 +28,8 @@ def encode_checkpoint(value: dict[str, Any]) -> str:
 def format_checkpoint(value: dict[str, Any]) -> str:
     if not value:
         return "暂无任务检查点。"
+    if value.get("version", 0) >= 2 or value.get("active_goal") or value.get("acceptance_matrix"):
+        return format_task_state(normalize_task_state(value, value.get("workspace")))
     lines = []
     labels = (
         ("phase", "当前阶段"),

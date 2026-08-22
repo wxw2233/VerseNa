@@ -136,6 +136,18 @@ def test_subagent_plan_requires_verifier_for_dynamic_validation():
     assert valid[1]["role"] == "verifier"
 
 
+def test_subagent_plan_timeout_matches_manager_maximum():
+    manager = SubagentPlanManager()
+    normalized = manager._validate([
+        {"id": "inspect", "role": "explorer", "task": "调查", "depends_on": [], "timeout": 900},
+        {"id": "review", "role": "reviewer", "task": "审查", "depends_on": ["inspect"], "timeout": 1200},
+    ])
+
+    assert isinstance(normalized, list)
+    assert normalized[0]["timeout"] == 900
+    assert normalized[1]["timeout"] == 900
+
+
 @pytest.mark.asyncio
 async def test_plan_validation_error_includes_structured_repair_guidance(tmp_path):
     payload = json.loads(await SubagentPlanManager().run(nodes=[
@@ -183,6 +195,8 @@ async def test_plan_parallelizes_readers_then_passes_reports_to_executor(tmp_pat
             peak = max(peak, len(running))
             await asyncio.sleep(0.04 if role != "executor" else 0.01)
             running.remove(role)
+            if role == "executor":
+                tmp_path.joinpath("changed.txt").write_text("implemented", encoding="utf-8")
             return result(
                 role,
                 f"{role} 报告",
@@ -222,6 +236,37 @@ async def test_plan_parallelizes_readers_then_passes_reports_to_executor(tmp_pat
 
 
 @pytest.mark.asyncio
+async def test_plan_handoff_honors_configured_report_limit(tmp_path, monkeypatch):
+    import agent.subagent_plan as plan_module
+
+    handoff = []
+    long_report = "已调查：" + ("x" * 12_000)
+
+    class FakeManager:
+        async def run(self, *, role, node_id, dependency_context=None, **kwargs):
+            if node_id == "implement":
+                handoff.extend(dependency_context or [])
+                return result(role, "实现完成")
+            return result(role, long_report)
+
+    monkeypatch.setattr(plan_module, "subagent_manager", FakeManager())
+    context = ToolContext(
+        "plan-report-limit",
+        tmp_path,
+        model=object(),
+        agent_config={"subagent_report_max_chars": 16_000},
+    )
+    payload = json.loads(await SubagentPlanManager().run(nodes=[
+        {"id": "inspect", "role": "explorer", "task": "调查模块", "depends_on": []},
+        {"id": "implement", "role": "executor", "task": "实施修改", "depends_on": ["inspect"]},
+    ], context=context))
+
+    assert payload["success"] is True
+    assert len(handoff) == 1
+    assert handoff[0]["report"] == long_report
+
+
+@pytest.mark.asyncio
 async def test_plan_honors_full_dependency_order_and_transfers_each_handoff(tmp_path, monkeypatch):
     import agent.subagent_plan as plan_module
 
@@ -235,10 +280,14 @@ async def test_plan_honors_full_dependency_order_and_transfers_each_handoff(tmp_
             handoffs[node_id] = dependency_context or []
             dependencies[node_id] = depends_on or []
             await asyncio.sleep(0.01)
+            changed = tmp_path / "src" / "changed.txt"
+            if role == "executor":
+                changed.parent.mkdir(parents=True, exist_ok=True)
+                changed.write_text("implemented", encoding="utf-8")
             return result(
                 role,
                 f"{node_id} 报告",
-                modified=[str(tmp_path / "changed.txt")] if role == "executor" else None,
+                modified=[str(changed)] if role == "executor" else None,
             )
 
     monkeypatch.setattr(plan_module, "subagent_manager", FakeManager())

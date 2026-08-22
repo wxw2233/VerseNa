@@ -1,6 +1,6 @@
 # Tool Safety and Workspace
 
-VerseNa exposes four primary Agent tools: `code_exec`, `file_manager`, `web_search`, and `web_fetch`.
+VerseNa's primary work tools are `code_exec`, `file_manager`, `web_search`, and `web_fetch`. It also provides focused workflow tools such as `project_map`, `task_checkpoint`, `verification_exec`, `runtime_smoke`, and `service_status`.
 
 ## Tool Workspace
 
@@ -21,6 +21,8 @@ $env:VERSENA_TOOL_WORKSPACE = "D:\VerseNaWorkspace"
 ```
 
 Relative paths supplied to `file_manager` and the `cwd` supplied to `code_exec` are resolved inside this workspace. Paths that escape the workspace, credential files, environment files, access tokens, and databases are rejected by `file_manager`.
+
+`file_manager` supports `read`, `write`, `list`, `search`, `find_replace`, `copy`, `move`, `delete`, `mkdir`, and `info`. Its mutating actions invalidate the in-memory `project_map` cache for that workspace so architecture discovery does not reuse a pre-change view.
 
 ## Confirmation Rules
 
