@@ -165,7 +165,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, nextTick, onBeforeUnmount, onMounted, watch } from 'vue'
+import { ref, reactive, computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, watch } from 'vue'
 import { ArrowDown, Check, FolderCog, LoaderCircle, PanelLeftClose, PanelLeftOpen, RefreshCcw, TriangleAlert, WifiOff } from 'lucide-vue-next'
 import { useToast } from '../composables/useToast'
 import { useKeyboard } from '../composables/useKeyboard'
@@ -178,6 +178,7 @@ import { cancelBrowserSpeech, speakWithBrowser } from '../utils/browserSpeech'
 import { prepareTextForSpeech } from '../utils/ttsText'
 import { detectAgentPetState, setDesktopPetState } from '../utils/pet'
 import { finalAnswerText } from '../utils/agentTimeline'
+import { fetchWithTimeout } from '../utils/api'
 import ChatBubble from '../components/ChatBubble.vue'
 import ChatInput from '../components/ChatInput.vue'
 import SessionList from '../components/SessionList.vue'
@@ -194,6 +195,11 @@ const unreadCount = ref(0)
 const currentResponseUnread = ref(false)
 const isAutoScrolling = ref(false)
 let autoScrollTimer = null
+let scrollRestoreFrame = null
+let scrollRestoreTimer = null
+let scrollRestoreToken = 0
+let chatViewActive = true
+let savedScrollPosition = null
 const toast = useToast()
 const workspacePanelOpen = ref(false)
 const contextCompaction = reactive({
@@ -251,7 +257,11 @@ let actionPending = false
 
 async function refreshCurrentHistory() {
   const sessionId = sessionStore.currentSessionId
-  const response = await fetch(`/api/sessions/${sessionId}/history`)
+  const response = await fetchWithTimeout(
+    `/api/sessions/${encodeURIComponent(sessionId)}/history`,
+    { cache: 'no-store' },
+    30000,
+  )
   if (!response.ok) throw new Error(`历史记录同步失败: HTTP ${response.status}`)
   const history = await response.json()
   if (sessionStore.currentSessionId === sessionId) store.loadHistory(history)
@@ -314,6 +324,10 @@ watch([petState, () => themeStore.current], syncPetState, { immediate: true })
 
 const BOTTOM_THRESHOLD = 12
 
+function isMessagesAtBottom(element) {
+  return element.scrollHeight - element.scrollTop - element.clientHeight <= BOTTOM_THRESHOLD
+}
+
 function resetUnreadState() {
   unreadCount.value = 0
   currentResponseUnread.value = false
@@ -323,7 +337,7 @@ function handleMessagesScroll() {
   const el = messagesRef.value
   if (!el) return
 
-  const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= BOTTOM_THRESHOLD
+  const atBottom = isMessagesAtBottom(el)
   if (isAutoScrolling.value && !atBottom) return
 
   isAtBottom.value = atBottom
@@ -335,7 +349,10 @@ function handleMessagesScroll() {
 
 function cancelAutoScroll() {
   isAutoScrolling.value = false
-  if (autoScrollTimer) clearTimeout(autoScrollTimer)
+  if (autoScrollTimer) {
+    clearTimeout(autoScrollTimer)
+    autoScrollTimer = null
+  }
 }
 
 function markCurrentResponseUnread() {
@@ -350,7 +367,7 @@ function scrollToBottom(smooth = false) {
   if (autoScrollTimer) clearTimeout(autoScrollTimer)
   isAutoScrolling.value = smooth
   nextTick(() => {
-    if (messagesRef.value) {
+    if (chatViewActive && messagesRef.value) {
       messagesRef.value.scrollTo({
         top: messagesRef.value.scrollHeight,
         behavior: smooth ? 'smooth' : 'auto',
@@ -359,12 +376,85 @@ function scrollToBottom(smooth = false) {
 
     if (smooth) {
       autoScrollTimer = setTimeout(() => {
+        autoScrollTimer = null
         isAutoScrolling.value = false
         handleMessagesScroll()
       }, 500)
     }
   })
 }
+
+function cancelScrollRestore() {
+  scrollRestoreToken += 1
+  if (scrollRestoreFrame !== null) {
+    cancelAnimationFrame(scrollRestoreFrame)
+    scrollRestoreFrame = null
+  }
+  if (scrollRestoreTimer !== null) {
+    clearTimeout(scrollRestoreTimer)
+    scrollRestoreTimer = null
+  }
+}
+
+function rememberScrollPosition() {
+  const el = messagesRef.value
+  if (!el) {
+    savedScrollPosition = { atBottom: isAtBottom.value, top: 0 }
+    return
+  }
+  savedScrollPosition = {
+    atBottom: isAutoScrolling.value || isMessagesAtBottom(el),
+    top: el.scrollTop,
+  }
+}
+
+function restoreScrollPosition() {
+  const saved = savedScrollPosition
+  savedScrollPosition = null
+  if (!saved) return
+
+  cancelScrollRestore()
+  const token = scrollRestoreToken
+  const apply = () => {
+    scrollRestoreFrame = null
+    scrollRestoreTimer = null
+    if (!chatViewActive || token !== scrollRestoreToken || !messagesRef.value) return
+
+    const el = messagesRef.value
+    if (saved.atBottom) {
+      el.scrollTop = el.scrollHeight
+      isAtBottom.value = true
+      resetUnreadState()
+      return
+    }
+
+    el.scrollTop = Math.max(0, Number(saved.top) || 0)
+    handleMessagesScroll()
+  }
+
+  nextTick(() => {
+    if (!chatViewActive || token !== scrollRestoreToken) return
+    if (typeof requestAnimationFrame !== 'function') {
+      scrollRestoreTimer = setTimeout(apply, 0)
+      return
+    }
+    scrollRestoreFrame = requestAnimationFrame(() => {
+      scrollRestoreFrame = requestAnimationFrame(apply)
+    })
+  })
+}
+
+onDeactivated(() => {
+  rememberScrollPosition()
+  chatViewActive = false
+  cancelScrollRestore()
+  cancelAutoScroll()
+})
+
+onActivated(() => {
+  chatViewActive = true
+  restoreScrollPosition()
+})
 
 // 消息内容在同一个流式消息内持续变化，等待 DOM 完成更新后再保持底部锁定。
 watch(() => store.messages, () => {
@@ -383,7 +473,11 @@ watch(() => sessionStore.currentSessionId, () => {
 async function loadSkillState() {
   const sessionId = sessionStore.currentSessionId
   try {
-    const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/skill-state`)
+    const response = await fetchWithTimeout(
+      `/api/sessions/${encodeURIComponent(sessionId)}/skill-state`,
+      { cache: 'no-store' },
+      10000,
+    )
     if (!response.ok) throw new Error(`HTTP ${response.status}`)
     const data = await response.json()
     if (sessionStore.currentSessionId === sessionId) activeSkill.value = data
@@ -414,7 +508,11 @@ async function clearActiveSkill() {
 async function loadToolSettings() {
   const sessionId = sessionStore.currentSessionId
   try {
-    const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/tool-settings`)
+    const response = await fetchWithTimeout(
+      `/api/sessions/${encodeURIComponent(sessionId)}/tool-settings`,
+      { cache: 'no-store' },
+      10000,
+    )
     if (!response.ok) throw new Error(`HTTP ${response.status}`)
     const data = await response.json()
     if (sessionStore.currentSessionId === sessionId) Object.assign(toolSettings, data)
@@ -977,6 +1075,9 @@ function releaseAutoAudio() {
 }
 
 onBeforeUnmount(() => {
+  chatViewActive = false
+  cancelScrollRestore()
+  cancelAutoScroll()
   autoSpeechRun += 1
   releaseAutoAudio()
   if (autoBrowserUtterance) cancelBrowserSpeech()

@@ -9,7 +9,7 @@ export const useSessionStore = defineStore('session', () => {
   const error = ref('')
   let fetchPromise = null
 
-  async function fetchSessions({ retries = 2, retryDelay = 250 } = {}) {
+  async function fetchSessions({ retries = 2, retryDelay = 250, timeoutMs = 8000 } = {}) {
     if (fetchPromise) return fetchPromise
 
     loading.value = true
@@ -18,6 +18,7 @@ export const useSessionStore = defineStore('session', () => {
       const data = await fetchJsonWithRetry('/api/sessions', {
         retries,
         retryDelay,
+        timeoutMs,
         cache: 'no-store',
         validate: Array.isArray,
       })

@@ -5,6 +5,8 @@ import { notifyAuthenticationRequired } from '../utils/auth.js'
 const MAX_RECONNECT_ATTEMPTS = 5
 const ACK_TIMEOUT_MS = 10000
 const HEARTBEAT_INTERVAL_MS = 15000
+const HEARTBEAT_TIMEOUT_MS = 35000
+const CONNECTION_TIMEOUT_MS = 10000
 
 function defaultWebSocketUrl() {
   const protocol = location.protocol === 'https:' ? 'wss' : 'ws'
@@ -23,6 +25,8 @@ export function useWebSocket(url = defaultWebSocketUrl()) {
   let connectionId = 0
   let manualClose = false
   let heartbeatTimer = null
+  let connectionTimer = null
+  let lastPongAt = 0
   const pendingAcknowledgements = new Map()
 
   function rejectPendingAcknowledgements(message) {
@@ -40,18 +44,35 @@ export function useWebSocket(url = defaultWebSocketUrl()) {
   }
 
   function stopHeartbeat() {
-    if (!heartbeatTimer) return
-    clearInterval(heartbeatTimer)
+    if (heartbeatTimer) clearInterval(heartbeatTimer)
     heartbeatTimer = null
+    lastPongAt = 0
+  }
+
+  function clearConnectionTimer() {
+    if (!connectionTimer) return
+    clearTimeout(connectionTimer)
+    connectionTimer = null
   }
 
   function startHeartbeat(socket, id) {
     stopHeartbeat()
+    lastPongAt = Date.now()
     heartbeatTimer = setInterval(() => {
       if (id !== connectionId || socket.readyState !== WebSocket.OPEN) return
+      if (Date.now() - lastPongAt > HEARTBEAT_TIMEOUT_MS) {
+        connected.value = false
+        status.value = 'reconnecting'
+        try { socket.close(4000, 'Heartbeat timeout') } catch {}
+        return
+      }
       try {
         socket.send(JSON.stringify({ type: 'ping' }))
-      } catch {}
+      } catch {
+        connected.value = false
+        status.value = 'reconnecting'
+        try { socket.close(4000, 'Heartbeat send failed') } catch {}
+      }
     }, HEARTBEAT_INTERVAL_MS)
   }
 
@@ -82,9 +103,15 @@ export function useWebSocket(url = defaultWebSocketUrl()) {
     const myId = ++connectionId
     const socket = new WebSocket(url)
     ws.value = socket
+    connectionTimer = setTimeout(() => {
+      if (myId !== connectionId || socket.readyState !== WebSocket.CONNECTING) return
+      status.value = 'reconnecting'
+      try { socket.close(4000, 'Connection timeout') } catch {}
+    }, CONNECTION_TIMEOUT_MS)
 
     socket.onopen = () => {
       if (myId !== connectionId) return
+      clearConnectionTimer()
       const recovered = reconnectAttempts.value > 0
       connected.value = true
       status.value = 'connected'
@@ -99,6 +126,7 @@ export function useWebSocket(url = defaultWebSocketUrl()) {
 
     socket.onclose = (event) => {
       if (myId !== connectionId) return
+      clearConnectionTimer()
       connected.value = false
       ws.value = null
       stopHeartbeat()
@@ -122,12 +150,20 @@ export function useWebSocket(url = defaultWebSocketUrl()) {
     socket.onerror = () => {
       if (myId !== connectionId) return
       connected.value = false
+      if (!manualClose) {
+        status.value = 'reconnecting'
+        scheduleReconnect()
+      }
     }
 
     socket.onmessage = (event) => {
       if (myId !== connectionId) return
       try {
         const message = JSON.parse(event.data)
+        if (message.type === 'pong') {
+          lastPongAt = Date.now()
+          return
+        }
         if (message.type === 'auth_required') {
           manualClose = true
           status.value = 'unauthorized'
@@ -218,6 +254,7 @@ export function useWebSocket(url = defaultWebSocketUrl()) {
     manualClose = true
     clearReconnectTimer()
     stopHeartbeat()
+    clearConnectionTimer()
     connected.value = false
     status.value = 'disconnected'
     rejectPendingAcknowledgements('连接已关闭，服务端未确认消息')

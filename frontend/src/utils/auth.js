@@ -1,6 +1,25 @@
 const AUTH_REQUIRED_EVENT = 'versena-auth-required'
 const nativeFetch = globalThis.fetch.bind(globalThis)
+const AUTH_REQUEST_TIMEOUT_MS = 10000
 let interceptorInstalled = false
+
+async function fetchAuth(input, init = {}) {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), AUTH_REQUEST_TIMEOUT_MS)
+  try {
+    return await nativeFetch(input, { ...init, signal: controller.signal })
+  } catch (error) {
+    if (controller.signal.aborted) {
+      const timeoutError = new Error(`认证请求超时（${AUTH_REQUEST_TIMEOUT_MS}ms）`)
+      timeoutError.name = 'TimeoutError'
+      timeoutError.code = 'TIMEOUT'
+      throw timeoutError
+    }
+    throw error
+  } finally {
+    clearTimeout(timer)
+  }
+}
 
 
 function isAuthEndpoint(input) {
@@ -38,7 +57,7 @@ export function installAuthFetchInterceptor() {
 
 
 export async function getAuthStatus() {
-  const response = await nativeFetch('/api/auth/status', {
+  const response = await fetchAuth('/api/auth/status', {
     credentials: 'same-origin',
     cache: 'no-store',
   })
@@ -48,7 +67,7 @@ export async function getAuthStatus() {
 
 
 export async function loginWithToken(token) {
-  const response = await nativeFetch('/api/auth/login', {
+  const response = await fetchAuth('/api/auth/login', {
     method: 'POST',
     credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json' },
@@ -65,7 +84,7 @@ export async function loginWithToken(token) {
 
 
 export async function logoutSession() {
-  await nativeFetch('/api/auth/logout', {
+  await fetchAuth('/api/auth/logout', {
     method: 'POST',
     credentials: 'same-origin',
   })

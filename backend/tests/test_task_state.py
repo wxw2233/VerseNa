@@ -4,8 +4,11 @@ from agent.task_state import (
     diff_workspace_snapshots,
     build_self_check,
     prepare_for_user_message,
+    reconcile_recovery_warnings,
     record_tool_result,
+    recovery_check,
 )
+from config import settings
 
 
 def test_workspace_snapshot_reports_created_modified_and_deleted_files(tmp_path):
@@ -83,3 +86,63 @@ def test_self_check_separates_agent_and_unknown_workspace_changes(tmp_path):
     assert "agent.txt" in check["agent_changes"]
     assert "user.txt" in check["blocking_reasons"][0] or check["has_user_changes"]
     assert check["safe_to_continue"] is False
+
+
+def test_read_only_project_map_cache_is_not_an_unknown_workspace_change(tmp_path, monkeypatch):
+    from agent.project_map import build_project_map, clear_project_map_cache
+
+    workspace = tmp_path / "project"
+    workspace.mkdir()
+    (workspace / "package.json").write_text(
+        '{"name":"snapshot-test","scripts":{"test":"pytest"}}',
+        encoding="utf-8",
+    )
+    data_dir = workspace / "backend" / "data"
+    monkeypatch.setattr(settings, "DATA_DIR", data_dir)
+    clear_project_map_cache()
+
+    state = prepare_for_user_message({}, "读取项目结构", workspace)
+    build_project_map(workspace, refresh=True)
+
+    recovery = recovery_check(state, workspace)
+
+    assert not any(
+        item["kind"] in {"concurrent_workspace_change", "worktree_changed"}
+        for item in recovery["findings"]
+    )
+
+
+def test_real_project_change_after_read_only_index_is_still_reported(tmp_path, monkeypatch):
+    from agent.project_map import build_project_map, clear_project_map_cache
+
+    workspace = tmp_path / "project"
+    workspace.mkdir()
+    (workspace / "main.py").write_text("print('before')\n", encoding="utf-8")
+    data_dir = workspace / "backend" / "data"
+    monkeypatch.setattr(settings, "DATA_DIR", data_dir)
+    clear_project_map_cache()
+
+    state = prepare_for_user_message({}, "读取项目结构", workspace)
+    build_project_map(workspace, refresh=True)
+    (workspace / "main.py").write_text("print('after')\n", encoding="utf-8")
+
+    recovery = recovery_check(state, workspace)
+
+    conflict = next(
+        item for item in recovery["findings"]
+        if item["kind"] == "concurrent_workspace_change"
+    )
+    assert "main.py" in conflict["paths"]
+
+
+def test_resolved_workspace_warning_is_removed_from_checkpoint_state():
+    state = {
+        "unverified": [
+            "任务开始后检测到新的工作区改动，继续前需重新读取相关文件",
+            "仍需确认 API 行为",
+        ],
+    }
+
+    reconcile_recovery_warnings(state, {"findings": []})
+
+    assert state["unverified"] == ["仍需确认 API 行为"]

@@ -17,10 +17,12 @@ def test_openai_adapter_init():
 
 
 class FakeStreamResponse:
-    def __init__(self, lines, release=None):
-        self.status_code = 200
+    def __init__(self, lines, release=None, status_code=200, headers=None, body=b""):
+        self.status_code = status_code
         self._lines = lines
         self._release = release
+        self.headers = headers or {}
+        self._body = body
 
     async def __aenter__(self):
         return self
@@ -33,6 +35,9 @@ class FakeStreamResponse:
             yield line
             if index == 0 and self._release:
                 await self._release.wait()
+
+    async def aread(self):
+        return self._body
 
 
 class FakeAsyncClient:
@@ -89,6 +94,85 @@ async def test_openai_adapter_falls_back_to_json_response(monkeypatch):
     chunks = [chunk async for chunk in adapter.chat([{"role": "user", "content": "hello"}])]
 
     assert [chunk.content for chunk in chunks] == ["fallback"]
+
+
+@pytest.mark.asyncio
+async def test_openai_adapter_accepts_jsonl_and_sse_metadata(monkeypatch):
+    from agent.models import openai_adapter as adapter_module
+    from agent.models.openai_adapter import OpenAIAdapter
+
+    response = FakeStreamResponse([
+        "{\"choices\":[{\"delta\":{\"content\":\"jsonl\"}}]}",
+        "event: message",
+        "data: {\"choices\":[{\"delta\":{\"content\":\" +sse\"}}]}",
+        "id: 2",
+        "data: [DONE]",
+    ])
+    monkeypatch.setattr(
+        adapter_module.httpx,
+        "AsyncClient",
+        lambda **kwargs: FakeAsyncClient(response),
+    )
+
+    adapter = OpenAIAdapter("key", "https://example.com/v1", "model")
+    chunks = [chunk async for chunk in adapter.chat([{"role": "user", "content": "hello"}])]
+
+    assert [chunk.content for chunk in chunks] == ["jsonl", " +sse"]
+
+
+@pytest.mark.asyncio
+async def test_openai_adapter_reports_non_openai_stream_response(monkeypatch):
+    from agent.models import openai_adapter as adapter_module
+    from agent.models.openai_adapter import OpenAIAdapter
+
+    import asyncio
+
+    async def no_sleep(_):
+        return None
+
+    response = FakeStreamResponse(
+        ["upstream gateway is unavailable"],
+        headers={"content-type": "text/plain; charset=utf-8"},
+    )
+    monkeypatch.setattr(adapter_module.httpx, "AsyncClient", lambda **kwargs: FakeAsyncClient(response))
+    monkeypatch.setattr(asyncio, "sleep", no_sleep)
+
+    adapter = OpenAIAdapter("key", "https://example.com/v1", "model")
+    chunks = [chunk async for chunk in adapter.chat([{"role": "user", "content": "hello"}])]
+
+    assert len(chunks) == 1
+    assert "兼容性错误" in chunks[0].content
+    assert "text/plain" in chunks[0].content
+    assert "upstream gateway is unavailable" in chunks[0].content
+
+
+@pytest.mark.asyncio
+async def test_openai_adapter_normalizes_full_endpoint_url(monkeypatch):
+    from agent.models import openai_adapter as adapter_module
+    from agent.models.openai_adapter import OpenAIAdapter
+
+    captured = {}
+    response = FakeStreamResponse(["data: [DONE]"])
+
+    class CapturingClient(FakeAsyncClient):
+        def stream(self, *args, **kwargs):
+            captured["url"] = args[1]
+            return self.response
+
+    monkeypatch.setattr(
+        adapter_module.httpx,
+        "AsyncClient",
+        lambda **kwargs: CapturingClient(response),
+    )
+
+    adapter = OpenAIAdapter(
+        "key",
+        "https://example.com/v1/chat/completions",
+        "model",
+    )
+    _ = [chunk async for chunk in adapter.chat([{"role": "user", "content": "hello"}])]
+
+    assert captured["url"] == "https://example.com/v1/chat/completions"
 
 
 @pytest.mark.asyncio

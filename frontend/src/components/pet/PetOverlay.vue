@@ -1,11 +1,11 @@
 <template>
   <div v-if="visible" class="pet-overlay" :style="overlayStyle" @pointerdown="startDrag">
-    <PetSprite :state="liveState" :theme="liveTheme" />
+    <PetSprite :state="liveState" :theme="liveTheme" @config-loaded="handlePetConfig" />
   </div>
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import PetSprite from './PetSprite.vue'
 
 const props = defineProps({ state: { type: String, default: 'idle' }, theme: { type: String, default: 'default' } })
@@ -27,14 +27,11 @@ function updateState(event) {
   if (typeof event.detail?.state === 'string') liveState.value = event.detail.state
   if (typeof event.detail?.theme === 'string' && event.detail.theme) liveTheme.value = event.detail.theme
 }
-async function loadScale() {
-  try {
-    const response = await fetch('/api/themes/' + encodeURIComponent(liveTheme.value) + '/pet-config?t=' + Date.now())
-    if (response.ok) {
-      scale.value = Number((await response.json()).scale || 1)
-      localStorage.setItem('pet-scale', String(scale.value))
-    }
-  } catch {}
+function handlePetConfig(config) {
+  if (config?.theme && config.theme !== liveTheme.value) return
+  if (!Number.isFinite(Number(config?.scale))) return
+  scale.value = Number(config.scale)
+  localStorage.setItem('pet-scale', String(scale.value))
 }
 function updateScale(event) {
   if (event.detail?.theme === liveTheme.value && Number.isFinite(Number(event.detail.scale))) {
@@ -49,8 +46,7 @@ window.addEventListener('versena:toggle-pet', toggle)
 window.addEventListener('versena:pet-state', updateState)
 window.addEventListener('versena:pet-scale', updateScale)
 watch(() => props.state, value => { liveState.value = value })
-watch(() => props.theme, value => { liveTheme.value = value; loadScale() })
-onMounted(loadScale)
+watch(() => props.theme, value => { liveTheme.value = value })
 onBeforeUnmount(() => { window.removeEventListener('versena:toggle-pet', toggle); window.removeEventListener('versena:pet-state', updateState); window.removeEventListener('versena:pet-scale', updateScale); window.removeEventListener('pointermove', moveDrag) })
 </script>
 

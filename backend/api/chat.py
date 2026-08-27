@@ -26,6 +26,7 @@ from agent.task_state import (
     format_task_state,
     normalize_task_state,
     prepare_for_user_message,
+    reconcile_recovery_warnings,
     recovery_check,
     refresh_self_check,
     workspace_id,
@@ -413,6 +414,15 @@ async def websocket_chat(ws: WebSocket):
             payload["error"] = redact_sensitive_text(error)
         await ws.send_text(json.dumps(payload, ensure_ascii=False))
 
+    async def send_control(event):
+        """Send connection-level control frames without storing them for stream replay."""
+        payload = redact_sensitive_data(dict(event))
+        async with send_lock:
+            try:
+                await ws.send_text(json.dumps(payload, ensure_ascii=False))
+            except Exception:
+                pass
+
     def message_generation(message, fallback):
         if not message:
             return fallback
@@ -431,7 +441,7 @@ async def websocket_chat(ws: WebSocket):
                 raw = await ws.receive_text()
                 m = json.loads(raw)
                 if m.get('type') == 'ping':
-                    await send_event({'type': 'pong'}, active_generation_id)
+                    await send_control({'type': 'pong'})
                 elif m.get('type') == 'stop':
                     target_generation = m.get("generation_id")
                     if target_generation and generation_stream_manager.stop(
@@ -459,8 +469,10 @@ async def websocket_chat(ws: WebSocket):
                     )
                 else:
                     await msg_queue.put(m)
-        except Exception:
+        except WebSocketDisconnect:
             pass
+        except Exception as exc:
+            log_error("Chat", f"WebSocket 读取失败: {type(exc).__name__}: {exc}")
         finally:
             reader_done = True
             generation_stream_manager.detach(active_generation_id, ws)
@@ -735,6 +747,7 @@ async def websocket_chat(ws: WebSocket):
                 generation_id=generation_id,
             )
             recovery = recovery_check(task_state, tool_workspace)
+            task_state = reconcile_recovery_warnings(task_state, recovery)
             if recovery.get("findings"):
                 task_state["unverified"] = list(task_state.get("unverified") or [])
                 for finding in recovery["findings"]:
@@ -1097,5 +1110,6 @@ async def websocket_chat(ws: WebSocket):
 
     except WebSocketDisconnect:
         reader_task.cancel()
-    except Exception:
+    except Exception as exc:
+        log_error("Chat", f"WebSocket 主循环失败: {type(exc).__name__}: {exc}")
         reader_task.cancel()

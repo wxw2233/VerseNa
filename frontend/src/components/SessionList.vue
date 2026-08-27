@@ -204,6 +204,7 @@ import { useChatStore } from '../stores/chat'
 import { usePersonaStore } from '../stores/persona'
 import { useThemeStore } from '../stores/theme'
 import { openDesktopPet } from '../utils/pet'
+import { fetchWithTimeout } from '../utils/api'
 
 const sessionStore = useSessionStore()
 const chatStore = useChatStore()
@@ -227,11 +228,16 @@ const creatingPackId = ref('')
 const editSessionId = ref('')
 const editName = ref('')
 const editPackId = ref('')
+const editPreviousPackId = ref('')
 const editSaving = ref(false)
 const deleteSessionId = ref('')
 const deleteSessionName = ref('')
 const deleteSaving = ref(false)
 const newDialogHandlers = ref({ onCreated: null, onCancel: null })
+const themePackCache = new Map()
+const themePackRequests = new Map()
+let switchSequence = 0
+let switchController = null
 
 const groupedSessions = computed(() => {
   const groups = {}
@@ -260,7 +266,7 @@ async function fetchThemepacks() {
   themepacksLoading.value = true
   themepacksError.value = ''
   try {
-    const resp = await fetch('/api/themepacks')
+    const resp = await fetchWithTimeout('/api/themepacks', { cache: 'no-store' }, 12000)
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
     themepacks.value = await resp.json()
   } catch (e) {
@@ -269,6 +275,26 @@ async function fetchThemepacks() {
   } finally {
     themepacksLoading.value = false
   }
+}
+
+async function fetchThemePack(packId) {
+  if (themePackCache.has(packId)) return themePackCache.get(packId)
+  if (themePackRequests.has(packId)) return themePackRequests.get(packId)
+
+  const request = fetchWithTimeout(
+    `/api/themepacks/${encodeURIComponent(packId)}`,
+    { cache: 'no-store' },
+    12000,
+  ).then(async response => {
+    if (!response.ok) throw new Error(`主题包读取失败: HTTP ${response.status}`)
+    const pack = await response.json()
+    themePackCache.set(packId, pack)
+    return pack
+  }).finally(() => {
+    themePackRequests.delete(packId)
+  })
+  themePackRequests.set(packId, request)
+  return request
 }
 
 function handleNew(handlers = {}) {
@@ -288,7 +314,7 @@ function cancelNew() {
   onCancel?.()
 }
 
-async function applyThemePack(pack) {
+async function applyThemePack(pack, signal) {
   if (pack.persona_ref) personaStore.switchPersona(pack.persona_ref)
 
   const themeId = pack.theme_ref || pack.id
@@ -304,30 +330,28 @@ async function applyThemePack(pack) {
       if (pack.theme.colors[key]) colorOverrides[cssVar] = pack.theme.colors[key]
     }
   }
-  if (themeId) await themeStore.switchTheme(themeId, colorOverrides)
+  if (themeId) await themeStore.switchTheme(themeId, colorOverrides, { signal })
 }
 
 async function createWithPack(packId) {
   if (creatingPackId.value) return
   creatingPackId.value = packId
   try {
-    const packResp = await fetch(`/api/themepacks/${packId}`)
-    if (!packResp.ok) throw new Error(`主题包读取失败: HTTP ${packResp.status}`)
-    const pack = await packResp.json()
+    const pack = await fetchThemePack(packId)
 
-    const resp = await fetch('/api/sessions', {
+    const resp = await fetchWithTimeout('/api/sessions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ theme_pack_id: packId })
-    })
+    }, 12000)
     if (!resp.ok) throw new Error(`会话创建失败: HTTP ${resp.status}`)
     const data = await resp.json()
 
-    const metadataResp = await fetch(`/api/sessions/${data.session_id}`, {
+    const metadataResp = await fetchWithTimeout(`/api/sessions/${data.session_id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ theme_pack_id: packId })
-    })
+    }, 12000)
     if (!metadataResp.ok) console.warn(`Session metadata update failed: HTTP ${metadataResp.status}`)
 
     // 主题必须完成应用后再切换会话，避免首条消息期间仍显示旧主题。
@@ -389,28 +413,51 @@ function handleEscape(event) {
 const currentPackId = ref('')
 
 async function handleSwitch(id) {
+  if (sessionStore.currentSessionId === id) return
+
   const session = sessionStore.sessions.find(s => s.id === id)
   const newPackId = session?.theme_pack_id || ''
+  const requestId = ++switchSequence
+  switchController?.abort()
+  switchController = new AbortController()
+  const { signal } = switchController
 
-  // 只在主题包真正变化时才切换主题（避免背景重载）
+  // 先切换当前会话并清空旧内容，避免慢请求期间界面仍显示上一会话。
+  sessionStore.switchSession(id)
+  chatStore.clearMessages()
+
+  const historyPromise = fetchWithTimeout(
+    `/api/sessions/${encodeURIComponent(id)}/history`,
+    { cache: 'no-store', signal },
+    30000,
+  ).then(async response => {
+    if (!response.ok) throw new Error(`历史记录加载失败: HTTP ${response.status}`)
+    return response.json()
+  })
+
+  let themePromise = Promise.resolve()
   if (newPackId && newPackId !== currentPackId.value) {
-    const packResp = await fetch(`/api/themepacks/${newPackId}`)
-    if (packResp.ok) {
-      const pack = await packResp.json()
-      await applyThemePack(pack)
-    }
-    currentPackId.value = newPackId
+    themePromise = fetchThemePack(newPackId).then(pack => {
+      if (signal.aborted) return
+      return applyThemePack(pack, signal)
+    })
+  } else if (!newPackId && currentPackId.value) {
+    themePromise = themeStore.applyTheme('default', { signal })
   }
 
-  // 加载历史
-  const history = await fetch(`/api/sessions/${id}/history`).then(r => r.json())
+  const [historyResult, themeResult] = await Promise.allSettled([historyPromise, themePromise])
+  if (requestId !== switchSequence || sessionStore.currentSessionId !== id) return
 
-  // 切换 session
-  sessionStore.switchSession(id)
-
-  // 等 Vue 完成 out 动画后清空并加载新消息
-  await new Promise(r => setTimeout(r, 50))
-  chatStore.loadHistory(history)
+  if (historyResult.status === 'rejected') {
+    toast.error(historyResult.reason?.message || '会话历史加载失败')
+    return
+  }
+  if (themeResult.status === 'rejected') {
+    toast.warning('主题包加载失败，已保留当前主题')
+  } else {
+    currentPackId.value = newPackId
+  }
+  chatStore.loadHistory(historyResult.value)
 }
 
 function handleDelete(id) {
@@ -463,6 +510,7 @@ function startEdit(session) {
     ? session.name
     : session.id.replace('session_', '').slice(0, 12)
   editPackId.value = session.theme_pack_id || ''
+  editPreviousPackId.value = session.theme_pack_id || ''
   fetchThemepacks()
   showEditDialog.value = true
 }
@@ -473,16 +521,18 @@ async function saveEdit() {
   const name = editName.value.trim()
   editSaving.value = true
   try {
-    const resp = await fetch(`/api/sessions/${id}`, {
+    const resp = await fetchWithTimeout(`/api/sessions/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         name: name || undefined,
         theme_pack_id: editPackId.value || null
       })
-    })
+    }, 12000)
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
     await sessionStore.fetchSessions()
+    themePackCache.delete(editPreviousPackId.value)
+    themePackCache.delete(editPackId.value)
     showEditDialog.value = false
     toast.success('会话已保存')
   } catch (e) {

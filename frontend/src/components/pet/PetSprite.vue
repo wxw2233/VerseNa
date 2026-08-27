@@ -5,7 +5,7 @@
         v-if="previousFrameUrl"
         :key="'previous-' + transitionId"
         class="pet-frame pet-frame-previous"
-        :class="{ transitioning: transitionActive }"
+        :class="{ transitioning: transitionActive && transitionTargetUrl === previousFrameUrl }"
         :src="previousFrameUrl"
         :style="frameStyle(previousFrameUrl)"
         alt=""
@@ -15,7 +15,7 @@
         v-if="displayedFrameUrl"
         :key="'current-' + displayedFrameUrl + '-' + transitionId"
         class="pet-frame pet-frame-current"
-        :class="{ transitioning: transitionActive }"
+        :class="{ transitioning: transitionActive && transitionTargetUrl === displayedFrameUrl }"
         :src="displayedFrameUrl"
         :style="frameStyle(displayedFrameUrl)"
         alt=""
@@ -33,6 +33,26 @@
 
 <script setup>
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { fetchWithTimeout } from '../../utils/api'
+
+const imageCache = new Map()
+const resourceCache = new Map()
+
+function cachedImage(url) {
+  if (!url) return Promise.resolve(null)
+  if (imageCache.has(url)) return imageCache.get(url)
+  const promise = new Promise(resolve => {
+    const image = new Image()
+    image.onload = () => resolve(image)
+    image.onerror = () => {
+      imageCache.delete(url)
+      resolve(null)
+    }
+    image.src = url
+  })
+  imageCache.set(url, promise)
+  return promise
+}
 
 const props = defineProps({
   state: { type: String, default: 'idle' },
@@ -40,6 +60,7 @@ const props = defineProps({
   scale: { type: Number, default: 1 },
   configRevision: { type: Number, default: 0 },
 })
+const emit = defineEmits(['config-loaded'])
 
 const actions = ['idle', 'blink', 'thinking', 'tool', 'working', 'walk', 'jump', 'wave']
 const defaultAnimations = {
@@ -79,6 +100,7 @@ const frameLoaded = ref(false)
 const displayedFrameUrl = ref('')
 const previousFrameUrl = ref('')
 const transitionActive = ref(false)
+const transitionTargetUrl = ref('')
 const transitionId = ref(0)
 const loadedTheme = ref(props.theme || 'default')
 const assetRevision = ref(Date.now())
@@ -117,7 +139,8 @@ const frameUrl = computed(() => {
 })
 
 function frameAssetUrl(filename, theme = loadedTheme.value, revision = assetRevision.value) {
-  return '/api/themes/' + encodeURIComponent(theme) + '/assets/' + encodeURIComponent(filename) + '?petv=' + revision
+  const suffix = revision ? `?petv=${encodeURIComponent(revision)}` : ''
+  return '/api/themes/' + encodeURIComponent(theme) + '/assets/' + encodeURIComponent(filename) + suffix
 }
 
 function normalizeAnimations(value = {}) {
@@ -164,22 +187,24 @@ function frameStyle(url) {
 }
 
 function loadImage(url) {
-  return new Promise(resolve => {
-    const image = new Image()
-    image.onload = () => resolve(image)
-    image.onerror = () => resolve(null)
-    image.src = url
-  })
+  return cachedImage(url)
 }
 
-async function preloadFrameSet(files, theme, revision, generation) {
+function clearTransition() {
+  if (transitionTimer) clearTimeout(transitionTimer)
+  transitionTimer = null
+  previousFrameUrl.value = ''
+  transitionTargetUrl.value = ''
+  transitionActive.value = false
+}
+
+async function preloadFrameSet(files, theme, revision, generation, priorityAction = '') {
   const entries = Object.entries(files).flatMap(([action, filenames]) => (
     filenames.map(filename => ({ action, url: frameAssetUrl(filename, theme, revision) }))
   ))
-  frameActions.clear()
-  entries.forEach(entry => frameActions.set(entry.url, entry.action))
-  for (let start = 0; start < entries.length; start += 6) {
-    const batch = entries.slice(start, start + 6)
+  const ordered = entries.filter(entry => entry.action === priorityAction)
+  for (let start = 0; start < ordered.length; start += 4) {
+    const batch = ordered.slice(start, start + 4)
     await Promise.all(batch.map(entry => loadImage(entry.url)))
     if (generation !== loadGeneration) return
   }
@@ -188,8 +213,8 @@ async function preloadFrameSet(files, theme, revision, generation) {
 function presentFrame(url, generation) {
   const sequence = ++frameLoadSequence
   if (!url) {
+    clearTransition()
     displayedFrameUrl.value = ''
-    previousFrameUrl.value = ''
     frameLoaded.value = false
     return
   }
@@ -198,46 +223,68 @@ function presentFrame(url, generation) {
     const shouldCrossfade = crossfadeNextFrame && displayedFrameUrl.value && displayedFrameUrl.value !== url
     crossfadeNextFrame = false
     if (shouldCrossfade) {
+      clearTransition()
       previousFrameUrl.value = displayedFrameUrl.value
+      transitionTargetUrl.value = url
       transitionActive.value = true
       transitionId.value += 1
-      if (transitionTimer) clearTimeout(transitionTimer)
-      transitionTimer = setTimeout(() => {
-        previousFrameUrl.value = ''
-        transitionActive.value = false
-        transitionTimer = null
-      }, crossfadeDuration)
+      transitionTimer = setTimeout(clearTransition, crossfadeDuration)
     }
     displayedFrameUrl.value = url
     frameLoaded.value = true
   })
 }
 
-async function loadFrames() {
+async function loadFrames(revisionOverride = null) {
   const generation = ++loadGeneration
   const theme = props.theme || 'default'
-  const revision = Date.now()
+  const revision = revisionOverride ?? props.configRevision ?? 0
   clearPlaybackTimers()
   if (blinkTimer) {
     clearTimeout(blinkTimer)
     blinkTimer = null
   }
   try {
-    const [response, configResponse] = await Promise.all([
-      fetch('/api/themes/' + encodeURIComponent(theme) + '/pet-assets?t=' + Date.now()),
-      fetch('/api/themes/' + encodeURIComponent(theme) + '/pet-config?t=' + Date.now()),
-    ])
-    if (!response.ok || generation !== loadGeneration) return
-    const files = await response.json()
-    const config = configResponse.ok ? await configResponse.json() : {}
+    const resourceKey = `${theme}:${revision}`
+    let resourcePromise = resourceCache.get(resourceKey)
+    if (!resourcePromise) {
+      resourcePromise = Promise.all([
+        fetchWithTimeout(
+          '/api/themes/' + encodeURIComponent(theme) + '/pet-assets',
+          { cache: 'no-store' },
+          12000,
+        ),
+        fetchWithTimeout(
+          '/api/themes/' + encodeURIComponent(theme) + '/pet-config',
+          { cache: 'no-store' },
+          12000,
+        ),
+      ]).then(async ([response, configResponse]) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`)
+        return {
+          files: await response.json(),
+          config: configResponse.ok ? await configResponse.json() : {},
+        }
+      }).catch(error => {
+        resourceCache.delete(resourceKey)
+        throw error
+      })
+      resourceCache.set(resourceKey, resourcePromise)
+    }
+    const { files, config } = await resourcePromise
     if (generation !== loadGeneration) return
-    await preloadFrameSet(files, theme, revision, generation)
-    if (generation !== loadGeneration) return
+    frameActions.clear()
+    for (const [action, filenames] of Object.entries(files)) {
+      for (const filename of filenames || []) {
+        frameActions.set(frameAssetUrl(filename, theme, revision), action)
+      }
+    }
     frameFiles.value = files
     loadedTheme.value = theme
     assetRevision.value = revision
     animationSettings.value = normalizeAnimations(config.animations)
     placementSettings.value = normalizePlacements(config.placements)
+    emit('config-loaded', { theme, scale: Number(config.scale) || 1 })
   } catch {
     return
   }
@@ -250,6 +297,10 @@ async function loadFrames() {
   presentFrame(frameUrl.value, generation)
   restartTimer()
   scheduleBlink()
+
+  // 首帧已经开始显示，剩余帧在后台逐步解码，不阻塞主题切换。
+  const priorityAction = resolvedFrameAction.value
+  void preloadFrameSet(files, theme, revision, generation, priorityAction)
 }
 
 function clearPlaybackTimers() {
@@ -259,6 +310,8 @@ function clearPlaybackTimers() {
   frameTimer = null
   pendingTimer = null
   bridgeTimer = null
+  clearTransition()
+  crossfadeNextFrame = false
 }
 
 function restartTimer() {
@@ -326,6 +379,13 @@ function switchAction(nextAction) {
   resetPlayback()
   presentFrame(frameUrl.value, loadGeneration)
   restartTimer()
+  void preloadFrameSet(
+    frameFiles.value,
+    loadedTheme.value,
+    assetRevision.value,
+    loadGeneration,
+    resolvedFrameAction.value,
+  )
 }
 
 function transitionTo(nextAction) {
@@ -397,7 +457,9 @@ watch(() => props.configRevision, loadFrames)
 watch(frameUrl, url => presentFrame(url, loadGeneration))
 
 function handleConfigUpdate(event) {
-  if (!event.detail?.theme || event.detail.theme === props.theme) loadFrames()
+  if (!event.detail?.theme || event.detail.theme === props.theme) {
+    loadFrames(event.detail?.revision ?? null)
+  }
 }
 
 window.addEventListener('versena:pet-config', handleConfigUpdate)

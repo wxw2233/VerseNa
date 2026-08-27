@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from agent.context_protocol import classify_error, utc_now
+from config import settings
 
 
 TASK_STATE_VERSION = 3
@@ -28,6 +29,12 @@ WORKSPACE_SNAPSHOT_IGNORED_DIRS = {
     ".git", ".hg", ".svn", "node_modules", ".venv", "venv", "env",
     "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache",
     "dist", "build", "coverage", ".cache",
+}
+WORKSPACE_SNAPSHOT_IGNORED_DATA_CHILDREN = {
+    "project_maps", "backups", "logs", "runtime",
+}
+WORKSPACE_SNAPSHOT_IGNORED_DATA_FILES = {
+    "audit.log", "runtime.log", "ciyuan.db", "access_token", "secret.key",
 }
 VALID_PHASES = {
     "created", "investigating", "implementing", "validating", "blocked",
@@ -274,6 +281,53 @@ def workspace_id(workspace: Path | str | None) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()[:16] if value else ""
 
 
+def _managed_data_paths(workspace: Path | str | None) -> tuple[Path, ...]:
+    """Return VerseNa-owned paths that must not look like project edits.
+
+    A selected workspace can be the VerseNa repository root itself. In that
+    case project_map and runtime code write under ``settings.DATA_DIR`` during
+    otherwise read-only work. Those files are application evidence, not user
+    or agent source changes, so the workspace audit must exclude them.
+    """
+    root_text = normalize_workspace(workspace)
+    if not root_text:
+        return ()
+    root = Path(root_text)
+    try:
+        data_dir = Path(settings.DATA_DIR).expanduser().resolve()
+    except (OSError, TypeError, ValueError):
+        return ()
+
+    managed: list[Path] = []
+    try:
+        if data_dir != root and data_dir.is_relative_to(root):
+            managed.append(data_dir)
+        elif data_dir == root:
+            managed.extend(data_dir / name for name in WORKSPACE_SNAPSHOT_IGNORED_DATA_CHILDREN)
+            managed.extend(data_dir / name for name in WORKSPACE_SNAPSHOT_IGNORED_DATA_FILES)
+    except (OSError, ValueError):
+        return ()
+    return tuple(managed)
+
+
+def _is_managed_data_path(path: Path, workspace: Path | str | None) -> bool:
+    try:
+        candidate = path.resolve()
+        return any(
+            candidate == managed or candidate.is_relative_to(managed)
+            for managed in _managed_data_paths(workspace)
+        )
+    except (OSError, TypeError, ValueError):
+        return False
+
+
+def _is_snapshot_ignored(path: Path, relative: Path, workspace: Path | str | None) -> bool:
+    return (
+        any(part in WORKSPACE_SNAPSHOT_IGNORED_DIRS for part in relative.parts)
+        or _is_managed_data_path(path, workspace)
+    )
+
+
 def _git(workspace: Path, *args: str) -> tuple[int, str]:
     try:
         completed = subprocess.run(
@@ -307,6 +361,12 @@ def capture_worktree_baseline(workspace: Path | str | None) -> dict[str, Any]:
         path = line[3:].strip() if len(line) > 3 else line.strip()
         if not path:
             continue
+        try:
+            relative_path = Path(path.replace("/", os.sep))
+            if _is_managed_data_path(root / relative_path, root):
+                continue
+        except (OSError, TypeError, ValueError):
+            pass
         if line.startswith("??"):
             untracked.append(path)
         else:
@@ -361,7 +421,7 @@ def capture_workspace_snapshot(
                 continue
             try:
                 relative = path.relative_to(root)
-                if any(part in WORKSPACE_SNAPSHOT_IGNORED_DIRS for part in relative.parts):
+                if _is_snapshot_ignored(path, relative, root):
                     continue
                 stat = path.stat()
             except OSError:
@@ -1263,6 +1323,36 @@ def recovery_check(state: dict[str, Any], workspace: Path | str | None = None) -
             "下一步是否仍被用户批准？",
         ],
     }
+
+
+def reconcile_recovery_warnings(
+    state: dict[str, Any],
+    recovery: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Drop resolved workspace-audit warnings from the model-facing state.
+
+    These warnings are derived observations, not permanent task evidence. In
+    particular, an older checkpoint may contain a false positive caused by
+    VerseNa's own runtime cache; retaining that message would make the model
+    reread files even after the current audit is clean.
+    """
+    if not isinstance(state, dict) or not isinstance(recovery, dict):
+        return state
+    active_messages = {
+        str(item.get("message") or "")
+        for item in recovery.get("findings") or []
+        if isinstance(item, dict)
+    }
+    derived_prefixes = (
+        "任务开始后检测到新的工作区改动",
+        "任务基线之后出现无法归属给 Agent 的文件改动",
+    )
+    state["unverified"] = [
+        item for item in state.get("unverified") or []
+        if not any(str(item).startswith(prefix) for prefix in derived_prefixes)
+        or str(item) in active_messages
+    ]
+    return state
 
 
 def format_task_state(state: dict[str, Any], *, max_chars: int = 5_000) -> str:

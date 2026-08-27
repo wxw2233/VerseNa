@@ -1,15 +1,16 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { fetchJsonWithRetry } from '../utils/api'
+import { fetchJsonWithRetry, fetchWithTimeout } from '../utils/api'
 
 export const useThemeStore = defineStore('theme', () => {
   const themes = ref([])
   const current = ref('default')
 
-  async function fetchThemes({ retries = 2, retryDelay = 250 } = {}) {
+  async function fetchThemes({ retries = 2, retryDelay = 250, timeoutMs = 8000 } = {}) {
     const data = await fetchJsonWithRetry('/api/themes', {
       retries,
       retryDelay,
+      timeoutMs,
       cache: 'no-store',
       validate: Array.isArray,
     })
@@ -20,17 +21,21 @@ export const useThemeStore = defineStore('theme', () => {
   /**
    * 切换主题：预加载 CSS，一次性应用（遮罩已覆盖屏幕）
    */
-  async function switchTheme(name, colorOverrides = {}) {
+  async function switchTheme(name, colorOverrides = {}, { signal } = {}) {
     if (!name || name === 'null' || name === 'undefined') return
 
     // 预加载 CSS
     let css = ''
     try {
-      const resp = await fetch(`/api/themes/${name}/css?t=${Date.now()}`)
+      const resp = await fetchWithTimeout(`/api/themes/${encodeURIComponent(name)}/css`, {
+        cache: 'no-store',
+        signal,
+      }, 12000)
       if (resp.ok) css = await resp.text()
     } catch {}
 
     // 同一帧内应用 CSS + 颜色
+    if (signal?.aborted) return
     if (css) {
       let styleEl = document.getElementById('theme-style')
       if (!styleEl) {
@@ -53,11 +58,15 @@ export const useThemeStore = defineStore('theme', () => {
     localStorage.setItem('current-theme', name)
   }
 
-  async function applyTheme(name) {
+  async function applyTheme(name, { signal } = {}) {
     if (!name || name === 'null' || name === 'undefined') return
-    const resp = await fetch(`/api/themes/${name}/css?t=${Date.now()}`)
+    const resp = await fetchWithTimeout(`/api/themes/${encodeURIComponent(name)}/css`, {
+      cache: 'no-store',
+      signal,
+    }, 12000)
     if (!resp.ok) return
     const css = await resp.text()
+    if (signal?.aborted) return
     let styleEl = document.getElementById('theme-style')
     if (!styleEl) {
       styleEl = document.createElement('style')
